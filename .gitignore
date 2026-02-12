@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Local runtime artifacts
+aion/logs/*
+!aion/logs/.gitkeep
+aion/state/*
+!aion/state/.gitkeep
+
+# Local PID / temp output
+*.pid
+*.out
