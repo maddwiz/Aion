@@ -17,6 +17,10 @@ def test_runtime_context_uses_governor_components(tmp_path: Path):
     _write_series(tmp_path / "reflex_health_governor.csv", [0.96, 1.00])
     _write_series(tmp_path / "symbolic_governor.csv", [0.94, 0.98])
     _write_series(tmp_path / "novaspine_context_boost.csv", [1.0, 1.05])
+    _write_series(tmp_path / "meta_mix_quality.csv", [0.60, 0.75])
+    _write_series(tmp_path / "meta_mix_disagreement.csv", [0.30, 0.20])
+    _write_series(tmp_path / "meta_mix_alpha.csv", [0.52, 0.58])
+    _write_series(tmp_path / "meta_mix_gross.csv", [0.20, 0.26])
 
     ctx = ex._runtime_context(tmp_path)
     assert 0.50 <= ctx["runtime_multiplier"] <= 1.10
@@ -27,6 +31,10 @@ def test_runtime_context_uses_governor_components(tmp_path: Path):
     assert ctx["components"]["dna_stress_governor"]["found"] is True
     assert ctx["components"]["reflex_health_governor"]["found"] is True
     assert ctx["components"]["symbolic_governor"]["found"] is True
+    assert ctx["components"]["meta_mix_quality_modifier"]["found"] is True
+    assert ctx["components"]["meta_mix_disagreement_modifier"]["found"] is True
+    assert ctx["components"]["meta_mix_alpha_balance_modifier"]["found"] is True
+    assert ctx["components"]["meta_mix_gross_modifier"]["found"] is True
 
 
 def test_runtime_context_defaults_to_neutral_when_missing(tmp_path: Path):

@@ -247,6 +247,30 @@ def _runtime_context(runs_dir: Path):
         if found:
             active_vals.append(float(v))
 
+    # Derived council-mix diagnostics from adaptive blending artifacts.
+    qv, qf = _latest_series_value(runs_dir / "meta_mix_quality.csv", lo=0.0, hi=1.0, default=0.5)
+    dsv, dsf = _latest_series_value(runs_dir / "meta_mix_disagreement.csv", lo=0.0, hi=1.0, default=0.0)
+    av, af = _latest_series_value(runs_dir / "meta_mix_alpha.csv", lo=0.0, hi=1.0, default=0.5)
+    gv, gf = _latest_series_value(runs_dir / "meta_mix_gross.csv", lo=0.05, hi=0.60, default=0.24)
+    if qf:
+        q_mod = _clamp(0.80 + 0.40 * qv, 0.80, 1.20)
+        comps["meta_mix_quality_modifier"] = {"value": float(q_mod), "found": True}
+        active_vals.append(float(q_mod))
+    if dsf:
+        d_mod = _clamp(1.04 - 0.22 * dsv, 0.78, 1.04)
+        comps["meta_mix_disagreement_modifier"] = {"value": float(d_mod), "found": True}
+        active_vals.append(float(d_mod))
+    if af:
+        balance = 1.0 - abs(2.0 * av - 1.0)
+        a_mod = _clamp(0.90 + 0.14 * balance, 0.90, 1.04)
+        comps["meta_mix_alpha_balance_modifier"] = {"value": float(a_mod), "found": True}
+        active_vals.append(float(a_mod))
+    if gf:
+        gn = _clamp((gv - 0.12) / max(1e-9, 0.45 - 0.12), 0.0, 1.0)
+        g_mod = _clamp(0.88 + 0.24 * gn, 0.88, 1.12)
+        comps["meta_mix_gross_modifier"] = {"value": float(g_mod), "found": True}
+        active_vals.append(float(g_mod))
+
     if active_vals:
         arr = np.clip(np.asarray(active_vals, float), 0.20, 2.00)
         mult = float(np.exp(np.mean(np.log(arr + 1e-12))))

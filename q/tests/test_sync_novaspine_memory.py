@@ -30,6 +30,11 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
             "mean_confidence_calibrated": 0.62,
             "brier_raw": 0.241,
             "brier_calibrated": 0.229,
+            "adaptive_enabled": True,
+            "mean_alpha": 0.54,
+            "mean_gross_dynamic": 0.21,
+            "mean_quality_mix": 0.61,
+            "mean_disagreement_norm": 0.34,
         },
     )
     _write_json(tmp_path / "dream_coherence_info.json", {"status": "ok", "signals": ["reflex_latent", "meta_mix"], "mean_coherence": 0.62, "mean_governor": 0.93})
@@ -81,6 +86,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     mmr = rc.get("payload", {}).get("meta_mix_reliability", {})
     assert float(mmr.get("mean_governor")) > 0.0
     assert float(mmr.get("mean_confidence_calibrated")) > 0.0
+    assert float(mmr.get("mean_alpha")) > 0.0
+    assert float(mmr.get("mean_quality_mix")) > 0.0
     dna = rc.get("payload", {}).get("dna_stress", {})
     assert dna.get("status") == "ok"
     assert float(dna.get("mean_stress")) > 0.0

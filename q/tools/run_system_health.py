@@ -98,6 +98,10 @@ if __name__ == "__main__":
         RUNS / "meta_mix_confidence_raw.csv",
         RUNS / "meta_mix_confidence_calibrated.csv",
         RUNS / "meta_mix_reliability_governor.csv",
+        RUNS / "meta_mix_alpha.csv",
+        RUNS / "meta_mix_gross.csv",
+        RUNS / "meta_mix_quality.csv",
+        RUNS / "meta_mix_disagreement.csv",
         RUNS / "tune_best_config.json",
         RUNS / "quality_runtime_modifier.csv",
         RUNS / "turnover_budget_rolling_after.csv",
@@ -153,6 +157,10 @@ if __name__ == "__main__":
     hive_pg = _load_series(RUNS / "hive_persistence_governor.csv")
     quality_gov = _load_series(RUNS / "quality_governor.csv")
     meta_rel = _load_series(RUNS / "meta_mix_reliability_governor.csv")
+    meta_alpha = _load_series(RUNS / "meta_mix_alpha.csv")
+    meta_gross = _load_series(RUNS / "meta_mix_gross.csv")
+    meta_q = _load_series(RUNS / "meta_mix_quality.csv")
+    meta_d = _load_series(RUNS / "meta_mix_disagreement.csv")
     dream_gov = _load_series(RUNS / "dream_coherence_governor.csv")
     dna_gov = _load_series(RUNS / "dna_stress_governor.csv")
     reflex_gov = _load_series(RUNS / "reflex_health_governor.csv")
@@ -188,6 +196,26 @@ if __name__ == "__main__":
         shape["meta_mix_reliability_mean"] = float(np.mean(meta_rel))
         shape["meta_mix_reliability_min"] = float(np.min(meta_rel))
         shape["meta_mix_reliability_max"] = float(np.max(meta_rel))
+    if meta_alpha is not None:
+        shape["meta_mix_alpha_rows"] = int(len(meta_alpha))
+        shape["meta_mix_alpha_mean"] = float(np.mean(meta_alpha))
+        shape["meta_mix_alpha_min"] = float(np.min(meta_alpha))
+        shape["meta_mix_alpha_max"] = float(np.max(meta_alpha))
+    if meta_gross is not None:
+        shape["meta_mix_gross_rows"] = int(len(meta_gross))
+        shape["meta_mix_gross_mean"] = float(np.mean(meta_gross))
+        shape["meta_mix_gross_min"] = float(np.min(meta_gross))
+        shape["meta_mix_gross_max"] = float(np.max(meta_gross))
+    if meta_q is not None:
+        shape["meta_mix_quality_rows"] = int(len(meta_q))
+        shape["meta_mix_quality_mean"] = float(np.mean(meta_q))
+        shape["meta_mix_quality_min"] = float(np.min(meta_q))
+        shape["meta_mix_quality_max"] = float(np.max(meta_q))
+    if meta_d is not None:
+        shape["meta_mix_disagreement_rows"] = int(len(meta_d))
+        shape["meta_mix_disagreement_mean"] = float(np.mean(meta_d))
+        shape["meta_mix_disagreement_min"] = float(np.min(meta_d))
+        shape["meta_mix_disagreement_max"] = float(np.max(meta_d))
     if hb_stress is not None:
         shape["heartbeat_stress_rows"] = int(len(hb_stress))
         shape["heartbeat_stress_mean"] = float(np.mean(hb_stress))

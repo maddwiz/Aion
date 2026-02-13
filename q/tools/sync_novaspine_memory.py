@@ -270,6 +270,11 @@ def build_events():
                     "mean_confidence_calibrated": _safe_float((mix or {}).get("mean_confidence_calibrated", 0.0)),
                     "brier_raw": _safe_float((mix or {}).get("brier_raw", 0.0)),
                     "brier_calibrated": _safe_float((mix or {}).get("brier_calibrated", 0.0)),
+                    "adaptive_enabled": bool((mix or {}).get("adaptive_enabled", False)),
+                    "mean_alpha": _safe_float((mix or {}).get("mean_alpha", 0.5)),
+                    "mean_gross_dynamic": _safe_float((mix or {}).get("mean_gross_dynamic", 0.24)),
+                    "mean_quality_mix": _safe_float((mix or {}).get("mean_quality_mix", 0.5)),
+                    "mean_disagreement_norm": _safe_float((mix or {}).get("mean_disagreement_norm", 0.0)),
                 },
                 "dna_stress": {
                     "status": str((dna or {}).get("status", "na")) if isinstance(dna, dict) else "na",
