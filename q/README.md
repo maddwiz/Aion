@@ -201,6 +201,9 @@ Turnover throttle (live-ready budget):
 export TURNOVER_MAX_STEP=0.35
 export TURNOVER_BUDGET_WINDOW=5
 export TURNOVER_BUDGET_LIMIT=1.00
+export DISAGREEMENT_LOOKBACK=63
+export DISAGREEMENT_SMOOTH=0.85
+export DISAGREEMENT_SHOCK_ALPHA=0.20
 ```
 Nested WF robustness:
 ```bash

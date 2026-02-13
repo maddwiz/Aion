@@ -19,6 +19,7 @@ from qmods.guardrails_bundle import (
     apply_turnover_budget_governor,
     apply_turnover_governor,
     disagreement_gate,
+    disagreement_gate_series,
     parameter_stability_filter,
     regime_governor_from_returns,
     stability_governor,
@@ -151,7 +152,18 @@ def main():
     # 3) Council disagreement gate — runs_plus/council_votes.csv (T x K)
     votes = _maybe_load_csv(RUNS/"council_votes.csv")
     if votes is not None and votes.shape[0] >= 1:
-        gates = np.array([disagreement_gate(v) for v in votes])
+        shock = _as_series_last_col(_maybe_load_csv(RUNS/"shock_mask.csv"))
+        if votes.ndim == 2 and votes.shape[0] >= 8:
+            gates = disagreement_gate_series(
+                votes,
+                clamp=(0.45, 1.0),
+                lookback=int(np.clip(int(os.getenv("DISAGREEMENT_LOOKBACK", "63")), 8, 252)),
+                smooth=float(np.clip(float(os.getenv("DISAGREEMENT_SMOOTH", "0.85")), 0.0, 0.98)),
+                shock_mask=shock,
+                shock_alpha=float(np.clip(float(os.getenv("DISAGREEMENT_SHOCK_ALPHA", "0.20")), 0.0, 1.0)),
+            )
+        else:
+            gates = np.array([disagreement_gate(v) for v in votes])
         np.savetxt(RUNS/"disagreement_gate.csv", gates, delimiter=",")
         gate_stats = {"gate_mean": float(np.mean(gates)),
                       "gate_min": float(np.min(gates)),

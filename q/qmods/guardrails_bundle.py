@@ -54,6 +54,78 @@ def disagreement_gate(votes: np.ndarray, clamp=(0.5, 1.0)) -> float:
     return max(clamp[0], clamp[1] - dispersion)
 
 
+def disagreement_gate_series(
+    votes_t: np.ndarray,
+    clamp: tuple[float, float] = (0.45, 1.0),
+    lookback: int = 63,
+    smooth: float = 0.85,
+    shock_mask: np.ndarray | None = None,
+    shock_alpha: float = 0.20,
+) -> np.ndarray:
+    """
+    Dynamic disagreement gate from council vote dispersion.
+    - penalizes high dispersion relative to rolling history
+    - smooths to avoid abrupt exposure jumps
+    - optional additional cut on shock days
+    """
+    v = np.asarray(votes_t, float)
+    if v.ndim == 1:
+        v = v.reshape(-1, 1)
+    if v.ndim != 2 or v.shape[0] == 0:
+        return np.asarray([], float)
+
+    lo = float(min(clamp))
+    hi = float(max(clamp))
+    T = v.shape[0]
+    disp = np.std(v, axis=1).astype(float)
+    disp = np.nan_to_num(disp, nan=0.0, posinf=0.0, neginf=0.0)
+    lb = int(max(8, lookback))
+
+    # Rolling percentile rank of current dispersion in its recent window.
+    pr = np.zeros(T, dtype=float)
+    for t in range(T):
+        j = max(0, t - lb + 1)
+        w = disp[j : t + 1]
+        if len(w) < 4:
+            pr[t] = 0.5
+        else:
+            pr[t] = float(np.mean(w <= w[-1]))
+    pr = np.clip(pr, 0.0, 1.0)
+
+    # Penalize both level and acceleration of disagreement.
+    ema = np.zeros(T, dtype=float)
+    ema[0] = pr[0]
+    a = 0.22
+    for t in range(1, T):
+        ema[t] = (1.0 - a) * ema[t - 1] + a * pr[t]
+    jerk = np.abs(np.diff(pr, prepend=pr[0]))
+    jerk = np.clip(jerk / (np.percentile(jerk, 90) + 1e-9), 0.0, 2.0)
+    level = np.clip(disp / 0.75, 0.0, 1.0)
+
+    penalty = np.clip(
+        0.45 * pr + 0.20 * ema + 0.15 * np.clip(jerk, 0.0, 1.0) + 0.20 * level,
+        0.0,
+        1.0,
+    )
+    gate = hi - (hi - lo) * penalty
+
+    if shock_mask is not None:
+        sm = np.asarray(shock_mask, float).ravel()
+        L = min(T, len(sm))
+        if L > 0:
+            sa = float(np.clip(shock_alpha, 0.0, 1.0))
+            gate[:L] = gate[:L] * np.clip(1.0 - sa * np.clip(sm[:L], 0.0, 1.0), 0.70, 1.0)
+
+    gate = np.clip(gate, lo, hi)
+    s = float(np.clip(smooth, 0.0, 0.98))
+    if s > 0.0 and T > 1:
+        out = gate.copy()
+        for t in range(1, T):
+            out[t] = s * out[t - 1] + (1.0 - s) * out[t]
+        gate = np.clip(out, lo, hi)
+    return gate
+
+
 def apply_turnover_governor(weights_t: np.ndarray, max_step_turnover: float = 0.35) -> TurnoverGovernedResult:
     """
     Enforce an L1 turnover budget per step:

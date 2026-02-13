@@ -2,6 +2,7 @@ import numpy as np
 
 from qmods.guardrails_bundle import (
     apply_turnover_budget_governor,
+    disagreement_gate_series,
     regime_governor_from_returns,
     stability_governor,
 )
@@ -56,3 +57,26 @@ def test_turnover_budget_governor_enforces_rolling_limit():
     assert np.max(res.turnover_after) <= 0.35 + 1e-6
     assert np.max(res.rolling_turnover_after) <= limit + 1e-6
     assert float(np.mean(res.turnover_after)) <= float(np.mean(res.turnover_before))
+
+
+def test_disagreement_gate_series_penalizes_high_dispersion():
+    T = 260
+    low = np.zeros((T, 4), dtype=float)
+    low[:, 0] = 0.4
+    low[:, 1] = 0.42
+    low[:, 2] = 0.39
+    low[:, 3] = 0.41
+
+    high = np.zeros((T, 4), dtype=float)
+    for t in range(T):
+        s = 1.0 if (t % 2 == 0) else -1.0
+        high[t] = np.array([0.9 * s, -0.9 * s, 0.8 * s, -0.8 * s], dtype=float)
+
+    g_low = disagreement_gate_series(low, clamp=(0.45, 1.0), lookback=63, smooth=0.85)
+    g_high = disagreement_gate_series(high, clamp=(0.45, 1.0), lookback=63, smooth=0.85)
+
+    assert g_low.shape == g_high.shape == (T,)
+    assert np.isfinite(g_low).all() and np.isfinite(g_high).all()
+    assert float(np.min(g_low)) >= 0.45 - 1e-9
+    assert float(np.max(g_low)) <= 1.0 + 1e-9
+    assert float(np.mean(g_high)) < float(np.mean(g_low))
