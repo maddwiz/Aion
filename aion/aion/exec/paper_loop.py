@@ -11,6 +11,7 @@ from ..brain.signals import (
     multi_timeframe_alignment,
     opposite_confidence,
 )
+from ..brain.external_signals import blend_external_signals, load_external_signal_map
 from ..data.ib_client import disconnect, hist_bars_cached, ib
 from ..execution.simulator import ExecutionSimulator
 from ..ml.meta_label import MetaLabelModel
@@ -381,6 +382,15 @@ def main() -> int:
             last_prices = {}
             cycle_conf = []
             entry_candidates = []
+            external_signals = {}
+            global_external = None
+            if cfg.EXT_SIGNAL_ENABLED:
+                external_signals = load_external_signal_map(
+                    path=cfg.EXT_SIGNAL_FILE,
+                    min_confidence=cfg.EXT_SIGNAL_MIN_CONFIDENCE,
+                    max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
+                )
+                global_external = external_signals.get("__GLOBAL__")
 
             for sym in wl:
                 try:
@@ -408,7 +418,19 @@ def main() -> int:
                     high = float(df["high"].iloc[-lookback:].max())
                     low = float(df["low"].iloc[-lookback:].min())
 
-                    signal = build_trade_signal(last, price, high, low, cfg, profile=profile)
+                    signal = build_trade_signal(
+                        last,
+                        price,
+                        high,
+                        low,
+                        cfg,
+                        profile=profile,
+                        external=blend_external_signals(
+                            external_signals.get(sym),
+                            global_external,
+                            max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
+                        ),
+                    )
                     base_conf = float(signal.get("confidence", 0.0))
                     mtf_score = 1.0
                     mtf_reasons = []

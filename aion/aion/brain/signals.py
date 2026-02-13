@@ -648,7 +648,46 @@ def _regime_multipliers(regime: str, cfg):
     return stop, target, trail
 
 
-def build_trade_signal(row: pd.Series, price: float, high: float, low: float, cfg, profile: dict | None = None):
+def _apply_external_overlay(
+    long_conf: float,
+    short_conf: float,
+    long_th: float,
+    short_th: float,
+    external: dict | None,
+    cfg,
+):
+    if not external or not getattr(cfg, "EXT_SIGNAL_ENABLED", False):
+        return long_conf, short_conf, long_th, short_th, None
+
+    try:
+        bias = float(external.get("bias", 0.0))
+        conf = float(external.get("confidence", 0.0))
+    except Exception:
+        return long_conf, short_conf, long_th, short_th, None
+
+    bias = max(-float(cfg.EXT_SIGNAL_MAX_BIAS), min(float(cfg.EXT_SIGNAL_MAX_BIAS), bias))
+    conf = _clamp01(conf)
+    signed = bias * conf
+    if abs(signed) < 1e-9:
+        return long_conf, short_conf, long_th, short_th, {"bias": bias, "confidence": conf, "signed": 0.0}
+
+    long_conf = _clamp01(long_conf + float(cfg.EXT_SIGNAL_CONF_BOOST) * signed)
+    short_conf = _clamp01(short_conf - float(cfg.EXT_SIGNAL_CONF_BOOST) * signed)
+    long_th = _clamp_threshold(long_th - float(cfg.EXT_SIGNAL_THRESHOLD_SHIFT) * signed)
+    short_th = _clamp_threshold(short_th + float(cfg.EXT_SIGNAL_THRESHOLD_SHIFT) * signed)
+
+    return long_conf, short_conf, long_th, short_th, {"bias": bias, "confidence": conf, "signed": signed}
+
+
+def build_trade_signal(
+    row: pd.Series,
+    price: float,
+    high: float,
+    low: float,
+    cfg,
+    profile: dict | None = None,
+    external: dict | None = None,
+):
     scored = score_signal(row, price, high, low, cfg)
     long_th, short_th, opp_exit = _dynamic_thresholds(cfg, profile)
 
@@ -665,8 +704,17 @@ def build_trade_signal(row: pd.Series, price: float, high: float, low: float, cf
     opp_exit = _clamp_threshold(opp_exit + opp_shift)
     margin_min = max(0.03, cfg.SIGNAL_MIN_MARGIN + margin_shift)
 
-    long_conf = scored["long_conf"]
-    short_conf = scored["short_conf"]
+    long_conf = float(scored["long_conf"])
+    short_conf = float(scored["short_conf"])
+    long_conf, short_conf, long_th, short_th, ext = _apply_external_overlay(
+        long_conf=long_conf,
+        short_conf=short_conf,
+        long_th=long_th,
+        short_th=short_th,
+        external=external,
+        cfg=cfg,
+    )
+
     side = None
     confidence = 0.0
     reasons = []
@@ -694,6 +742,8 @@ def build_trade_signal(row: pd.Series, price: float, high: float, low: float, cf
             "entry_threshold_short": short_th,
             "margin_min": margin_min,
             "components": scored["components"],
+            "external_bias": float(ext.get("bias", 0.0)) if ext else 0.0,
+            "external_confidence": float(ext.get("confidence", 0.0)) if ext else 0.0,
         }
 
     margin = abs(long_conf - short_conf)
@@ -735,6 +785,11 @@ def build_trade_signal(row: pd.Series, price: float, high: float, low: float, cf
         if matched > 0 and abs(factor - 1.0) >= 0.015:
             reasons = reasons + [f"Adaptive reason factor {factor:.2f}"]
 
+    if ext and abs(float(ext.get("signed", 0.0))) >= 0.01:
+        reasons = reasons + [
+            f"External overlay bias {float(ext.get('bias', 0.0)):+.2f} @ {float(ext.get('confidence', 0.0)):.2f}"
+        ]
+
     stop_mult, target_mult, trail_mult = _regime_multipliers(regime, cfg)
 
     return {
@@ -758,6 +813,8 @@ def build_trade_signal(row: pd.Series, price: float, high: float, low: float, cf
         "entry_threshold_short": short_th,
         "margin_min": margin_min,
         "components": scored["components"],
+        "external_bias": float(ext.get("bias", 0.0)) if ext else 0.0,
+        "external_confidence": float(ext.get("confidence", 0.0)) if ext else 0.0,
     }
 
 
