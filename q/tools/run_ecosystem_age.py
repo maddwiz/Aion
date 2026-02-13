@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -46,7 +47,20 @@ if __name__ == "__main__":
     w = pd.read_csv(p_w)
     h = pd.read_csv(p_h)
 
-    governed, summary = govern_hive_weights(w, h)
+    governed, summary = govern_hive_weights(
+        w,
+        h,
+        half_life_days=int(max(10, int(float(os.getenv("ECO_HALF_LIFE_DAYS", "63"))))),
+        atrophy_floor=float(np.clip(float(os.getenv("ECO_ATROPHY_FLOOR", "0.10")), 0.01, 0.60)),
+        inertia=float(np.clip(float(os.getenv("ECO_INERTIA", "0.85")), 0.0, 0.98)),
+        atrophy_trigger=float(np.clip(float(os.getenv("ECO_ATROPHY_TRIGGER", "0.32")), 0.05, 0.95)),
+        atrophy_cap=float(np.clip(float(os.getenv("ECO_ATROPHY_CAP", "0.06")), 0.01, 0.50)),
+        split_trigger=float(np.clip(float(os.getenv("ECO_SPLIT_TRIGGER", "0.55")), 0.10, 0.95)),
+        split_vol_trigger=float(np.clip(float(os.getenv("ECO_SPLIT_VOL_TRIGGER", "0.22")), 0.01, 2.0)),
+        split_intensity=float(np.clip(float(os.getenv("ECO_SPLIT_INTENSITY", "0.25")), 0.01, 1.0)),
+        fusion_corr=float(np.clip(float(os.getenv("ECO_FUSION_CORR", "0.92")), 0.50, 0.999)),
+        fusion_intensity=float(np.clip(float(os.getenv("ECO_FUSION_INTENSITY", "0.12")), 0.0, 1.0)),
+    )
     governed.to_csv(RUNS / "weights_cross_hive_governed.csv", index=False)
     (RUNS / "hive_evolution.json").write_text(json.dumps(summary, indent=2))
 
@@ -71,7 +85,7 @@ if __name__ == "__main__":
     html = (
         f"<p>Governed hive weights saved to <b>weights_cross_hive_governed.csv</b>.</p>"
         f"<p>Latest governed: {summary.get('latest_governed_weights', {})}</p>"
-        f"<p>Events: {len(summary.get('events', []))}</p>"
+        f"<p>Events: {len(summary.get('events', []))}; counts={summary.get('event_counts', {})}</p>"
     )
     append_card("Ecosystem Age Governor ✔", html)
 

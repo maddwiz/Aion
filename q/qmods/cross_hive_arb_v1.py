@@ -1,6 +1,23 @@
 #!/usr/bin/env python3
 import numpy as np
 
+
+def _as_time_array(x, T: int, lo: float, hi: float, default: float) -> np.ndarray:
+    arr = np.asarray(x, dtype=float)
+    if arr.ndim == 0:
+        return np.full(T, float(np.clip(float(arr), lo, hi)), dtype=float)
+    arr = arr.ravel()
+    if arr.size == 0:
+        return np.full(T, float(default), dtype=float)
+    if arr.size < T:
+        pad = np.full(T - arr.size, float(arr[-1]), dtype=float)
+        arr = np.concatenate([arr, pad], axis=0)
+    if arr.size > T:
+        arr = arr[:T]
+    arr = np.nan_to_num(arr, nan=default, posinf=default, neginf=default)
+    return np.clip(arr, lo, hi).astype(float)
+
+
 def arb_weights(
     hive_scores: dict,
     alpha=2.0,
@@ -15,6 +32,7 @@ def arb_weights(
     plus practical execution constraints:
       - inertia smoothing over time
       - optional min/max per-hive weight clamps
+      - optional time-varying alpha/inertia schedules
     hive_scores: {name: [T]} base score (higher=better)
     drawdown_penalty: {name: [T]} penalty in [0,1], where 1 is worst
     disagreement_penalty: {name: [T]} penalty in [0,1], where 1 is worst
@@ -32,20 +50,32 @@ def arb_weights(
         G = np.stack([np.asarray(disagreement_penalty.get(n, np.zeros(S.shape[0])), float) for n in names], axis=1)
         Z = Z - 1.0 * np.clip(G, 0.0, 1.0)
 
-    W = np.exp(alpha * Z)
-    W = W / (W.sum(1, keepdims=True) + 1e-9)
+    T = Z.shape[0]
+    alpha_t = _as_time_array(alpha, T, lo=0.2, hi=10.0, default=2.0)
+    inertia_t = _as_time_array(inertia, T, lo=0.0, hi=0.98, default=0.80)
 
-    # Clamp single-hive concentration and ensure small floor for exploration/recovery.
-    mn = float(np.clip(min_weight, 0.0, 0.95))
-    mx = float(np.clip(max_weight, mn + 1e-6, 1.0))
-    if mn > 0.0 or mx < 0.999:
-        W = np.clip(W, mn, mx)
-        W = W / (W.sum(1, keepdims=True) + 1e-9)
+    W = np.zeros_like(Z, dtype=float)
+    for t in range(T):
+        z = Z[t]
+        z = z - np.max(z)
+        e = np.exp(alpha_t[t] * z)
+        s = float(np.sum(e))
+        if s <= 0:
+            wrow = np.full(e.shape[0], 1.0 / max(1, e.shape[0]), dtype=float)
+        else:
+            wrow = e / s
 
-    # Inertia smoothing to lower rebalance churn.
-    ib = float(np.clip(inertia, 0.0, 0.98))
-    if ib > 0.0 and W.shape[0] > 1:
-        for t in range(1, W.shape[0]):
-            W[t] = ib * W[t - 1] + (1.0 - ib) * W[t]
-            W[t] = W[t] / (W[t].sum() + 1e-9)
+        # Clamp single-hive concentration and ensure small floor for exploration/recovery.
+        mn = float(np.clip(min_weight, 0.0, 0.95))
+        mx = float(np.clip(max_weight, mn + 1e-6, 1.0))
+        if mn > 0.0 or mx < 0.999:
+            wrow = np.clip(wrow, mn, mx)
+            wrow = wrow / (wrow.sum() + 1e-9)
+
+        if t > 0 and inertia_t[t] > 0.0:
+            wrow = inertia_t[t] * W[t - 1] + (1.0 - inertia_t[t]) * wrow
+            wrow = np.clip(wrow, 0.0, None)
+            wrow = wrow / (wrow.sum() + 1e-9)
+
+        W[t] = wrow
     return names, W

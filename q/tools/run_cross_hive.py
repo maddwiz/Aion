@@ -96,6 +96,72 @@ def novaspine_hive_multipliers(hives):
         out[h] = float(np.clip(b, 0.80, 1.20))
     return out
 
+
+def _load_series(path: Path):
+    if not path.exists():
+        return None
+    try:
+        a = np.loadtxt(path, delimiter=",")
+    except Exception:
+        try:
+            a = np.loadtxt(path, delimiter=",", skiprows=1)
+        except Exception:
+            return None
+    a = np.asarray(a, float)
+    if a.ndim == 2 and a.shape[1] >= 1:
+        a = a[:, -1]
+    return a.ravel()
+
+
+def adaptive_arb_schedules(base_alpha, base_inertia, pivot_stab):
+    """
+    Build adaptive alpha/inertia schedules from hive disagreement + council divergence.
+    High disagreement/divergence => lower alpha (less concentration), higher inertia.
+    """
+    T = int(pivot_stab.shape[0])
+    if T <= 0:
+        return np.asarray([], float), np.asarray([], float), {}
+
+    disagree = (1.0 - pivot_stab.mean(axis=1).values).astype(float)
+    disagree = np.nan_to_num(disagree, nan=0.0, posinf=0.0, neginf=0.0)
+    disagree = np.clip(disagree, 0.0, 1.0)
+
+    # Optional council divergence from meta stack vs synapses.
+    m = _load_series(RUNS / "meta_stack_pred.csv")
+    s = _load_series(RUNS / "synapses_pred.csv")
+    div = np.zeros(T, float)
+    if m is not None and s is not None and len(m) > 0 and len(s) > 0:
+        L = min(T, len(m), len(s))
+        d = np.abs(np.asarray(m[:L], float) - np.asarray(s[:L], float))
+        d = np.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+        p90 = float(np.percentile(d, 90)) if len(d) else 0.0
+        div[:L] = np.clip(d / (p90 + 1e-9), 0.0, 1.0)
+
+    # Cross-hive stability dispersion: if high, more confidence in specialization.
+    disp = pivot_stab.std(axis=1).values.astype(float)
+    disp = np.nan_to_num(disp, nan=0.0, posinf=0.0, neginf=0.0)
+    p90d = float(np.percentile(disp, 90)) if len(disp) else 0.0
+    disp = np.clip(disp / (p90d + 1e-9), 0.0, 1.0)
+
+    alpha_t = base_alpha * (1.0 - 0.35 * disagree - 0.25 * div + 0.15 * disp)
+    alpha_t = np.clip(alpha_t, 0.8, 4.5)
+
+    inertia_t = base_inertia + 0.12 * disagree + 0.10 * div - 0.08 * disp
+    inertia_t = np.clip(inertia_t, 0.40, 0.97)
+
+    diag = {
+        "mean_disagreement": float(np.mean(disagree)),
+        "mean_council_divergence": float(np.mean(div)),
+        "mean_stability_dispersion": float(np.mean(disp)),
+        "alpha_mean": float(np.mean(alpha_t)),
+        "alpha_min": float(np.min(alpha_t)),
+        "alpha_max": float(np.max(alpha_t)),
+        "inertia_mean": float(np.mean(inertia_t)),
+        "inertia_min": float(np.min(inertia_t)),
+        "inertia_max": float(np.max(inertia_t)),
+    }
+    return alpha_t, inertia_t, diag
+
 if __name__ == "__main__":
     p = RUNS / "hive_signals.csv"
     if not p.exists():
@@ -185,17 +251,28 @@ if __name__ == "__main__":
     inertia = float(np.clip(float(os.getenv("CROSS_HIVE_INERTIA", "0.80")), 0.0, 0.98))
     max_w = float(np.clip(float(os.getenv("CROSS_HIVE_MAX_W", "0.65")), 0.10, 1.0))
     min_w = float(np.clip(float(os.getenv("CROSS_HIVE_MIN_W", "0.02")), 0.0, 0.30))
+    adaptive = str(os.getenv("CROSS_HIVE_ADAPTIVE", "1")).strip().lower() in {"1", "true", "yes", "on"}
+
+    if adaptive:
+        alpha_sched, inertia_sched, adaptive_diag = adaptive_arb_schedules(alpha, inertia, pivot_stab)
+    else:
+        alpha_sched, inertia_sched = alpha, inertia
+        adaptive_diag = {"enabled": False}
 
     names, W = arb_weights(
         scores,
-        alpha=alpha,
+        alpha=alpha_sched,
         drawdown_penalty=dd_pen,
         disagreement_penalty=dg_pen,
-        inertia=inertia,
+        inertia=inertia_sched,
         max_weight=max_w,
         min_weight=min_w,
     )
-    out = pd.DataFrame(W, index=pivot_sig.index, columns=names).reset_index().rename(columns={"index": "DATE"})
+    out = pd.DataFrame(W, index=pivot_sig.index, columns=names)
+    if adaptive and len(out) == len(alpha_sched):
+        out["arb_alpha"] = np.asarray(alpha_sched, float)
+        out["arb_inertia"] = np.asarray(inertia_sched, float)
+    out = out.reset_index().rename(columns={"index": "DATE"})
     out.to_csv(RUNS / "cross_hive_weights.csv", index=False)
 
     if len(out) > 1 and len(names) > 0:
@@ -206,8 +283,10 @@ if __name__ == "__main__":
     summary = {
         "hives": names,
         "rows": int(len(out)),
-        "alpha": alpha,
-        "inertia": inertia,
+        "alpha_base": alpha,
+        "inertia_base": inertia,
+        "adaptive_enabled": bool(adaptive),
+        "adaptive_diagnostics": adaptive_diag,
         "max_weight": max_w,
         "min_weight": min_w,
         "mean_turnover": turn,
@@ -223,7 +302,7 @@ if __name__ == "__main__":
     html = (
         f"<p>Cross-hive weights over {len(names)} hives saved to cross_hive_weights.csv</p>"
         f"<p>Latest: {summary['latest_weights']}</p>"
-        f"<p>alpha={alpha:.2f}, inertia={inertia:.2f}, turnover={turn:.4f}</p>"
+        f"<p>alpha_base={alpha:.2f}, inertia_base={inertia:.2f}, turnover={turn:.4f}, adaptive={bool(adaptive)}</p>"
     )
     append_card("Cross-Hive Arbitration ✔", html)
     print(f"✅ Wrote {RUNS/'cross_hive_weights.csv'}")

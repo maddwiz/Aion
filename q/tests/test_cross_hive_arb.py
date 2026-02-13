@@ -39,3 +39,19 @@ def test_arb_weights_inertia_reduces_turnover():
     t_fast = float(np.mean(np.sum(np.abs(np.diff(w_fast, axis=0)), axis=1)))
     t_slow = float(np.mean(np.sum(np.abs(np.diff(w_slow, axis=0)), axis=1)))
     assert t_slow < t_fast
+
+
+def test_arb_weights_accepts_time_varying_alpha_and_inertia():
+    T = 90
+    scores = {
+        "A": np.linspace(-0.4, 0.5, T),
+        "B": np.linspace(0.2, -0.1, T),
+        "C": np.sin(np.linspace(0, 5, T)) * 0.25,
+    }
+    alpha_t = np.linspace(1.0, 3.0, T)
+    inertia_t = np.linspace(0.2, 0.9, T)
+    names, W = arb_weights(scores, alpha=alpha_t, inertia=inertia_t, min_weight=0.01, max_weight=0.8)
+    assert names == ["A", "B", "C"]
+    assert W.shape == (T, 3)
+    assert np.isfinite(W).all()
+    assert np.allclose(W.sum(axis=1), 1.0, atol=1e-6)

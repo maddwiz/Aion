@@ -18,82 +18,193 @@ def _safe_health_series(hive_signals: pd.DataFrame, hive: str) -> pd.Series:
     return s.sort_index().dropna()
 
 
+def _safe_signal_series(hive_signals: pd.DataFrame, hive: str) -> pd.Series:
+    h = hive_signals[hive_signals["HIVE"] == hive].copy()
+    h = h.sort_values("DATE")
+    s = pd.to_numeric(h.get("hive_signal", 0.0), errors="coerce").fillna(0.0)
+    s.index = pd.to_datetime(h["DATE"], errors="coerce")
+    return s.sort_index().dropna()
+
+
+def _renorm_row(row: np.ndarray, n: int) -> np.ndarray:
+    row = np.asarray(row, float)
+    row = np.nan_to_num(row, nan=0.0, posinf=0.0, neginf=0.0)
+    row = np.clip(row, 0.0, None)
+    s = float(np.sum(row))
+    if (not np.isfinite(s)) or s <= 0:
+        return np.full(n, 1.0 / max(1, n), dtype=float)
+    return row / s
+
+
+def _redistribute_excess(row: np.ndarray, excess: float, mask: np.ndarray, weights: np.ndarray):
+    e = float(max(0.0, excess))
+    if e <= 0:
+        return
+    m = np.asarray(mask, bool)
+    if not np.any(m):
+        return
+    w = np.asarray(weights, float)
+    w = np.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
+    w = np.where(m, np.clip(w, 0.0, None), 0.0)
+    s = float(np.sum(w))
+    if s <= 0:
+        w = np.where(m, 1.0, 0.0)
+        s = float(np.sum(w))
+    row += e * (w / (s + 1e-12))
+
+
 def govern_hive_weights(
     cross_hive_weights: pd.DataFrame,
     hive_signals: pd.DataFrame,
     half_life_days: int = 63,
     atrophy_floor: float = 0.10,
     inertia: float = 0.85,
+    atrophy_trigger: float = 0.32,
+    atrophy_cap: float = 0.06,
+    split_trigger: float = 0.55,
+    split_vol_trigger: float = 0.22,
+    split_intensity: float = 0.25,
+    fusion_corr: float = 0.92,
+    fusion_intensity: float = 0.12,
 ) -> tuple[pd.DataFrame, dict]:
     """
-    Apply ecosystem aging logic:
-    - aging/vitality from EW health
-    - atrophy floor to avoid hard zeroing
-    - inertia to avoid churn
+    Apply ecosystem aging logic with actionable controls:
+    - vitality scaling from EW health
+    - atrophy cap for persistent weak hives (with redistribution)
+    - split pressure on dominant volatile hives
+    - fusion flow for highly correlated hive pairs
+    - inertia smoothing to avoid churn
     """
     w = cross_hive_weights.copy()
     w["DATE"] = pd.to_datetime(w["DATE"], errors="coerce")
     w = w.dropna(subset=["DATE"]).sort_values("DATE").reset_index(drop=True)
-    hives = [c for c in w.columns if c != "DATE"]
+
+    # Keep only hive columns; ignore diagnostics such as arb_alpha/arb_inertia.
+    hives = [c for c in w.columns if c != "DATE" and not str(c).startswith("arb_")]
     if not hives:
-        return w, {"hives": [], "events": []}
+        return w[["DATE"]].copy(), {"hives": [], "events": []}
 
     hs = hive_signals.copy()
     hs["DATE"] = pd.to_datetime(hs["DATE"], errors="coerce")
     hs = hs.dropna(subset=["DATE"]).sort_values(["DATE", "HIVE"])
 
-    governed = w[hives].astype(float).copy()
+    T = len(w)
+    H = len(hives)
+    governed = w[hives].astype(float).values
+    vitality = np.zeros((T, H), dtype=float)
+    vol = np.zeros((T, H), dtype=float)
+
     events = []
+    max_events = 64
+    event_counts = {"atrophy_applied": 0, "split_applied": 0, "fusion_applied": 0}
     vitality_latest = {}
 
     alpha = 1.0 - np.exp(np.log(0.5) / max(2.0, float(half_life_days)))
 
-    for hive in hives:
-        s = _safe_health_series(hs, hive).reindex(w["DATE"]).ffill().fillna(0.0)
-        ema = s.ewm(alpha=alpha, adjust=False).mean()
+    for j, hive in enumerate(hives):
+        hs_h = _safe_health_series(hs, hive).reindex(w["DATE"]).ffill().fillna(0.0)
+        sig_h = _safe_signal_series(hs, hive).reindex(w["DATE"]).ffill().fillna(0.0)
+        ema = hs_h.ewm(alpha=alpha, adjust=False).mean()
         trend = (ema - ema.shift(10)).fillna(0.0)
-        vitality = np.clip(0.55 + 0.35 * ema + 0.10 * np.tanh(3.0 * trend), atrophy_floor, 1.25)
-        vitality_latest[hive] = float(vitality.iloc[-1]) if len(vitality) else float(atrophy_floor)
-        governed[hive] = governed[hive].values * vitality.values
+        vit = np.clip(0.55 + 0.35 * ema.values + 0.10 * np.tanh(3.0 * trend.values), atrophy_floor, 1.25)
+        vitality[:, j] = vit
+        vol[:, j] = sig_h.rolling(21, min_periods=7).std(ddof=1).fillna(0.0).values
+        vitality_latest[hive] = float(vit[-1]) if len(vit) else float(atrophy_floor)
+        governed[:, j] = governed[:, j] * vit
 
-        # Event tags
-        if vitality_latest[hive] < 0.35:
-            events.append({"hive": hive, "event": "atrophy", "score": vitality_latest[hive]})
-        if float(governed[hive].iloc[-1]) > 0.55 and float(s.std(ddof=1) or 0.0) > 0.30:
-            events.append({"hive": hive, "event": "split_candidate", "score": float(governed[hive].iloc[-1])})
-
-    # Normalize each date
-    row_sum = governed.sum(axis=1).replace(0.0, np.nan)
-    governed = governed.div(row_sum, axis=0).fillna(1.0 / max(1, len(hives)))
-
-    # Inertia smoothing
-    gov_arr = governed.values
-    for t in range(1, len(gov_arr)):
-        gov_arr[t] = inertia * gov_arr[t - 1] + (1.0 - inertia) * gov_arr[t]
-        s = gov_arr[t].sum()
-        if s > 0:
-            gov_arr[t] /= s
-    governed = pd.DataFrame(gov_arr, columns=hives)
-
-    # Fusion candidates: highly correlated hive-signal pairs
+    # Correlation map for fusion dynamics.
     piv = hs.pivot(index="DATE", columns="HIVE", values="hive_signal").reindex(columns=hives).fillna(0.0)
-    if piv.shape[1] >= 2:
-        corr = piv.corr()
-        for i, h1 in enumerate(hives):
-            for h2 in hives[i + 1 :]:
-                c = float(corr.loc[h1, h2]) if h1 in corr.index and h2 in corr.columns else 0.0
-                if c > 0.90:
+    corr = piv.corr() if piv.shape[1] >= 2 else pd.DataFrame(index=hives, columns=hives, data=np.eye(H))
+    fusion_pairs = []
+    for i, h1 in enumerate(hives):
+        for j, h2 in enumerate(hives[i + 1 :], start=i + 1):
+            c = float(corr.loc[h1, h2]) if h1 in corr.index and h2 in corr.columns else 0.0
+            if c >= fusion_corr:
+                fusion_pairs.append((i, j, c))
+                if len(events) < max_events:
                     events.append({"hive": f"{h1}+{h2}", "event": "fusion_candidate", "score": c})
 
-    out = pd.concat([w[["DATE"]], governed], axis=1)
+    # Apply dynamic actions row-by-row.
+    for t in range(T):
+        row = governed[t].copy()
+        vrow = vitality[t]
+        volrow = vol[t]
+
+        # 1) Atrophy caps for weak hives with redistribution.
+        for j in range(H):
+            if vrow[j] < atrophy_trigger and row[j] > atrophy_cap:
+                excess = float(row[j] - atrophy_cap)
+                row[j] = float(atrophy_cap)
+                mask = np.ones(H, dtype=bool)
+                mask[j] = False
+                _redistribute_excess(row, excess, mask, vrow)
+                event_counts["atrophy_applied"] += 1
+                if len(events) < max_events:
+                    events.append({"hive": hives[j], "event": "atrophy_applied", "score": float(vrow[j])})
+
+        # 2) Split pressure for dominant volatile hive.
+        dom = int(np.argmax(row))
+        if row[dom] > split_trigger and volrow[dom] > split_vol_trigger:
+            pressure = float((row[dom] - split_trigger) / max(1e-9, 1.0 - split_trigger))
+            cut = float(np.clip(split_intensity * pressure * row[dom], 0.0, 0.25))
+            if cut > 0:
+                row[dom] -= cut
+                mask = np.ones(H, dtype=bool)
+                mask[dom] = False
+                # Prefer lower-correlation recipients when splitting.
+                corr_pen = np.ones(H, dtype=float)
+                if hives[dom] in corr.index:
+                    corr_pen = 1.0 - np.clip(np.abs(corr.loc[hives[dom], hives].values.astype(float)), 0.0, 1.0)
+                _redistribute_excess(row, cut, mask, vrow * corr_pen)
+                event_counts["split_applied"] += 1
+                if len(events) < max_events:
+                    events.append({"hive": hives[dom], "event": "split_applied", "score": float(cut)})
+
+        # 3) Fusion flow across highly correlated pairs: move from weaker vitality to stronger.
+        for i, j, c in fusion_pairs:
+            if row[i] <= 0 or row[j] <= 0:
+                continue
+            if abs(vrow[i] - vrow[j]) < 1e-6:
+                continue
+            donor = i if vrow[i] < vrow[j] else j
+            recv = j if donor == i else i
+            flow_scale = float(np.clip((c - fusion_corr) / max(1e-9, 1.0 - fusion_corr), 0.0, 1.0))
+            flow = float(fusion_intensity * flow_scale * min(row[i], row[j]))
+            flow = min(flow, row[donor] * 0.6)
+            if flow <= 0:
+                continue
+            row[donor] -= flow
+            row[recv] += flow
+            event_counts["fusion_applied"] += 1
+
+        governed[t] = _renorm_row(row, H)
+
+    # Inertia smoothing
+    ib = float(np.clip(inertia, 0.0, 0.98))
+    if ib > 0.0 and T > 1:
+        for t in range(1, T):
+            governed[t] = ib * governed[t - 1] + (1.0 - ib) * governed[t]
+            governed[t] = _renorm_row(governed[t], H)
+
+    out = pd.concat([w[["DATE"]], pd.DataFrame(governed, columns=hives)], axis=1)
     summary = {
         "hives": hives,
         "half_life_days": int(half_life_days),
         "atrophy_floor": float(atrophy_floor),
         "inertia": float(inertia),
+        "parameters": {
+            "atrophy_trigger": float(atrophy_trigger),
+            "atrophy_cap": float(atrophy_cap),
+            "split_trigger": float(split_trigger),
+            "split_vol_trigger": float(split_vol_trigger),
+            "split_intensity": float(split_intensity),
+            "fusion_corr": float(fusion_corr),
+            "fusion_intensity": float(fusion_intensity),
+        },
         "latest_raw_weights": {h: float(w[h].iloc[-1]) for h in hives},
         "latest_governed_weights": {h: float(out[h].iloc[-1]) for h in hives},
         "latest_vitality": vitality_latest,
+        "event_counts": event_counts,
         "events": events,
     }
     return out, summary

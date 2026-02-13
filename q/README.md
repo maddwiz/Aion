@@ -60,6 +60,7 @@ This now includes:
 - symbolic + heartbeat + reflexive generation
 - hive build + hive walk-forward diagnostics
 - guardrails, governors, councils, meta/synapses, cross-hive, ecosystem
+- adaptive cross-hive arbitration (time-varying alpha/inertia from disagreement/divergence)
 - reliability-aware quality governor (nested WF + hive WF + council diagnostics)
 - NovaSpine recall feedback loop (augment -> context boost -> final risk scaling)
 - immune drill governance check (synthetic stress scenarios)
@@ -145,4 +146,22 @@ python tools/replay_novaspine_outbox.py
 and can be called directly for per-hive memory boosts:
 ```bash
 python tools/run_novaspine_hive_feedback.py
+```
+
+### Advanced hive controls (optional env)
+Cross-hive adaptive arbitration:
+```bash
+export CROSS_HIVE_ADAPTIVE=1
+export CROSS_HIVE_ALPHA=2.2
+export CROSS_HIVE_INERTIA=0.80
+```
+Ecosystem evolution governors:
+```bash
+export ECO_ATROPHY_TRIGGER=0.32
+export ECO_ATROPHY_CAP=0.06
+export ECO_SPLIT_TRIGGER=0.55
+export ECO_SPLIT_VOL_TRIGGER=0.22
+export ECO_SPLIT_INTENSITY=0.25
+export ECO_FUSION_CORR=0.92
+export ECO_FUSION_INTENSITY=0.12
 ```
