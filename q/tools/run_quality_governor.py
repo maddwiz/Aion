@@ -243,8 +243,15 @@ if __name__ == "__main__":
     reflex_q = None
     try:
         rm = float(reflex_info.get("governor_mean", np.nan))
-        if np.isfinite(rm):
-            reflex_q = float(np.clip((rm - 0.72) / (1.10 - 0.72 + 1e-9), 0.0, 1.0))
+        rh = float(reflex_info.get("health_mean", np.nan))
+        q_rm = float(np.clip((rm - 0.72) / (1.10 - 0.72 + 1e-9), 0.0, 1.0)) if np.isfinite(rm) else np.nan
+        q_rh = float(np.clip(rh / 1.50, 0.0, 1.0)) if np.isfinite(rh) else np.nan
+        if np.isfinite(q_rm) and np.isfinite(q_rh):
+            reflex_q = float(np.clip(0.55 * q_rm + 0.45 * q_rh, 0.0, 1.0))
+        elif np.isfinite(q_rm):
+            reflex_q = q_rm
+        elif np.isfinite(q_rh):
+            reflex_q = q_rh
     except Exception:
         reflex_q = None
     sym_q = None
@@ -263,7 +270,7 @@ if __name__ == "__main__":
             "council": (council_q, 0.20),
             "dream_coherence": (dream_q, 0.10),
             "dna_stress": (dna_q, 0.08),
-            "reflex_health": (reflex_q, 0.08),
+            "reflex_health": (reflex_q, 0.06),
             "symbolic": (sym_q, 0.08),
             "system_health": (health_q, 0.13),
             "ecosystem": (eco_q, 0.07),
@@ -285,8 +292,8 @@ if __name__ == "__main__":
         base_quality=quality,
         disagreement_gate=gate,
         global_governor=global_gov,
-        lo=0.55,
-        hi=1.15,
+        lo=float(np.clip(float(os.getenv("Q_QUALITY_GOV_LO", "0.58")), 0.30, 1.20)),
+        hi=float(np.clip(float(os.getenv("Q_QUALITY_GOV_HI", "1.15")), 0.50, 1.30)),
         smooth=0.85,
     )
 

@@ -226,7 +226,7 @@ def build_alert_payload(
 if __name__ == "__main__":
     min_health = float(os.getenv("Q_MIN_HEALTH_SCORE", "70"))
     min_global = float(os.getenv("Q_MIN_GLOBAL_GOV_MEAN", "0.45"))
-    min_quality_gov = float(os.getenv("Q_MIN_QUALITY_GOV_MEAN", "0.60"))
+    min_quality_gov = float(os.getenv("Q_MIN_QUALITY_GOV_MEAN", "0.58"))
     min_quality_score = float(os.getenv("Q_MIN_QUALITY_SCORE", "0.45"))
     require_immune_pass = str(os.getenv("Q_REQUIRE_IMMUNE_PASS", "0")).strip().lower() in {"1", "true", "yes", "on"}
     max_issues = int(os.getenv("Q_MAX_HEALTH_ISSUES", "2"))

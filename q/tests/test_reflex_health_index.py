@@ -1,6 +1,6 @@
 import numpy as np
 
-from qmods.reflex_health_index import reflex_health_governor
+from qmods.reflex_health_index import reflex_health, reflex_health_governor
 
 
 def test_reflex_health_governor_bounds_and_monotonic_mean():
@@ -16,3 +16,17 @@ def test_reflex_health_governor_bounds_and_monotonic_mean():
     assert float(np.min(g_low)) >= 0.72 - 1e-9
     assert float(np.max(g_high)) <= 1.10 + 1e-9
     assert float(np.mean(g_high)) > float(np.mean(g_low))
+
+
+def test_reflex_health_penalizes_deep_drawdown():
+    T = 320
+    rng = np.random.default_rng(9)
+    steady = 0.0008 + 0.002 * rng.standard_normal(T)
+    stressed = steady.copy()
+    stressed[150:170] -= 0.045  # concentrated drawdown shock
+
+    h_steady = reflex_health(steady, lookback=126)
+    h_stress = reflex_health(stressed, lookback=126)
+
+    assert h_steady.shape == h_stress.shape == (T,)
+    assert float(np.mean(h_stress[190:260])) < float(np.mean(h_steady[190:260]))

@@ -85,8 +85,20 @@ if __name__ == "__main__":
         else:
             r = np.zeros(252, float)
 
-    H = reflex_health(r, lookback=126)
+    H, comp = reflex_health(r, lookback=126, return_components=True)
     np.savetxt(RUNS / "reflex_health.csv", H, delimiter=",")
+    if isinstance(comp, dict):
+        base = np.asarray(comp.get("base_sharpe", np.zeros_like(H)), float).ravel()
+        ddp = np.asarray(comp.get("drawdown_penalty", np.zeros_like(H)), float).ravel()
+        isp = np.asarray(comp.get("instability_penalty", np.zeros_like(H)), float).ravel()
+        C = np.column_stack([base[: len(H)], ddp[: len(H)], isp[: len(H)], H])
+        np.savetxt(
+            RUNS / "reflex_health_components.csv",
+            C,
+            delimiter=",",
+            header="base_sharpe,drawdown_penalty,instability_penalty,reflex_health",
+            comments="",
+        )
     Hg = reflex_health_governor(H, lo=0.72, hi=1.10, smooth=0.88)
     np.savetxt(RUNS / "reflex_health_governor.csv", Hg, delimiter=",")
 
@@ -105,6 +117,8 @@ if __name__ == "__main__":
         "governor_mean": float(np.mean(Hg)) if len(Hg) else 1.0,
         "governor_min": float(np.min(Hg)) if len(Hg) else 1.0,
         "governor_max": float(np.max(Hg)) if len(Hg) else 1.0,
+        "drawdown_penalty_mean": float(np.mean(comp.get("drawdown_penalty", [0.0]))) if isinstance(comp, dict) else 0.0,
+        "instability_penalty_mean": float(np.mean(comp.get("instability_penalty", [0.0]))) if isinstance(comp, dict) else 0.0,
         "wrote_reflex_signal_gated": bool(wrote_gate),
     }
     (RUNS / "reflex_health_info.json").write_text(json.dumps(info, indent=2))

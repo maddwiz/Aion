@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
 import numpy as np
 
-def reflex_health(latent_returns: np.ndarray, lookback=126):
+
+def _rolling_dd_penalty(window_rets: np.ndarray, dd_ref: float = 0.35) -> float:
+    w = np.asarray(window_rets, float).ravel()
+    if len(w) == 0:
+        return 0.0
+    eq = np.cumprod(1.0 + np.clip(w, -0.95, 0.95))
+    peak = np.maximum.accumulate(eq)
+    dd = eq / (peak + 1e-12) - 1.0
+    mdd = float(np.abs(np.min(dd))) if len(dd) else 0.0
+    return float(np.clip(mdd / max(1e-6, dd_ref), 0.0, 1.0))
+
+
+def reflex_health(latent_returns: np.ndarray, lookback=126, return_components: bool = False):
     r = np.asarray(latent_returns, float)
     out = np.zeros_like(r, float)
+    base_sharpe = np.zeros_like(r, float)
+    dd_pen = np.zeros_like(r, float)
+    instab_pen = np.zeros_like(r, float)
     for i in range(len(r)):
         j = max(0, i - lookback + 1)
         w = r[j:i+1]
@@ -12,9 +27,25 @@ def reflex_health(latent_returns: np.ndarray, lookback=126):
         if not np.isfinite(sd) or sd < 1e-6:
             out[i] = 0.0
             continue
-        raw = (mu / (sd + 1e-12)) * np.sqrt(252.0)
+        raw = float((mu / (sd + 1e-12)) * np.sqrt(252.0))
+        base = float(np.clip(raw, 0.0, 5.0))
+        ddp = _rolling_dd_penalty(w, dd_ref=0.35)
+        # Volatility-of-returns proxy for reflex instability.
+        inst = float(np.nanstd(np.diff(w))) if len(w) > 1 else 0.0
+        inst_ref = float(np.nanstd(w) + 1e-6)
+        ip = float(np.clip(inst / (2.5 * inst_ref + 1e-12), 0.0, 1.0))
+        adj = base * (1.0 - 0.35 * ddp) * (1.0 - 0.12 * ip)
         # Clamp to avoid exploding values when window std is tiny.
-        out[i] = float(np.clip(raw, 0.0, 5.0))
+        out[i] = float(np.clip(adj, 0.0, 5.0))
+        base_sharpe[i] = base
+        dd_pen[i] = ddp
+        instab_pen[i] = ip
+    if return_components:
+        return out, {
+            "base_sharpe": base_sharpe,
+            "drawdown_penalty": dd_pen,
+            "instability_penalty": instab_pen,
+        }
     return out
 
 def gate_reflex(reflex_signal: np.ndarray, health: np.ndarray, min_h=0.5):
