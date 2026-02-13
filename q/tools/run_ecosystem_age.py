@@ -13,6 +13,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,24 @@ if __name__ == "__main__":
     governed.to_csv(RUNS / "weights_cross_hive_governed.csv", index=False)
     (RUNS / "hive_evolution.json").write_text(json.dumps(summary, indent=2))
 
+    # Diversification governor from hive concentration.
+    hive_cols = [c for c in governed.columns if c != "DATE"]
+    div_stats = {}
+    if hive_cols:
+        mat = governed[hive_cols].astype(float).values
+        hhi = (mat * mat).sum(axis=1)
+        n = max(1, len(hive_cols))
+        base = 1.0 / n
+        # normalize concentration to [0,1]
+        conc = np.clip((hhi - base) / (1.0 - base + 1e-12), 0.0, 1.0)
+        gov = np.clip(1.05 - 0.25 * conc, 0.80, 1.05)
+        pd.DataFrame({"DATE": governed["DATE"], "hive_diversification_governor": gov}).to_csv(
+            RUNS / "hive_diversification_governor.csv", index=False
+        )
+        div_stats = {"mean": float(np.mean(gov)), "min": float(np.min(gov)), "max": float(np.max(gov))}
+    summary["diversification_governor"] = div_stats
+    (RUNS / "hive_evolution.json").write_text(json.dumps(summary, indent=2))
+
     html = (
         f"<p>Governed hive weights saved to <b>weights_cross_hive_governed.csv</b>.</p>"
         f"<p>Latest governed: {summary.get('latest_governed_weights', {})}</p>"
@@ -58,3 +77,5 @@ if __name__ == "__main__":
 
     print(f"✅ Wrote {RUNS/'weights_cross_hive_governed.csv'}")
     print(f"✅ Wrote {RUNS/'hive_evolution.json'}")
+    if div_stats:
+        print(f"✅ Wrote {RUNS/'hive_diversification_governor.csv'}")

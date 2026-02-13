@@ -76,6 +76,9 @@ if __name__ == "__main__":
     run_script("tools/make_symbolic.py")
     run_script("tools/make_heartbeat.py")
     run_script("tools/make_reflexive.py")
+    # (E) Build hive signals + per-hive walk-forward diagnostics
+    run_script("tools/make_hive.py")
+    run_script("tools/run_hive_walkforward.py")
 
     # ---------- PHASE 1: Guardrails ----------
     # Parameter stability, turnover, disagreement gate + DD scaling + report card

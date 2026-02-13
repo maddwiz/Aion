@@ -81,6 +81,25 @@ if __name__ == "__main__":
         dg_pen[str(hive)] = np.nan_to_num(disagree[hive].values, nan=0.0)
         np.savetxt(RUNS / f"hive_score_{hive}.csv", scores[str(hive)], delimiter=",")
 
+    # Optional quality priors from per-hive walk-forward metrics.
+    priors = {}
+    m = RUNS / "hive_wf_metrics.csv"
+    if m.exists():
+        try:
+            met = pd.read_csv(m)
+            if {"HIVE", "sharpe_oos"}.issubset(met.columns):
+                for _, row in met.iterrows():
+                    hname = str(row["HIVE"])
+                    sh = float(row.get("sharpe_oos", 0.0))
+                    # Map sharpe into [0.75, 1.35] multiplier.
+                    priors[hname] = float(np.clip(1.0 + 0.20 * np.tanh(sh / 1.5), 0.75, 1.35))
+        except Exception:
+            priors = {}
+    if priors:
+        for hive in list(scores.keys()):
+            mult = float(priors.get(hive, 1.0))
+            scores[hive] = scores[hive] * mult
+
     alpha = float(np.clip(float(os.getenv("CROSS_HIVE_ALPHA", "2.2")), 0.2, 10.0))
     inertia = float(np.clip(float(os.getenv("CROSS_HIVE_INERTIA", "0.80")), 0.0, 0.98))
     max_w = float(np.clip(float(os.getenv("CROSS_HIVE_MAX_W", "0.65")), 0.10, 1.0))
@@ -111,6 +130,7 @@ if __name__ == "__main__":
         "max_weight": max_w,
         "min_weight": min_w,
         "mean_turnover": turn,
+        "quality_priors": {k: float(v) for k, v in priors.items()},
         "date_min": str(out["DATE"].min().date()) if len(out) else None,
         "date_max": str(out["DATE"].max().date()) if len(out) else None,
         "latest_weights": {k: float(out.iloc[-1][k]) for k in names} if len(out) else {},
