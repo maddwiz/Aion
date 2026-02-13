@@ -15,6 +15,8 @@ import json
 import os
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
@@ -29,24 +31,30 @@ def _load_json(path: Path):
         return None
 
 
-if __name__ == "__main__":
-    min_health = float(os.getenv("Q_MIN_HEALTH_SCORE", "70"))
-    min_global = float(os.getenv("Q_MIN_GLOBAL_GOV_MEAN", "0.45"))
-    min_quality_gov = float(os.getenv("Q_MIN_QUALITY_GOV_MEAN", "0.60"))
-    min_quality_score = float(os.getenv("Q_MIN_QUALITY_SCORE", "0.45"))
-    require_immune_pass = str(os.getenv("Q_REQUIRE_IMMUNE_PASS", "0")).strip().lower() in {"1", "true", "yes", "on"}
-    max_issues = int(os.getenv("Q_MAX_HEALTH_ISSUES", "2"))
-    min_nested_sharpe = float(os.getenv("Q_MIN_NESTED_SHARPE", "0.20"))
-    min_nested_assets = int(os.getenv("Q_MIN_NESTED_ASSETS", "3"))
+def build_alert_payload(
+    health: dict,
+    guards: dict,
+    nested: dict,
+    quality: dict,
+    immune: dict,
+    pipeline: dict,
+    shock: dict,
+    concentration: dict,
+    thresholds: dict,
+):
+    min_health = float(thresholds.get("min_health_score", 70.0))
+    min_global = float(thresholds.get("min_global_governor_mean", 0.45))
+    min_quality_gov = float(thresholds.get("min_quality_gov_mean", 0.60))
+    min_quality_score = float(thresholds.get("min_quality_score", 0.45))
+    require_immune_pass = bool(thresholds.get("require_immune_pass", False))
+    max_issues = int(thresholds.get("max_health_issues", 2))
+    min_nested_sharpe = float(thresholds.get("min_nested_sharpe", 0.20))
+    min_nested_assets = int(thresholds.get("min_nested_assets", 3))
+    max_shock_rate = float(thresholds.get("max_shock_rate", 0.25))
+    max_conc_hhi_after = float(thresholds.get("max_concentration_hhi_after", 0.18))
+    max_conc_top1_after = float(thresholds.get("max_concentration_top1_after", 0.30))
 
-    health = _load_json(RUNS / "system_health.json") or {}
-    guards = _load_json(RUNS / "guardrails_summary.json") or {}
-    nested = _load_json(RUNS / "nested_wf_summary.json") or {}
-    quality = _load_json(RUNS / "quality_snapshot.json") or {}
-    immune = _load_json(RUNS / "immune_drill.json") or {}
-    pipeline = _load_json(RUNS / "pipeline_status.json") or {}
     issues = []
-
     score = float(health.get("health_score", 0.0))
     n_issues = len(health.get("issues", []) or [])
     if score < min_health:
@@ -92,6 +100,33 @@ if __name__ == "__main__":
     if q_score is not None and q_score < min_quality_score:
         issues.append(f"quality_score<{min_quality_score} ({q_score:.3f})")
 
+    shock_rate = None
+    if isinstance(shock, dict):
+        try:
+            shock_rate = float(shock.get("shock_rate", np.nan))
+        except Exception:
+            shock_rate = None
+    if shock_rate is not None and np.isfinite(shock_rate) and shock_rate > max_shock_rate:
+        issues.append(f"shock_rate>{max_shock_rate} ({shock_rate:.3f})")
+
+    conc_hhi_after = None
+    conc_top1_after = None
+    if isinstance(concentration, dict):
+        st = concentration.get("stats", {})
+        if isinstance(st, dict):
+            try:
+                conc_hhi_after = float(st.get("hhi_after", np.nan))
+            except Exception:
+                conc_hhi_after = None
+            try:
+                conc_top1_after = float(st.get("top1_after", np.nan))
+            except Exception:
+                conc_top1_after = None
+    if conc_hhi_after is not None and np.isfinite(conc_hhi_after) and conc_hhi_after > max_conc_hhi_after:
+        issues.append(f"concentration_hhi_after>{max_conc_hhi_after} ({conc_hhi_after:.3f})")
+    if conc_top1_after is not None and np.isfinite(conc_top1_after) and conc_top1_after > max_conc_top1_after:
+        issues.append(f"concentration_top1_after>{max_conc_top1_after} ({conc_top1_after:.3f})")
+
     immune_ok = bool(immune.get("ok", False)) if isinstance(immune, dict) else False
     immune_pass = bool(immune.get("pass", False)) if isinstance(immune, dict) else False
     if require_immune_pass:
@@ -115,6 +150,9 @@ if __name__ == "__main__":
             "require_immune_pass": require_immune_pass,
             "min_nested_sharpe": min_nested_sharpe,
             "min_nested_assets": min_nested_assets,
+            "max_shock_rate": max_shock_rate,
+            "max_concentration_hhi_after": max_conc_hhi_after,
+            "max_concentration_top1_after": max_conc_top1_after,
         },
         "observed": {
             "health_score": score,
@@ -127,12 +165,62 @@ if __name__ == "__main__":
             "nested_assets": n_assets,
             "nested_avg_oos_sharpe": n_sh,
             "pipeline_failed_steps": failed_steps,
+            "shock_rate": shock_rate,
+            "concentration_hhi_after": conc_hhi_after,
+            "concentration_top1_after": conc_top1_after,
         },
         "alerts": issues,
     }
+    return payload
+
+
+if __name__ == "__main__":
+    min_health = float(os.getenv("Q_MIN_HEALTH_SCORE", "70"))
+    min_global = float(os.getenv("Q_MIN_GLOBAL_GOV_MEAN", "0.45"))
+    min_quality_gov = float(os.getenv("Q_MIN_QUALITY_GOV_MEAN", "0.60"))
+    min_quality_score = float(os.getenv("Q_MIN_QUALITY_SCORE", "0.45"))
+    require_immune_pass = str(os.getenv("Q_REQUIRE_IMMUNE_PASS", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    max_issues = int(os.getenv("Q_MAX_HEALTH_ISSUES", "2"))
+    min_nested_sharpe = float(os.getenv("Q_MIN_NESTED_SHARPE", "0.20"))
+    min_nested_assets = int(os.getenv("Q_MIN_NESTED_ASSETS", "3"))
+    max_shock_rate = float(os.getenv("Q_MAX_SHOCK_RATE", "0.25"))
+    max_conc_hhi_after = float(os.getenv("Q_MAX_CONCENTRATION_HHI_AFTER", "0.18"))
+    max_conc_top1_after = float(os.getenv("Q_MAX_CONCENTRATION_TOP1_AFTER", "0.30"))
+
+    health = _load_json(RUNS / "system_health.json") or {}
+    guards = _load_json(RUNS / "guardrails_summary.json") or {}
+    nested = _load_json(RUNS / "nested_wf_summary.json") or {}
+    quality = _load_json(RUNS / "quality_snapshot.json") or {}
+    immune = _load_json(RUNS / "immune_drill.json") or {}
+    pipeline = _load_json(RUNS / "pipeline_status.json") or {}
+    shock = _load_json(RUNS / "shock_mask_info.json") or {}
+    concentration = _load_json(RUNS / "concentration_governor_info.json") or {}
+    payload = build_alert_payload(
+        health=health,
+        guards=guards,
+        nested=nested,
+        quality=quality,
+        immune=immune,
+        pipeline=pipeline,
+        shock=shock,
+        concentration=concentration,
+        thresholds={
+            "min_health_score": min_health,
+            "min_global_governor_mean": min_global,
+            "min_quality_gov_mean": min_quality_gov,
+            "min_quality_score": min_quality_score,
+            "require_immune_pass": require_immune_pass,
+            "max_health_issues": max_issues,
+            "min_nested_sharpe": min_nested_sharpe,
+            "min_nested_assets": min_nested_assets,
+            "max_shock_rate": max_shock_rate,
+            "max_concentration_hhi_after": max_conc_hhi_after,
+            "max_concentration_top1_after": max_conc_top1_after,
+        },
+    )
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))
     print(f"✅ Wrote {RUNS/'health_alerts.json'}")
-    if issues:
-        print("ALERT:", "; ".join(issues))
+    if payload.get("alerts"):
+        print("ALERT:", "; ".join(payload["alerts"]))
         raise SystemExit(2)
     print("✅ Health alerts clear")

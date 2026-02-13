@@ -76,6 +76,12 @@ This now includes:
 ```
 This runs strict mode (`Q_STRICT=1`) and fails if critical health alerts trigger.
 If your default Python is missing deps, set `Q_PYTHON=/absolute/path/to/venv/bin/python`.
+Extra alert thresholds (optional):
+```bash
+export Q_MAX_SHOCK_RATE=0.25
+export Q_MAX_CONCENTRATION_HHI_AFTER=0.18
+export Q_MAX_CONCENTRATION_TOP1_AFTER=0.30
+```
 
 ### Health artifacts
 - `runs_plus/system_health.json`
