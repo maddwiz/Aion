@@ -81,6 +81,46 @@ def _load_daily_returns():
             return a
     return None
 
+def _load_asset_returns_from_data():
+    data_dir = ROOT / "data"
+    if not data_dir.exists():
+        return None
+    frames = []
+    for p in sorted(data_dir.glob("*.csv")):
+        sym = p.stem.replace("_prices", "").upper().strip()
+        if not sym:
+            continue
+        try:
+            df = pd.read_csv(p)
+        except Exception:
+            continue
+        dcol = None
+        for c in ["date", "Date", "DATE", "timestamp", "Timestamp"]:
+            if c in df.columns:
+                dcol = c
+                break
+        if dcol is None:
+            continue
+        pcol = None
+        for c in ["Adj Close", "adj_close", "AdjClose", "Close", "close", "price", "Price"]:
+            if c in df.columns:
+                pcol = c
+                break
+        if pcol is None:
+            continue
+        dd = pd.DataFrame({"DATE": pd.to_datetime(df[dcol], errors="coerce"), sym: pd.to_numeric(df[pcol], errors="coerce")})
+        dd = dd.dropna(subset=["DATE"]).sort_values("DATE")
+        dd[sym] = dd[sym].pct_change()
+        dd["DATE"] = dd["DATE"].dt.normalize()
+        frames.append(dd[["DATE", sym]])
+    if not frames:
+        return None
+    out = frames[0]
+    for f in frames[1:]:
+        out = out.merge(f, on="DATE", how="outer")
+    out = out.sort_values("DATE").reset_index(drop=True)
+    return out
+
 
 def _append_card(title, html):
     for name in ["report_all.html", "report_best_plus.html", "report_plus.html", "report.html"]:
@@ -150,6 +190,18 @@ if __name__ == "__main__":
     h["DATE"] = pd.to_datetime(h["DATE"], errors="coerce")
     h = h.dropna(subset=["DATE"]).sort_values(["DATE", "HIVE"])
     dates = pd.Series(sorted(h["DATE"].dt.normalize().unique()))
+    asset_ret = _load_asset_returns_from_data()
+    hive_assets = None
+    ha = RUNS / "hive_assets.csv"
+    if ha.exists():
+        try:
+            tmp = pd.read_csv(ha)
+            if {"ASSET", "HIVE"}.issubset(tmp.columns):
+                hive_assets = tmp.copy()
+                hive_assets["ASSET"] = hive_assets["ASSET"].astype(str).str.upper()
+                hive_assets["HIVE"] = hive_assets["HIVE"].astype(str)
+        except Exception:
+            hive_assets = None
 
     pret = _load_portfolio_returns()
     if pret is not None:
@@ -175,12 +227,23 @@ if __name__ == "__main__":
         s["DATE"] = pd.to_datetime(s["DATE"], errors="coerce")
         s = pd.DataFrame({"DATE": dates}).merge(s, on="DATE", how="left").fillna(0.0)
         sig = s["hive_signal"].values.astype(float)
-        pnl = _wf_eval(sig, ret, train=126, test=21, step=21)
+        ret_h = ret
+        ret_source = "portfolio_returns"
+        if asset_ret is not None and hive_assets is not None:
+            aset = hive_assets.loc[hive_assets["HIVE"] == str(hive), "ASSET"].astype(str).str.upper().tolist()
+            aset = [a for a in aset if a in asset_ret.columns]
+            if aset:
+                rr = asset_ret[["DATE"] + aset].copy()
+                rr["ret_h"] = rr[aset].mean(axis=1)
+                rr = pd.DataFrame({"DATE": dates}).merge(rr[["DATE", "ret_h"]], on="DATE", how="left").fillna(0.0)
+                ret_h = rr["ret_h"].values.astype(float)
+                ret_source = f"asset_mean[{len(aset)}]"
+        pnl = _wf_eval(sig, ret_h, train=126, test=21, step=21)
         lag_pos = np.roll(np.tanh(0.7 * sig), 1)
         lag_pos[0] = 0.0
 
         sh = _annualized_sharpe(pnl)
-        hit = float(np.mean(np.sign(lag_pos) == np.sign(ret))) if len(ret) else 0.0
+        hit = float(np.mean(np.sign(lag_pos) == np.sign(ret_h))) if len(ret_h) else 0.0
         mdd = _max_dd(pnl)
         ntr = int(np.sum(np.abs(np.diff(np.sign(lag_pos))) > 0.0))
 
@@ -192,6 +255,7 @@ if __name__ == "__main__":
                 "max_dd": mdd,
                 "trades_proxy": ntr,
                 "mean_pnl": float(np.mean(pnl)) if len(pnl) else 0.0,
+                "ret_source": ret_source,
             }
         )
         oos_frames.append(pd.DataFrame({"DATE": dates, "HIVE": str(hive), "hive_oos_ret": pnl}))
