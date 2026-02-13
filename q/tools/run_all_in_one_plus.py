@@ -217,6 +217,9 @@ if __name__ == "__main__":
         export_args.extend(["--mirror-json", mirror_json])
     ok, rc = run_script("tools/export_aion_signal_pack.py", export_args)
     if not ok and rc is not None: failures.append({"step": "tools/export_aion_signal_pack.py", "code": rc})
+    # Optional cold/meta memory sync bridge (NovaSpine).
+    ok, rc = run_script("tools/sync_novaspine_memory.py")
+    if not ok and rc is not None: failures.append({"step": "tools/sync_novaspine_memory.py", "code": rc})
 
     # ---------- REPORT ----------
     # Many scripts already append cards; try to open the best report file.

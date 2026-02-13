@@ -62,6 +62,7 @@ This now includes:
 - guardrails, governors, councils, meta/synapses, cross-hive, ecosystem
 - reliability-aware quality governor (nested WF + hive WF + council diagnostics)
 - final portfolio assembly + system health + alert gate
+- optional NovaSpine bridge (cold/meta memory sync, async-safe)
 
 ### Strict production cycle
 ```bash
@@ -76,6 +77,8 @@ If your default Python is missing deps, set `Q_PYTHON=/absolute/path/to/venv/bin
 - `runs_plus/pipeline_status.json`
 - `runs_plus/quality_snapshot.json`
 - `runs_plus/execution_constraints_info.json`
+- `runs_plus/novaspine_sync_status.json`
+- `runs_plus/novaspine_last_batch.json`
 
 ### Tests
 ```bash
@@ -96,3 +99,18 @@ You can define live execution limits in `config/execution_constraints.json`
 ```bash
 python tools/run_execution_constraints.py --replace-final
 ```
+
+### NovaSpine bridge (optional, recommended for cold/meta memory)
+Default is disabled (no runtime risk). Enable with env vars:
+```bash
+export C3_MEMORY_ENABLE=1
+export C3_MEMORY_BACKEND=filesystem
+# optional:
+# export C3_MEMORY_NAMESPACE=private/nova/actions
+# export C3_MEMORY_DIR=/absolute/path/to/outbox
+# export C3_MEMORY_BACKEND=http
+# export C3_MEMORY_HTTP_URL=https://your-endpoint.example/v1/events
+# export C3_MEMORY_TOKEN=your_token
+python tools/sync_novaspine_memory.py
+```
+The all-in-one pipeline also runs this bridge automatically.

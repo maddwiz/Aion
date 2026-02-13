@@ -93,6 +93,8 @@ if __name__ == "__main__":
         RUNS / "execution_constraints_info.json",
         RUNS / "q_signal_overlay.json",
         RUNS / "q_signal_overlay.csv",
+        RUNS / "novaspine_sync_status.json",
+        RUNS / "novaspine_last_batch.json",
     ]
 
     checks = []
