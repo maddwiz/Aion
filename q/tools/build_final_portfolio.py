@@ -26,6 +26,7 @@ TRACE_STEPS = [
     "meta_mix_reliability",
     "heartbeat_scaler",
     "legacy_scaler",
+    "dna_stress_governor",
     "dream_coherence",
     "hive_diversification",
     "global_governor",
@@ -185,7 +186,16 @@ if __name__ == "__main__":
         steps.append("legacy_scaler")
         _trace_put("legacy_scaler", ls.ravel())
 
-    # 11) Dream/reflex/symbolic coherence governor.
+    # 11) DNA stress governor from drift/velocity regime diagnostics.
+    dsg = load_series("runs_plus/dna_stress_governor.csv")
+    if dsg is not None:
+        L = min(len(dsg), W.shape[0])
+        ds = np.clip(dsg[:L], 0.70, 1.15).reshape(-1, 1)
+        W[:L] = W[:L] * ds
+        steps.append("dna_stress_governor")
+        _trace_put("dna_stress_governor", ds.ravel())
+
+    # 12) Dream/reflex/symbolic coherence governor.
     dcg = load_series("runs_plus/dream_coherence_governor.csv")
     if dcg is not None:
         L = min(len(dcg), W.shape[0])
@@ -194,7 +204,7 @@ if __name__ == "__main__":
         steps.append("dream_coherence")
         _trace_put("dream_coherence", ds.ravel())
 
-    # 12) Hive diversification governor from ecosystem layer.
+    # 13) Hive diversification governor from ecosystem layer.
     hg = load_series("runs_plus/hive_diversification_governor.csv")
     if hg is not None:
         L = min(len(hg), W.shape[0])
@@ -203,7 +213,7 @@ if __name__ == "__main__":
         steps.append("hive_diversification")
         _trace_put("hive_diversification", hs.ravel())
 
-    # 13) Global governor (regime * stability) from guardrails.
+    # 14) Global governor (regime * stability) from guardrails.
     gg = load_series("runs_plus/global_governor.csv")
     if gg is None:
         rg = load_series("runs_plus/regime_governor.csv")
@@ -222,7 +232,7 @@ if __name__ == "__main__":
         steps.append("global_governor")
         _trace_put("global_governor", g.ravel())
 
-    # 14) Reliability quality governor from nested/hive/council diagnostics.
+    # 15) Reliability quality governor from nested/hive/council diagnostics.
     qg = load_series("runs_plus/quality_governor.csv")
     if qg is not None:
         L = min(len(qg), W.shape[0])
@@ -231,7 +241,7 @@ if __name__ == "__main__":
         steps.append("quality_governor")
         _trace_put("quality_governor", qs.ravel())
 
-    # 15) NovaSpine recall-context boost (if available).
+    # 16) NovaSpine recall-context boost (if available).
     ncb = load_series("runs_plus/novaspine_context_boost.csv")
     if ncb is not None:
         L = min(len(ncb), W.shape[0])
@@ -240,7 +250,7 @@ if __name__ == "__main__":
         steps.append("novaspine_context_boost")
         _trace_put("novaspine_context_boost", nb.ravel())
 
-    # 16) NovaSpine per-hive alignment boost (global projection).
+    # 17) NovaSpine per-hive alignment boost (global projection).
     nhb = load_series("runs_plus/novaspine_hive_boost.csv")
     if nhb is not None:
         L = min(len(nhb), W.shape[0])
@@ -249,7 +259,7 @@ if __name__ == "__main__":
         steps.append("novaspine_hive_boost")
         _trace_put("novaspine_hive_boost", hb.ravel())
 
-    # 17) Shock/news mask exposure cut.
+    # 18) Shock/news mask exposure cut.
     sm = load_series("runs_plus/shock_mask.csv")
     if sm is not None:
         L = min(len(sm), W.shape[0])
@@ -259,7 +269,7 @@ if __name__ == "__main__":
         steps.append("shock_mask_guard")
         _trace_put("shock_mask_guard", sc.ravel())
 
-    # 18) Concentration governor (top1/top3 + HHI caps).
+    # 19) Concentration governor (top1/top3 + HHI caps).
     use_conc = str(os.getenv("Q_USE_CONCENTRATION_GOV", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if use_conc:
         top1 = float(np.clip(float(os.getenv("Q_CONCENTRATION_TOP1_CAP", "0.18")), 0.01, 1.0))
@@ -296,11 +306,11 @@ if __name__ == "__main__":
         comments="",
     )
 
-    # 19) Save final
+    # 20) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 20) Small JSON breadcrumb
+    # 21) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps(
             {
@@ -316,7 +326,7 @@ if __name__ == "__main__":
         )
     )
 
-    # 21) Report card
+    # 22) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 

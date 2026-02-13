@@ -59,6 +59,7 @@ python tools/run_all_in_one_plus.py
 This now includes:
 - symbolic + heartbeat + reflexive generation
 - dream/reflex/symbolic coherence governor
+- DNA drift/stress governor (with returns fallback)
 - shock/news sentinel gating
 - hive build + hive walk-forward diagnostics
 - guardrails, governors, councils, meta/synapses, cross-hive, ecosystem
@@ -100,6 +101,8 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/meta_mix_confidence_raw.csv`
 - `runs_plus/meta_mix_confidence_calibrated.csv`
 - `runs_plus/meta_mix_reliability_governor.csv`
+- `runs_plus/dna_stress_governor.csv`
+- `runs_plus/dna_stress_info.json`
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/final_governor_trace.csv`

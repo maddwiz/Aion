@@ -147,6 +147,9 @@ if __name__ == "__main__":
     if not ok and rc is not None: failures.append({"step": "tools/run_news_sentinel.py", "code": rc})
     ok, rc = run_script("tools/make_heartbeat.py")
     if not ok and rc is not None: failures.append({"step": "tools/make_heartbeat.py", "code": rc})
+    # DNA drift/stress governor (with fallback from returns).
+    ok, rc = run_script("tools/run_dna_governor.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_dna_governor.py", "code": rc})
     ok, rc = run_script("tools/make_reflexive.py")
     if not ok and rc is not None: failures.append({"step": "tools/make_reflexive.py", "code": rc})
     # (E) Build hive signals + per-hive walk-forward diagnostics

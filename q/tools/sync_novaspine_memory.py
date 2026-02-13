@@ -117,6 +117,7 @@ def build_events():
     quality = _load_json(RUNS / "quality_snapshot.json") or {}
     mix = _load_json(RUNS / "meta_mix_info.json") or {}
     dream = _load_json(RUNS / "dream_coherence_info.json") or {}
+    dna = _load_json(RUNS / "dna_stress_info.json") or {}
     cross = _load_json(RUNS / "cross_hive_summary.json") or {}
     eco = _load_json(RUNS / "hive_evolution.json") or {}
     constraints = _load_json(RUNS / "execution_constraints_info.json") or {}
@@ -133,6 +134,7 @@ def build_events():
     gov_trace = _load_series(RUNS / "final_governor_trace.csv")
     hb_stress = _load_series(RUNS / "heartbeat_stress.csv")
     meta_rel = _load_series(RUNS / "meta_mix_reliability_governor.csv")
+    dna_gov = _load_series(RUNS / "dna_stress_governor.csv")
 
     W = _load_matrix(RUNS / "portfolio_weights_final.csv")
     weights_info = {}
@@ -263,6 +265,12 @@ def build_events():
                     "mean_confidence_calibrated": _safe_float((mix or {}).get("mean_confidence_calibrated", 0.0)),
                     "brier_raw": _safe_float((mix or {}).get("brier_raw", 0.0)),
                     "brier_calibrated": _safe_float((mix or {}).get("brier_calibrated", 0.0)),
+                },
+                "dna_stress": {
+                    "status": str((dna or {}).get("status", "na")) if isinstance(dna, dict) else "na",
+                    "mean_stress": _safe_float((dna or {}).get("mean_stress", 0.0)),
+                    "max_stress": _safe_float((dna or {}).get("max_stress", 0.0)),
+                    "mean_governor": float(np.mean(dna_gov)) if dna_gov is not None and len(dna_gov) else None,
                 },
                 "final_steps": list((final_info or {}).get("steps", []) or []),
                 "pipeline_failed_count": int((pipeline or {}).get("failed_count", 0)),

@@ -104,6 +104,7 @@ if __name__ == "__main__":
     eco = _load_json(RUNS / "hive_evolution.json") or {}
     shock_info = _load_json(RUNS / "shock_mask_info.json") or {}
     dream_info = _load_json(RUNS / "dream_coherence_info.json") or {}
+    dna_info = _load_json(RUNS / "dna_stress_info.json") or {}
 
     hive_sh = None
     hive_hit = None
@@ -223,6 +224,13 @@ if __name__ == "__main__":
             dream_q = None
     except Exception:
         dream_q = None
+    dna_q = None
+    try:
+        ms = float(dna_info.get("mean_stress", np.nan))
+        if np.isfinite(ms):
+            dna_q = float(np.clip(1.0 - ms, 0.0, 1.0))
+    except Exception:
+        dna_q = None
 
     # Blend across subsystems, using whatever is available.
     quality, quality_detail = blend_quality(
@@ -231,6 +239,7 @@ if __name__ == "__main__":
             "hive_wf": (hive_q, 0.23),
             "council": (council_q, 0.20),
             "dream_coherence": (dream_q, 0.10),
+            "dna_stress": (dna_q, 0.08),
             "system_health": (health_q, 0.13),
             "ecosystem": (eco_q, 0.07),
             "shock_env": (shock_q, 0.05),
@@ -302,6 +311,13 @@ if __name__ == "__main__":
         dn = np.clip((np.asarray(dcg[:L], float) - 0.70) / (1.15 - 0.70 + 1e-9), 0.0, 1.0)
         runtime_mod[:L] *= np.clip(0.88 + 0.24 * dn, 0.78, 1.12)
 
+    # DNA stress governor modifier.
+    dsg = _load_series(RUNS / "dna_stress_governor.csv")
+    if dsg is not None and len(dsg):
+        L = min(T, len(dsg))
+        ds = np.clip(np.asarray(dsg[:L], float), 0.70, 1.15)
+        runtime_mod[:L] *= np.clip(ds, 0.75, 1.12)
+
     qg = np.clip(qg * runtime_mod, 0.55, 1.15)
     if len(qg) > 1:
         for t in range(1, len(qg)):
@@ -322,6 +338,7 @@ if __name__ == "__main__":
             "hive_wf": {"score": float(hive_q), "detail": hive_detail},
             "council": {"score": float(council_q), "detail": council_detail},
             "dream_coherence": {"score": float(dream_q) if dream_q is not None else None},
+            "dna_stress": {"score": float(dna_q) if dna_q is not None else None},
             "ecosystem": {"score": float(eco_q) if eco_q is not None else None},
             "shock_env": {"score": float(shock_q) if shock_q is not None else None},
             "system_health": {"score": float(health_q)},
@@ -341,6 +358,8 @@ if __name__ == "__main__":
             "shock_mask": (RUNS / "shock_mask.csv").exists(),
             "dream_coherence_info": (RUNS / "dream_coherence_info.json").exists(),
             "dream_coherence_governor": (RUNS / "dream_coherence_governor.csv").exists(),
+            "dna_stress_info": (RUNS / "dna_stress_info.json").exists(),
+            "dna_stress_governor": (RUNS / "dna_stress_governor.csv").exists(),
             "system_health": (RUNS / "system_health.json").exists(),
             "novaspine_context": (RUNS / "novaspine_context.json").exists(),
         },
