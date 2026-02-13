@@ -60,6 +60,7 @@ This now includes:
 - symbolic + heartbeat + reflexive generation
 - hive build + hive walk-forward diagnostics
 - guardrails, governors, councils, meta/synapses, cross-hive, ecosystem
+- reliability-aware quality governor (nested WF + hive WF + council diagnostics)
 - final portfolio assembly + system health + alert gate
 
 ### Strict production cycle
@@ -67,11 +68,13 @@ This now includes:
 ./tools/run_prod_cycle.sh
 ```
 This runs strict mode (`Q_STRICT=1`) and fails if critical health alerts trigger.
+If your default Python is missing deps, set `Q_PYTHON=/absolute/path/to/venv/bin/python`.
 
 ### Health artifacts
 - `runs_plus/system_health.json`
 - `runs_plus/health_alerts.json`
 - `runs_plus/pipeline_status.json`
+- `runs_plus/quality_snapshot.json`
 - `runs_plus/execution_constraints_info.json`
 
 ### Tests

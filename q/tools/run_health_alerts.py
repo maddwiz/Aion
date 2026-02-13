@@ -32,6 +32,8 @@ def _load_json(path: Path):
 if __name__ == "__main__":
     min_health = float(os.getenv("Q_MIN_HEALTH_SCORE", "70"))
     min_global = float(os.getenv("Q_MIN_GLOBAL_GOV_MEAN", "0.45"))
+    min_quality_gov = float(os.getenv("Q_MIN_QUALITY_GOV_MEAN", "0.60"))
+    min_quality_score = float(os.getenv("Q_MIN_QUALITY_SCORE", "0.45"))
     max_issues = int(os.getenv("Q_MAX_HEALTH_ISSUES", "2"))
     min_nested_sharpe = float(os.getenv("Q_MIN_NESTED_SHARPE", "0.20"))
     min_nested_assets = int(os.getenv("Q_MIN_NESTED_ASSETS", "3"))
@@ -39,6 +41,7 @@ if __name__ == "__main__":
     health = _load_json(RUNS / "system_health.json") or {}
     guards = _load_json(RUNS / "guardrails_summary.json") or {}
     nested = _load_json(RUNS / "nested_wf_summary.json") or {}
+    quality = _load_json(RUNS / "quality_snapshot.json") or {}
     pipeline = _load_json(RUNS / "pipeline_status.json") or {}
     issues = []
 
@@ -72,6 +75,21 @@ if __name__ == "__main__":
     if n_assets is not None and n_sh is not None and n_assets >= min_nested_assets and n_sh < min_nested_sharpe:
         issues.append(f"nested_wf_sharpe<{min_nested_sharpe} ({n_sh:.3f}) over {n_assets} assets")
 
+    q_mean = quality.get("quality_governor_mean", None)
+    q_score = quality.get("quality_score", None)
+    try:
+        q_mean = float(q_mean) if q_mean is not None else None
+    except Exception:
+        q_mean = None
+    try:
+        q_score = float(q_score) if q_score is not None else None
+    except Exception:
+        q_score = None
+    if q_mean is not None and q_mean < min_quality_gov:
+        issues.append(f"quality_governor_mean<{min_quality_gov} ({q_mean:.3f})")
+    if q_score is not None and q_score < min_quality_score:
+        issues.append(f"quality_score<{min_quality_score} ({q_score:.3f})")
+
     failed_steps = int(pipeline.get("failed_count", 0)) if isinstance(pipeline, dict) else 0
     if failed_steps > 0:
         issues.append(f"pipeline_failed_steps={failed_steps}")
@@ -82,6 +100,8 @@ if __name__ == "__main__":
             "min_health_score": min_health,
             "max_health_issues": max_issues,
             "min_global_governor_mean": min_global,
+            "min_quality_governor_mean": min_quality_gov,
+            "min_quality_score": min_quality_score,
             "min_nested_sharpe": min_nested_sharpe,
             "min_nested_assets": min_nested_assets,
         },
@@ -89,6 +109,8 @@ if __name__ == "__main__":
             "health_score": score,
             "health_issues": n_issues,
             "global_governor_mean": gmean,
+            "quality_governor_mean": q_mean,
+            "quality_score": q_score,
             "nested_assets": n_assets,
             "nested_avg_oos_sharpe": n_sh,
             "pipeline_failed_steps": failed_steps,

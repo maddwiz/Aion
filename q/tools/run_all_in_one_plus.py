@@ -19,10 +19,45 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
 
-PY = sys.executable  # use current venv python
+PY = sys.executable  # may be overridden by dependency-aware selector.
 
 def exists(fp: Path) -> bool:
     return fp.exists()
+
+
+def _python_has_core_deps(py_exec: str) -> bool:
+    code = "import importlib.util as u;import sys;sys.exit(0 if u.find_spec('numpy') and u.find_spec('pandas') else 1)"
+    try:
+        cp = subprocess.run([py_exec, "-c", code], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return cp.returncode == 0
+    except Exception:
+        return False
+
+
+def select_python() -> str | None:
+    # Prefer current interpreter if deps exist.
+    cur = str(sys.executable)
+    if _python_has_core_deps(cur):
+        return cur
+
+    # Then try explicit override + common venv locations.
+    candidates = []
+    env_py = os.getenv("Q_PYTHON", "").strip()
+    if env_py:
+        candidates.append(env_py)
+    candidates.extend(
+        [
+            str(ROOT / ".venv" / "bin" / "python"),
+            str(ROOT.parent / ".venv" / "bin" / "python"),
+        ]
+    )
+    for c in candidates:
+        p = Path(c)
+        if not p.exists() or not p.is_file():
+            continue
+        if _python_has_core_deps(str(p)):
+            return str(p)
+    return None
 
 def run_script(relpath: str, args=None):
     """Run a Python script if it exists. Returns (ok, returncode)."""
@@ -65,15 +100,30 @@ def try_open_report():
 def ensure_env():
     # make sure PYTHONPATH includes project root
     os.environ.setdefault("PYTHONPATH", str(ROOT))
+    global PY
+    selected = select_python()
+    if selected is None:
+        print("(!) Missing numpy/pandas in current Python and no valid venv found.")
+        print("    Set Q_PYTHON to a working interpreter, e.g.:")
+        print("    Q_PYTHON=/absolute/path/to/venv/bin/python python tools/run_all_in_one_plus.py")
+        return False
+    if selected != PY:
+        print(f"↺ switching python interpreter to {selected}")
+    PY = selected
     # friendly echo
     print(f"PYTHON     : {PY}")
     print(f"PROJECT    : {ROOT}")
     print(f"PYTHONPATH : {os.environ.get('PYTHONPATH')}")
+    return True
 
 if __name__ == "__main__":
-    ensure_env()
     strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if not ensure_env():
+        write_pipeline_status([{"step": "env_preflight", "code": 2}], strict_mode=strict)
+        raise SystemExit(2)
     failures = []
+    # Reset status at run start so alert checks do not read stale failures.
+    write_pipeline_status([], strict_mode=strict)
 
     # ---------- PHASE 0: Primers / basics ----------
     # (A) Lightweight nested WF summary (scaffold)
@@ -146,12 +196,20 @@ if __name__ == "__main__":
     # Legacy smooth scaler from DNA/heartbeat/symbolic/reflexive layers
     ok, rc = run_script("tools/tune_legacy_knobs.py")
     if not ok and rc is not None: failures.append({"step": "tools/tune_legacy_knobs.py", "code": rc})
+    # Quality governor from nested/hive/council/system diagnostics
+    ok, rc = run_script("tools/run_quality_governor.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_quality_governor.py", "code": rc})
     # Assemble final portfolio weights from available layers
     ok, rc = run_script("tools/build_final_portfolio.py")
     if not ok and rc is not None: failures.append({"step": "tools/build_final_portfolio.py", "code": rc})
     # Apply execution constraints for live realism
     ok, rc = run_script("tools/run_execution_constraints.py", ["--replace-final"])
     if not ok and rc is not None: failures.append({"step": "tools/run_execution_constraints.py", "code": rc})
+    # Emit a health snapshot for unattended operation
+    ok, rc = run_script("tools/run_system_health.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_system_health.py", "code": rc})
+    ok, rc = run_script("tools/run_health_alerts.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_health_alerts.py", "code": rc})
     # Export Q overlay pack for AION consumption (safe degraded mode if needed)
     export_args = []
     mirror_json = str(os.getenv("Q_EXPORT_MIRROR_JSON", "")).strip()
@@ -159,11 +217,6 @@ if __name__ == "__main__":
         export_args.extend(["--mirror-json", mirror_json])
     ok, rc = run_script("tools/export_aion_signal_pack.py", export_args)
     if not ok and rc is not None: failures.append({"step": "tools/export_aion_signal_pack.py", "code": rc})
-    # Emit a health snapshot for unattended operation
-    ok, rc = run_script("tools/run_system_health.py")
-    if not ok and rc is not None: failures.append({"step": "tools/run_system_health.py", "code": rc})
-    ok, rc = run_script("tools/run_health_alerts.py")
-    if not ok and rc is not None: failures.append({"step": "tools/run_health_alerts.py", "code": rc})
 
     # ---------- REPORT ----------
     # Many scripts already append cards; try to open the best report file.

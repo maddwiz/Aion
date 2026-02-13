@@ -76,6 +76,7 @@ if __name__ == "__main__":
         RUNS / "portfolio_weights_final.csv",
         RUNS / "meta_mix.csv",
         RUNS / "global_governor.csv",
+        RUNS / "quality_governor.csv",
         RUNS / "heartbeat_exposure_scaler.csv",
         RUNS / "legacy_exposure.csv",
         RUNS / "cross_hive_weights.csv",
@@ -118,6 +119,7 @@ if __name__ == "__main__":
     daily = _load_series(RUNS / "daily_returns.csv")
     gov = _load_series(RUNS / "global_governor.csv")
     hive_gov = _load_series(RUNS / "hive_diversification_governor.csv")
+    quality_gov = _load_series(RUNS / "quality_governor.csv")
 
     shape = {}
     if w is not None:
@@ -132,6 +134,9 @@ if __name__ == "__main__":
     if hive_gov is not None:
         shape["hive_governor_rows"] = int(len(hive_gov))
         shape["hive_governor_mean"] = float(np.mean(hive_gov))
+    if quality_gov is not None:
+        shape["quality_governor_rows"] = int(len(quality_gov))
+        shape["quality_governor_mean"] = float(np.mean(quality_gov))
 
     # Alignment diagnostics
     issues = []

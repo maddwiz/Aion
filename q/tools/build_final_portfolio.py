@@ -2,7 +2,7 @@
 # Final portfolio assembler:
 # Picks best base weights then applies (if available):
 #   cluster caps → adaptive caps → drawdown scaler → turnover governor
-#   → council gate → council/meta leverage → heartbeat/legacy/hive/global governors
+#   → council gate → council/meta leverage → heartbeat/legacy/hive/global/quality governors
 # Outputs:
 #   runs_plus/portfolio_weights_final.csv
 # Appends a card to report_*.
@@ -167,16 +167,24 @@ if __name__ == "__main__":
         W[:L] = W[:L] * g
         steps.append("global_governor")
 
-    # 12) Save final
+    # 12) Reliability quality governor from nested/hive/council diagnostics.
+    qg = load_series("runs_plus/quality_governor.csv")
+    if qg is not None:
+        L = min(len(qg), W.shape[0])
+        qs = np.clip(qg[:L], 0.45, 1.20).reshape(-1, 1)
+        W[:L] = W[:L] * qs
+        steps.append("quality_governor")
+
+    # 13) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 13) Small JSON breadcrumb
+    # 14) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps({"steps": steps, "T": int(T), "N": int(N)}, indent=2)
     )
 
-    # 14) Report card
+    # 15) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 

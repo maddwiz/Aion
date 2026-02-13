@@ -31,6 +31,45 @@ def append_card(title, html):
         p.write_text(txt, encoding="utf-8")
         print(f"✅ Appended card to {name}")
 
+
+def dynamic_quality_multipliers(index_dates, hives):
+    """
+    Build DATE x HIVE multipliers from hive_wf_oos_returns.csv rolling quality.
+    Returns DataFrame indexed by DATE with hive columns, values in [0.70, 1.40].
+    """
+    p = RUNS / "hive_wf_oos_returns.csv"
+    idx = pd.DatetimeIndex(index_dates)
+    out = pd.DataFrame(index=idx, columns=list(hives), data=1.0, dtype=float)
+    if not p.exists():
+        return out
+    try:
+        df = pd.read_csv(p)
+    except Exception:
+        return out
+    need = {"DATE", "HIVE", "hive_oos_ret"}
+    if not need.issubset(df.columns):
+        return out
+    df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
+    df = df.dropna(subset=["DATE"]).sort_values(["DATE", "HIVE"])
+    if df.empty:
+        return out
+
+    for hive, g in df.groupby("HIVE"):
+        hname = str(hive)
+        if hname not in out.columns:
+            continue
+        rr = pd.to_numeric(g["hive_oos_ret"], errors="coerce").fillna(0.0).values.astype(float)
+        dates = pd.to_datetime(g["DATE"], errors="coerce")
+        if len(rr) < 8:
+            continue
+        s = pd.Series(rr, index=dates)
+        mu = s.rolling(63, min_periods=15).mean()
+        sd = s.rolling(63, min_periods=15).std(ddof=1).replace(0.0, np.nan)
+        sh = (mu / (sd + 1e-12)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        mult = np.clip(1.0 + 0.25 * np.tanh(sh / 1.5), 0.70, 1.40)
+        out[hname] = mult.reindex(idx).ffill().fillna(1.0).values
+    return out
+
 if __name__ == "__main__":
     p = RUNS / "hive_signals.csv"
     if not p.exists():
@@ -81,7 +120,7 @@ if __name__ == "__main__":
         dg_pen[str(hive)] = np.nan_to_num(disagree[hive].values, nan=0.0)
         np.savetxt(RUNS / f"hive_score_{hive}.csv", scores[str(hive)], delimiter=",")
 
-    # Optional quality priors from per-hive walk-forward metrics.
+    # Optional static quality priors from per-hive walk-forward metrics.
     priors = {}
     m = RUNS / "hive_wf_metrics.csv"
     if m.exists():
@@ -99,6 +138,16 @@ if __name__ == "__main__":
         for hive in list(scores.keys()):
             mult = float(priors.get(hive, 1.0))
             scores[hive] = scores[hive] * mult
+
+    # Optional dynamic quality multipliers from per-hive OOS streams.
+    dyn_mult = dynamic_quality_multipliers(pivot_sig.index, pivot_sig.columns.tolist())
+    dyn_means = {}
+    if len(dyn_mult):
+        for hive in list(scores.keys()):
+            if hive in dyn_mult.columns:
+                mvec = np.asarray(dyn_mult[hive].values, float)
+                scores[hive] = scores[hive] * np.nan_to_num(mvec, nan=1.0, posinf=1.0, neginf=1.0)
+                dyn_means[hive] = float(np.mean(mvec))
 
     alpha = float(np.clip(float(os.getenv("CROSS_HIVE_ALPHA", "2.2")), 0.2, 10.0))
     inertia = float(np.clip(float(os.getenv("CROSS_HIVE_INERTIA", "0.80")), 0.0, 0.98))
@@ -131,6 +180,7 @@ if __name__ == "__main__":
         "min_weight": min_w,
         "mean_turnover": turn,
         "quality_priors": {k: float(v) for k, v in priors.items()},
+        "dynamic_quality_multiplier_mean": dyn_means,
         "date_min": str(out["DATE"].min().date()) if len(out) else None,
         "date_max": str(out["DATE"].max().date()) if len(out) else None,
         "latest_weights": {k: float(out.iloc[-1][k]) for k in names} if len(out) else {},

@@ -103,6 +103,58 @@ def _load_signal(path, sig_col, rename_to):
     out["ASSET"] = out["ASSET"].astype(str).str.upper()
     return out
 
+def _build_market_asset_from_data():
+    data_dir = ROOT / "data"
+    if not data_dir.exists():
+        return pd.DataFrame(columns=["DATE", "ASSET", "sym", "reflex"])
+    frames = []
+    for p in sorted(data_dir.glob("*.csv")):
+        sym = str(p.stem).replace("_prices", "").upper().strip()
+        if not sym:
+            continue
+        try:
+            df = pd.read_csv(p)
+        except Exception:
+            continue
+        dcol = None
+        for c in ["DATE", "Date", "date", "timestamp", "Timestamp"]:
+            if c in df.columns:
+                dcol = c
+                break
+        if dcol is None:
+            continue
+        pcol = None
+        for c in ["Adj Close", "adj_close", "AdjClose", "Close", "close", "price", "Price"]:
+            if c in df.columns:
+                pcol = c
+                break
+        if pcol is None:
+            continue
+        d = pd.DataFrame(
+            {
+                "DATE": pd.to_datetime(df[dcol], errors="coerce"),
+                "px": pd.to_numeric(df[pcol], errors="coerce"),
+            }
+        ).dropna(subset=["DATE", "px"]).sort_values("DATE")
+        if len(d) < 30:
+            continue
+        r = d["px"].pct_change().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        mom5 = r.rolling(5, min_periods=2).mean()
+        vol21 = r.rolling(21, min_periods=5).std(ddof=1).replace(0.0, np.nan)
+        sig = np.tanh((mom5 / (vol21 + 1e-12)).fillna(0.0))
+        out = pd.DataFrame(
+            {
+                "DATE": d["DATE"].dt.normalize(),
+                "ASSET": sym,
+                "sym": sig.values.astype(float),
+                "reflex": sig.values.astype(float),
+            }
+        )
+        frames.append(out)
+    if not frames:
+        return pd.DataFrame(columns=["DATE", "ASSET", "sym", "reflex"])
+    return pd.concat(frames, ignore_index=True).sort_values(["DATE", "ASSET"])
+
 def run_hive():
     RUNS.mkdir(parents=True, exist_ok=True)
     HIVES_DIR.mkdir(parents=True, exist_ok=True)
@@ -110,22 +162,38 @@ def run_hive():
     # Load signals
     sym = _load_signal(RUNS/"symbolic_signal.csv", "sym_signal", "sym")
     ref = _load_signal(RUNS/"reflexive_signal.csv", "reflex_signal", "reflex")
+    mkt = _build_market_asset_from_data()
 
     # Merge to a per-asset meta signal
     if sym.empty and ref.empty:
-        # Still write shells
-        pd.DataFrame(columns=["DATE","HIVE","hive_signal","sym","reflex","n_assets"]).to_csv(RUNS/"hive_signals.csv", index=False)
-        summary = {"hives": [], "date_min": None, "date_max": None, "rows": 0, "top_recent": [], "notes":"no symbolic/reflexive data"}
-        (RUNS/"hive_summary.json").write_text(json.dumps(summary, indent=2))
-        pd.DataFrame(columns=["ASSET","HIVE"]).to_csv(RUNS/"hive_assets.csv", index=False)
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), summary
+        aset = mkt.copy()
+        if aset.empty:
+            # Still write shells
+            pd.DataFrame(columns=["DATE","HIVE","hive_signal","sym","reflex","n_assets"]).to_csv(RUNS/"hive_signals.csv", index=False)
+            summary = {"hives": [], "date_min": None, "date_max": None, "rows": 0, "top_recent": [], "notes":"no symbolic/reflexive/data signals"}
+            (RUNS/"hive_summary.json").write_text(json.dumps(summary, indent=2))
+            pd.DataFrame(columns=["ASSET","HIVE"]).to_csv(RUNS/"hive_assets.csv", index=False)
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), summary
 
-    if sym.empty:
+    elif sym.empty:
         aset = ref.copy(); aset["sym"] = np.nan
     elif ref.empty:
         aset = sym.copy(); aset["reflex"] = np.nan
     else:
         aset = pd.merge(sym, ref, on=["DATE","ASSET"], how="outer").sort_values(["DATE","ASSET"])
+
+    # Enrich sparse symbolic/reflexive coverage with market-derived signals.
+    if not mkt.empty:
+        aset = aset.merge(
+            mkt.rename(columns={"sym": "sym_mkt", "reflex": "reflex_mkt"}),
+            on=["DATE", "ASSET"],
+            how="outer",
+        )
+        aset["sym"] = pd.to_numeric(aset.get("sym"), errors="coerce")
+        aset["reflex"] = pd.to_numeric(aset.get("reflex"), errors="coerce")
+        aset["sym"] = aset["sym"].fillna(pd.to_numeric(aset.get("sym_mkt"), errors="coerce"))
+        aset["reflex"] = aset["reflex"].fillna(pd.to_numeric(aset.get("reflex_mkt"), errors="coerce"))
+        aset.drop(columns=["sym_mkt", "reflex_mkt"], errors="ignore", inplace=True)
 
     # Combined per-asset signal: mean of available parts, bounded
     aset["meta_signal"] = aset[["sym","reflex"]].mean(axis=1)
