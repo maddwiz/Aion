@@ -8,6 +8,7 @@
 # Appends a report card.
 
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -80,20 +81,47 @@ if __name__ == "__main__":
         dg_pen[str(hive)] = np.nan_to_num(disagree[hive].values, nan=0.0)
         np.savetxt(RUNS / f"hive_score_{hive}.csv", scores[str(hive)], delimiter=",")
 
-    names, W = arb_weights(scores, alpha=2.2, drawdown_penalty=dd_pen, disagreement_penalty=dg_pen)
+    alpha = float(np.clip(float(os.getenv("CROSS_HIVE_ALPHA", "2.2")), 0.2, 10.0))
+    inertia = float(np.clip(float(os.getenv("CROSS_HIVE_INERTIA", "0.80")), 0.0, 0.98))
+    max_w = float(np.clip(float(os.getenv("CROSS_HIVE_MAX_W", "0.65")), 0.10, 1.0))
+    min_w = float(np.clip(float(os.getenv("CROSS_HIVE_MIN_W", "0.02")), 0.0, 0.30))
+
+    names, W = arb_weights(
+        scores,
+        alpha=alpha,
+        drawdown_penalty=dd_pen,
+        disagreement_penalty=dg_pen,
+        inertia=inertia,
+        max_weight=max_w,
+        min_weight=min_w,
+    )
     out = pd.DataFrame(W, index=pivot_sig.index, columns=names).reset_index().rename(columns={"index": "DATE"})
     out.to_csv(RUNS / "cross_hive_weights.csv", index=False)
+
+    if len(out) > 1 and len(names) > 0:
+        turn = float(np.mean(np.sum(np.abs(np.diff(W, axis=0)), axis=1)))
+    else:
+        turn = 0.0
 
     summary = {
         "hives": names,
         "rows": int(len(out)),
+        "alpha": alpha,
+        "inertia": inertia,
+        "max_weight": max_w,
+        "min_weight": min_w,
+        "mean_turnover": turn,
         "date_min": str(out["DATE"].min().date()) if len(out) else None,
         "date_max": str(out["DATE"].max().date()) if len(out) else None,
         "latest_weights": {k: float(out.iloc[-1][k]) for k in names} if len(out) else {},
     }
     (RUNS / "cross_hive_summary.json").write_text(json.dumps(summary, indent=2))
 
-    html = f"<p>Cross-hive weights over {len(names)} hives saved to cross_hive_weights.csv</p><p>Latest: {summary['latest_weights']}</p>"
+    html = (
+        f"<p>Cross-hive weights over {len(names)} hives saved to cross_hive_weights.csv</p>"
+        f"<p>Latest: {summary['latest_weights']}</p>"
+        f"<p>alpha={alpha:.2f}, inertia={inertia:.2f}, turnover={turn:.4f}</p>"
+    )
     append_card("Cross-Hive Arbitration ✔", html)
     print(f"✅ Wrote {RUNS/'cross_hive_weights.csv'}")
     print(f"✅ Wrote {RUNS/'cross_hive_summary.json'}")
