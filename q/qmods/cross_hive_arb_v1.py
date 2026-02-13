@@ -18,6 +18,19 @@ def _as_time_array(x, T: int, lo: float, hi: float, default: float) -> np.ndarra
     return np.clip(arr, lo, hi).astype(float)
 
 
+def _entropy_norm(w: np.ndarray) -> float:
+    a = np.asarray(w, float).ravel()
+    if len(a) <= 1:
+        return 1.0
+    a = np.clip(a, 0.0, None)
+    s = float(np.sum(a))
+    if s <= 0:
+        return 1.0
+    p = a / s
+    h = -np.sum(np.where(p > 0.0, p * np.log(p), 0.0))
+    return float(np.clip(h / np.log(len(p)), 0.0, 1.0))
+
+
 def arb_weights(
     hive_scores: dict,
     alpha=2.0,
@@ -26,6 +39,8 @@ def arb_weights(
     inertia: float = 0.80,
     max_weight: float = 0.70,
     min_weight: float = 0.00,
+    entropy_target: float | None = None,
+    entropy_strength: float = 0.0,
 ):
     """
     Softmax allocation over hives based on standardized health scores with penalties,
@@ -76,6 +91,21 @@ def arb_weights(
             wrow = inertia_t[t] * W[t - 1] + (1.0 - inertia_t[t]) * wrow
             wrow = np.clip(wrow, 0.0, None)
             wrow = wrow / (wrow.sum() + 1e-9)
+
+        # Entropy-aware diversification: if concentration gets too high,
+        # blend toward uniform to keep cross-hive exploration alive.
+        if entropy_target is not None:
+            et = float(np.clip(entropy_target, 0.0, 1.0))
+            es = float(np.clip(entropy_strength, 0.0, 1.0))
+            if et > 0.0 and es > 0.0 and len(wrow) > 1:
+                hcur = _entropy_norm(wrow)
+                if hcur < et:
+                    lam = es * (et - hcur) / max(et, 1e-9)
+                    lam = float(np.clip(lam, 0.0, es))
+                    uni = np.full_like(wrow, 1.0 / len(wrow))
+                    wrow = (1.0 - lam) * wrow + lam * uni
+                    wrow = np.clip(wrow, mn, mx)
+                    wrow = wrow / (wrow.sum() + 1e-9)
 
         W[t] = wrow
     return names, W

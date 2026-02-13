@@ -55,3 +55,26 @@ def test_arb_weights_accepts_time_varying_alpha_and_inertia():
     assert W.shape == (T, 3)
     assert np.isfinite(W).all()
     assert np.allclose(W.sum(axis=1), 1.0, atol=1e-6)
+
+
+def test_arb_weights_entropy_control_reduces_concentration():
+    T = 140
+    x = np.linspace(0.0, 12.0, T)
+    scores = {
+        "A": 1.8 * np.sin(x) + 0.3 * np.sin(2.3 * x),
+        "B": 1.5 * np.cos(0.9 * x) - 0.2 * np.sin(1.7 * x),
+        "C": -1.2 * np.sin(1.1 * x) + 0.4 * np.cos(1.9 * x),
+    }
+    _, w_base = arb_weights(scores, alpha=4.0, inertia=0.0, min_weight=0.0, max_weight=1.0)
+    _, w_div = arb_weights(
+        scores,
+        alpha=4.0,
+        inertia=0.0,
+        min_weight=0.0,
+        max_weight=1.0,
+        entropy_target=0.70,
+        entropy_strength=0.8,
+    )
+    hhi_base = float(np.mean(np.sum(w_base * w_base, axis=1)))
+    hhi_div = float(np.mean(np.sum(w_div * w_div, axis=1)))
+    assert hhi_div < hhi_base

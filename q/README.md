@@ -195,6 +195,8 @@ Cross-hive adaptive arbitration:
 export CROSS_HIVE_ADAPTIVE=1
 export CROSS_HIVE_ALPHA=2.2
 export CROSS_HIVE_INERTIA=0.80
+export CROSS_HIVE_ENTROPY_TARGET=0.60
+export CROSS_HIVE_ENTROPY_STRENGTH=0.25
 ```
 Synapses ensemble fusion:
 ```bash

@@ -139,6 +139,19 @@ def _load_series(path: Path):
     return a.ravel()
 
 
+def _entropy_norm(w: np.ndarray) -> float:
+    a = np.asarray(w, float).ravel()
+    if len(a) <= 1:
+        return 1.0
+    a = np.clip(a, 0.0, None)
+    s = float(np.sum(a))
+    if s <= 0:
+        return 1.0
+    p = a / s
+    h = -np.sum(np.where(p > 0.0, p * np.log(p), 0.0))
+    return float(np.clip(h / np.log(len(p)), 0.0, 1.0))
+
+
 def adaptive_arb_schedules(base_alpha, base_inertia, pivot_stab):
     """
     Build adaptive alpha/inertia schedules from hive disagreement + council divergence.
@@ -282,6 +295,8 @@ if __name__ == "__main__":
     inertia = float(np.clip(float(os.getenv("CROSS_HIVE_INERTIA", "0.80")), 0.0, 0.98))
     max_w = float(np.clip(float(os.getenv("CROSS_HIVE_MAX_W", "0.65")), 0.10, 1.0))
     min_w = float(np.clip(float(os.getenv("CROSS_HIVE_MIN_W", "0.02")), 0.0, 0.30))
+    entropy_target = float(np.clip(float(os.getenv("CROSS_HIVE_ENTROPY_TARGET", "0.60")), 0.0, 1.0))
+    entropy_strength = float(np.clip(float(os.getenv("CROSS_HIVE_ENTROPY_STRENGTH", "0.25")), 0.0, 1.0))
     adaptive = str(os.getenv("CROSS_HIVE_ADAPTIVE", "1")).strip().lower() in {"1", "true", "yes", "on"}
 
     if adaptive:
@@ -298,6 +313,8 @@ if __name__ == "__main__":
         inertia=inertia_sched,
         max_weight=max_w,
         min_weight=min_w,
+        entropy_target=entropy_target,
+        entropy_strength=entropy_strength,
     )
     out = pd.DataFrame(W, index=pivot_sig.index, columns=names)
     if adaptive and len(out) == len(alpha_sched):
@@ -310,6 +327,7 @@ if __name__ == "__main__":
         turn = float(np.mean(np.sum(np.abs(np.diff(W, axis=0)), axis=1)))
     else:
         turn = 0.0
+    ent = float(np.mean([_entropy_norm(r) for r in W])) if len(W) else None
 
     summary = {
         "hives": names,
@@ -320,6 +338,9 @@ if __name__ == "__main__":
         "adaptive_diagnostics": adaptive_diag,
         "max_weight": max_w,
         "min_weight": min_w,
+        "entropy_target": entropy_target,
+        "entropy_strength": entropy_strength,
+        "mean_entropy_norm": ent,
         "mean_turnover": turn,
         "quality_priors": {k: float(v) for k, v in priors.items()},
         "dynamic_quality_multiplier_mean": dyn_means,
