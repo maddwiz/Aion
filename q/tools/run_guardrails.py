@@ -19,6 +19,8 @@ from qmods.guardrails_bundle import (
     apply_turnover_governor,
     disagreement_gate,
     parameter_stability_filter,
+    regime_governor_from_returns,
+    stability_governor,
     turnover_cost_penalty,
 )
 from qmods.drawdown_floor import drawdown_floor_series
@@ -47,6 +49,32 @@ def _load_first_non_none(paths):
             return a
     return None
 
+def _as_series_last_col(a):
+    if a is None:
+        return None
+    x = np.asarray(a, float)
+    if x.ndim == 2:
+        x = x[:, -1]
+    return x.ravel()
+
+def _load_named_numeric_col(path: Path, colname: str):
+    if not path.exists():
+        return None
+    vals = []
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            rdr = csv.DictReader(f)
+            if colname not in (rdr.fieldnames or []):
+                return None
+            for row in rdr:
+                try:
+                    vals.append(float(row.get(colname, "")))
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    return np.asarray(vals, float).ravel() if vals else None
+
 def _append_report_card(title, html):
     for name in ["report_all.html", "report_best_plus.html", "report_plus.html", "report.html"]:
         p = ROOT / name
@@ -71,6 +99,7 @@ def main():
 
     # 2) Turnover cost + turnover governor — portfolio_weights.csv (T x N)
     wts = _load_first_non_none([ROOT/"portfolio_weights.csv", RUNS/"portfolio_weights.csv"])
+    wts_for_stability = None
     if wts is not None and wts.shape[0] > 2:
         fee_bps = 5.0
         max_step = float(np.clip(float(os.getenv("TURNOVER_MAX_STEP", "0.35")), 0.0, 10.0))
@@ -90,8 +119,11 @@ def main():
             "turnover_scale_mean": mean_scale,
             "turnover_max_step": max_step,
         }
+        wts_for_stability = gov.weights
     else:
         cost = {"note": "portfolio_weights.csv not found; skipped"}
+        if wts is not None:
+            wts_for_stability = wts
 
     # 3) Council disagreement gate — runs_plus/council_votes.csv (T x K)
     votes = _maybe_load_csv(RUNS/"council_votes.csv")
@@ -118,7 +150,69 @@ def main():
     else:
         dd_out = {"note": "cum_pnl.csv or weights missing; skipped"}
 
-    out = {"stability": stab, "turnover_cost": cost, "disagreement_gate": gate_stats, "drawdown_scaler": dd_out}
+    # 5) Regime and stability governors
+    ret_mat = _load_first_non_none([RUNS/"daily_returns.csv", ROOT/"daily_returns.csv", RUNS/"wf_oos_returns.csv"])
+    ret = _as_series_last_col(ret_mat)
+    if ret is None and cum is not None:
+        c = _as_series_last_col(cum)
+        if c is not None and len(c) > 1:
+            ret = np.diff(c, prepend=c[0])
+
+    dna_state = _load_named_numeric_col(RUNS/"dna_drift.csv", "dna_regime_state")
+    if ret is not None and len(ret) >= 20:
+        reg_lb = int(np.clip(int(os.getenv("REGIME_LOOKBACK", "63")), 5, 252))
+        reg_scale = regime_governor_from_returns(ret, lookback=reg_lb, dna_state=dna_state)
+        np.savetxt(RUNS/"regime_governor.csv", reg_scale, delimiter=",")
+        regime_stats = {
+            "lookback": reg_lb,
+            "mean": float(np.mean(reg_scale)),
+            "min": float(np.min(reg_scale)),
+            "max": float(np.max(reg_scale)),
+        }
+    else:
+        reg_scale = None
+        regime_stats = {"note": "daily returns missing; skipped"}
+
+    if wts_for_stability is not None and wts_for_stability.shape[0] >= 5:
+        st_lb = int(np.clip(int(os.getenv("STABILITY_LOOKBACK", "21")), 5, 252))
+        st_scale = stability_governor(wts_for_stability, votes_t=votes, lookback=st_lb)
+        np.savetxt(RUNS/"stability_governor.csv", st_scale, delimiter=",")
+        stability_gov = {
+            "lookback": st_lb,
+            "mean": float(np.mean(st_scale)),
+            "min": float(np.min(st_scale)),
+            "max": float(np.max(st_scale)),
+        }
+    else:
+        st_scale = None
+        stability_gov = {"note": "weights missing; skipped"}
+
+    if reg_scale is not None and st_scale is not None:
+        L = min(len(reg_scale), len(st_scale))
+        # Blend (not multiply) to avoid over-shrinking exposure in normal regimes.
+        g = np.clip(0.55 * reg_scale[:L] + 0.45 * st_scale[:L], 0.45, 1.10)
+    elif reg_scale is not None:
+        g = np.clip(reg_scale, 0.45, 1.10)
+    elif st_scale is not None:
+        g = np.clip(st_scale, 0.45, 1.10)
+    else:
+        g = None
+
+    if g is not None and len(g):
+        np.savetxt(RUNS/"global_governor.csv", g, delimiter=",")
+        global_gov = {"mean": float(np.mean(g)), "min": float(np.min(g)), "max": float(np.max(g))}
+    else:
+        global_gov = {"note": "no governors produced"}
+
+    out = {
+        "stability": stab,
+        "turnover_cost": cost,
+        "disagreement_gate": gate_stats,
+        "drawdown_scaler": dd_out,
+        "regime_governor": regime_stats,
+        "stability_governor": stability_gov,
+        "global_governor": global_gov,
+    }
     (RUNS/"guardrails_summary.json").write_text(json.dumps(out, indent=2))
     print(f"✅ Wrote {RUNS/'guardrails_summary.json'}")
 
@@ -141,6 +235,21 @@ def main():
         html_bits.append(f"<p><b>Council gate:</b> mean {gate_stats['gate_mean']:.3f} (min {gate_stats['gate_min']:.3f}, max {gate_stats['gate_max']:.3f})</p>")
     if "dd_floor" in dd_out:
         html_bits.append(f"<p><b>DD Reallocator:</b> floor {dd_out['dd_floor']}, cut {dd_out['cut']} (weights_dd_scaled.csv)</p>")
+    if "mean" in regime_stats:
+        html_bits.append(
+            f"<p><b>Regime governor:</b> mean {regime_stats['mean']:.3f} "
+            f"(min {regime_stats['min']:.3f}, max {regime_stats['max']:.3f})</p>"
+        )
+    if "mean" in stability_gov:
+        html_bits.append(
+            f"<p><b>Stability governor:</b> mean {stability_gov['mean']:.3f} "
+            f"(min {stability_gov['min']:.3f}, max {stability_gov['max']:.3f})</p>"
+        )
+    if "mean" in global_gov:
+        html_bits.append(
+            f"<p><b>Global governor:</b> mean {global_gov['mean']:.3f} "
+            f"(min {global_gov['min']:.3f}, max {global_gov['max']:.3f})</p>"
+        )
     if html_bits:
         _append_report_card("GUARDRAILS SUMMARY", "\n".join(html_bits))
 

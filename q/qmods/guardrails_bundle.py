@@ -82,3 +82,115 @@ def apply_turnover_governor(weights_t: np.ndarray, max_step_turnover: float = 0.
         turnover_after=t_after,
         scale_applied=scales,
     )
+
+
+def regime_governor_from_returns(
+    returns_t: np.ndarray,
+    lookback: int = 63,
+    min_scale: float = 0.45,
+    max_scale: float = 1.10,
+    dna_state: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Build a smooth exposure governor from realized volatility, drawdown, and optional DNA regime state.
+    dna_state: optional {-1,0,1} series where +1 means stressed regime.
+    """
+    r = np.asarray(returns_t, float).ravel()
+    T = len(r)
+    if T == 0:
+        return np.asarray([], float)
+
+    lb = int(max(5, lookback))
+    vol = np.zeros(T, float)
+    for t in range(T):
+        j = max(0, t - lb + 1)
+        w = r[j : t + 1]
+        vol[t] = float(np.nanstd(w, ddof=1)) if len(w) > 1 else 0.0
+
+    v_ok = vol[np.isfinite(vol)]
+    thr = float(np.nanquantile(v_ok, 0.75)) if v_ok.size else 0.0
+    vs = float(np.nanstd(v_ok) + 1e-12) if v_ok.size else 1.0
+    z = (vol - thr) / vs
+    highvol_pen = 1.0 / (1.0 + np.exp(-z))  # sigmoid in [0,1]
+
+    eq = np.cumprod(1.0 + np.clip(r, -0.95, 0.95))
+    peak = np.maximum.accumulate(eq)
+    dd = (eq / (peak + 1e-12) - 1.0).clip(-1.0, 0.0)
+    dd_pen = np.clip(np.abs(dd) / 0.12, 0.0, 1.0)
+
+    if dna_state is not None:
+        ds = np.asarray(dna_state, float).ravel()
+        if len(ds) < T:
+            pad = np.zeros(T, float)
+            pad[-len(ds) :] = ds if len(ds) else 0.0
+            ds = pad
+        else:
+            ds = ds[-T:]
+        dna_pen = np.clip((ds + 1.0) / 2.0, 0.0, 1.0)  # -1 -> 0, +1 -> 1
+    else:
+        dna_pen = np.zeros(T, float)
+
+    raw = 1.05 - 0.45 * highvol_pen - 0.30 * dd_pen - 0.20 * dna_pen
+    raw = np.clip(raw, min_scale, max_scale)
+
+    # Smooth governor to avoid fast leverage jumps.
+    alpha = 0.18
+    out = np.zeros(T, float)
+    out[0] = raw[0]
+    for t in range(1, T):
+        out[t] = (1.0 - alpha) * out[t - 1] + alpha * raw[t]
+    return np.clip(out, min_scale, max_scale)
+
+
+def stability_governor(
+    weights_t: np.ndarray,
+    votes_t: np.ndarray | None = None,
+    lookback: int = 21,
+    min_scale: float = 0.55,
+    max_scale: float = 1.05,
+) -> np.ndarray:
+    """
+    Penalize unstable behavior:
+    - high step turnover
+    - high council disagreement (if votes provided)
+    """
+    w = np.asarray(weights_t, float)
+    if w.ndim != 2 or w.shape[0] == 0:
+        return np.asarray([], float)
+    T = w.shape[0]
+
+    turn = np.zeros(T, float)
+    if T > 1:
+        turn[1:] = np.sum(np.abs(np.diff(w, axis=0)), axis=1)
+    lb = int(max(5, lookback))
+    turn_m = np.zeros(T, float)
+    for t in range(T):
+        j = max(0, t - lb + 1)
+        turn_m[t] = float(np.nanmean(turn[j : t + 1]))
+    base = float(np.nanmedian(turn_m) + 1e-12)
+    turn_pen = np.tanh(turn_m / (2.0 * base + 1e-12))
+
+    if votes_t is not None:
+        v = np.asarray(votes_t, float)
+        if v.ndim == 1:
+            v = v.reshape(-1, 1)
+        d = np.std(v, axis=1)
+        if len(d) < T:
+            pad = np.zeros(T, float)
+            pad[-len(d) :] = d if len(d) else 0.0
+            d = pad
+        else:
+            d = d[-T:]
+        dis_pen = np.clip(d / 0.75, 0.0, 1.0)
+    else:
+        dis_pen = np.zeros(T, float)
+
+    raw = 1.02 - 0.50 * turn_pen - 0.30 * dis_pen
+    raw = np.clip(raw, min_scale, max_scale)
+
+    alpha = 0.22
+    out = np.zeros(T, float)
+    out[0] = raw[0]
+    for t in range(1, T):
+        out[t] = (1.0 - alpha) * out[t - 1] + alpha * raw[t]
+    return np.clip(out, min_scale, max_scale)

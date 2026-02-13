@@ -2,7 +2,7 @@
 # Final portfolio assembler:
 # Picks best base weights then applies (if available):
 #   cluster caps → adaptive caps → drawdown scaler → turnover governor
-#   → council gate → council/meta leverage → heartbeat/legacy scalers
+#   → council gate → council/meta leverage → heartbeat/legacy/global governors
 # Outputs:
 #   runs_plus/portfolio_weights_final.csv
 # Appends a card to report_*.
@@ -141,16 +141,34 @@ if __name__ == "__main__":
         W[:L] = W[:L] * ls
         steps.append("legacy_scaler")
 
-    # 10) Save final
+    # 10) Global governor (regime * stability) from guardrails.
+    gg = load_series("runs_plus/global_governor.csv")
+    if gg is None:
+        rg = load_series("runs_plus/regime_governor.csv")
+        sg = load_series("runs_plus/stability_governor.csv")
+        if rg is not None and sg is not None:
+            L = min(len(rg), len(sg))
+            gg = np.clip(0.55 * rg[:L] + 0.45 * sg[:L], 0.45, 1.10)
+        elif rg is not None:
+            gg = np.clip(rg, 0.45, 1.10)
+        elif sg is not None:
+            gg = np.clip(sg, 0.45, 1.10)
+    if gg is not None:
+        L = min(len(gg), W.shape[0])
+        g = np.clip(gg[:L], 0.30, 1.15).reshape(-1, 1)
+        W[:L] = W[:L] * g
+        steps.append("global_governor")
+
+    # 11) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 11) Small JSON breadcrumb
+    # 12) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps({"steps": steps, "T": int(T), "N": int(N)}, indent=2)
     )
 
-    # 12) Report card
+    # 13) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 
