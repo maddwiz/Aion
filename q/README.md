@@ -81,12 +81,14 @@ Extra alert thresholds (optional):
 export Q_MAX_SHOCK_RATE=0.25
 export Q_MAX_CONCENTRATION_HHI_AFTER=0.18
 export Q_MAX_CONCENTRATION_TOP1_AFTER=0.30
+export Q_MAX_PORTFOLIO_L1_DRIFT=1.20
 ```
 
 ### Health artifacts
 - `runs_plus/system_health.json`
 - `runs_plus/health_alerts.json`
 - `runs_plus/pipeline_status.json`
+- `runs_plus/portfolio_drift_watch.json`
 - `runs_plus/quality_snapshot.json`
 - `runs_plus/quality_runtime_modifier.csv`
 - `runs_plus/hive_transparency.json`

@@ -217,6 +217,9 @@ if __name__ == "__main__":
     # Apply execution constraints for live realism
     ok, rc = run_script("tools/run_execution_constraints.py", ["--replace-final"])
     if not ok and rc is not None: failures.append({"step": "tools/run_execution_constraints.py", "code": rc})
+    # Drift watchdog across runs (final weights vs prior snapshot).
+    ok, rc = run_script("tools/run_portfolio_drift_watch.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_portfolio_drift_watch.py", "code": rc})
     # Immune drill: synthetic stress test of final constrained weights.
     ok, rc = run_script("tools/run_immune_drill.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_immune_drill.py", "code": rc})

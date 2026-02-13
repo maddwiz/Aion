@@ -99,6 +99,7 @@ if __name__ == "__main__":
         RUNS / "final_governor_trace.csv",
         RUNS / "portfolio_weights_exec.csv",
         RUNS / "execution_constraints_info.json",
+        RUNS / "portfolio_drift_watch.json",
         RUNS / "q_signal_overlay.json",
         RUNS / "q_signal_overlay.csv",
         RUNS / "novaspine_sync_status.json",

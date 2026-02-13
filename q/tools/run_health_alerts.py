@@ -40,6 +40,7 @@ def build_alert_payload(
     pipeline: dict,
     shock: dict,
     concentration: dict,
+    drift_watch: dict,
     thresholds: dict,
 ):
     min_health = float(thresholds.get("min_health_score", 70.0))
@@ -53,6 +54,7 @@ def build_alert_payload(
     max_shock_rate = float(thresholds.get("max_shock_rate", 0.25))
     max_conc_hhi_after = float(thresholds.get("max_concentration_hhi_after", 0.18))
     max_conc_top1_after = float(thresholds.get("max_concentration_top1_after", 0.30))
+    max_portfolio_l1_drift = float(thresholds.get("max_portfolio_l1_drift", 1.20))
 
     issues = []
     score = float(health.get("health_score", 0.0))
@@ -127,6 +129,20 @@ def build_alert_payload(
     if conc_top1_after is not None and np.isfinite(conc_top1_after) and conc_top1_after > max_conc_top1_after:
         issues.append(f"concentration_top1_after>{max_conc_top1_after} ({conc_top1_after:.3f})")
 
+    drift_latest_l1 = None
+    drift_status = None
+    if isinstance(drift_watch, dict):
+        d = drift_watch.get("drift", {})
+        if isinstance(d, dict):
+            drift_status = str(d.get("status", "na"))
+            try:
+                drift_latest_l1 = float(d.get("latest_l1", np.nan))
+            except Exception:
+                drift_latest_l1 = None
+    if drift_latest_l1 is not None and np.isfinite(drift_latest_l1) and drift_status != "bootstrap":
+        if drift_latest_l1 > max_portfolio_l1_drift:
+            issues.append(f"portfolio_latest_l1_drift>{max_portfolio_l1_drift} ({drift_latest_l1:.3f})")
+
     immune_ok = bool(immune.get("ok", False)) if isinstance(immune, dict) else False
     immune_pass = bool(immune.get("pass", False)) if isinstance(immune, dict) else False
     if require_immune_pass:
@@ -153,6 +169,7 @@ def build_alert_payload(
             "max_shock_rate": max_shock_rate,
             "max_concentration_hhi_after": max_conc_hhi_after,
             "max_concentration_top1_after": max_conc_top1_after,
+            "max_portfolio_l1_drift": max_portfolio_l1_drift,
         },
         "observed": {
             "health_score": score,
@@ -168,6 +185,8 @@ def build_alert_payload(
             "shock_rate": shock_rate,
             "concentration_hhi_after": conc_hhi_after,
             "concentration_top1_after": conc_top1_after,
+            "portfolio_latest_l1_drift": drift_latest_l1,
+            "portfolio_drift_status": drift_status,
         },
         "alerts": issues,
     }
@@ -195,6 +214,7 @@ if __name__ == "__main__":
     pipeline = _load_json(RUNS / "pipeline_status.json") or {}
     shock = _load_json(RUNS / "shock_mask_info.json") or {}
     concentration = _load_json(RUNS / "concentration_governor_info.json") or {}
+    drift_watch = _load_json(RUNS / "portfolio_drift_watch.json") or {}
     payload = build_alert_payload(
         health=health,
         guards=guards,
@@ -204,6 +224,7 @@ if __name__ == "__main__":
         pipeline=pipeline,
         shock=shock,
         concentration=concentration,
+        drift_watch=drift_watch,
         thresholds={
             "min_health_score": min_health,
             "min_global_governor_mean": min_global,
@@ -216,6 +237,7 @@ if __name__ == "__main__":
             "max_shock_rate": max_shock_rate,
             "max_concentration_hhi_after": max_conc_hhi_after,
             "max_concentration_top1_after": max_conc_top1_after,
+            "max_portfolio_l1_drift": float(os.getenv("Q_MAX_PORTFOLIO_L1_DRIFT", "1.20")),
         },
     )
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))

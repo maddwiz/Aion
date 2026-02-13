@@ -11,6 +11,7 @@ def test_build_alert_payload_triggers_shock_and_concentration_alerts():
         pipeline={"failed_count": 0},
         shock={"shock_rate": 0.40},
         concentration={"stats": {"hhi_after": 0.22, "top1_after": 0.35}},
+        drift_watch={"drift": {"status": "ok", "latest_l1": 1.5}},
         thresholds={
             "min_health_score": 70,
             "min_global_governor_mean": 0.45,
@@ -23,12 +24,14 @@ def test_build_alert_payload_triggers_shock_and_concentration_alerts():
             "max_shock_rate": 0.25,
             "max_concentration_hhi_after": 0.18,
             "max_concentration_top1_after": 0.30,
+            "max_portfolio_l1_drift": 1.2,
         },
     )
     alerts = payload["alerts"]
     assert any("shock_rate>" in a for a in alerts)
     assert any("concentration_hhi_after>" in a for a in alerts)
     assert any("concentration_top1_after>" in a for a in alerts)
+    assert any("portfolio_latest_l1_drift>" in a for a in alerts)
     assert payload["ok"] is False
 
 
@@ -42,6 +45,7 @@ def test_build_alert_payload_ok_when_metrics_inside_limits():
         pipeline={"failed_count": 0},
         shock={"shock_rate": 0.05},
         concentration={"stats": {"hhi_after": 0.12, "top1_after": 0.18}},
+        drift_watch={"drift": {"status": "ok", "latest_l1": 0.5}},
         thresholds={
             "min_health_score": 70,
             "min_global_governor_mean": 0.45,
@@ -54,6 +58,7 @@ def test_build_alert_payload_ok_when_metrics_inside_limits():
             "max_shock_rate": 0.25,
             "max_concentration_hhi_after": 0.18,
             "max_concentration_top1_after": 0.30,
+            "max_portfolio_l1_drift": 1.2,
         },
     )
     assert payload["alerts"] == []
