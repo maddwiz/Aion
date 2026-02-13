@@ -1,6 +1,10 @@
 import numpy as np
 
-from qmods.guardrails_bundle import regime_governor_from_returns, stability_governor
+from qmods.guardrails_bundle import (
+    apply_turnover_budget_governor,
+    regime_governor_from_returns,
+    stability_governor,
+)
 
 
 def test_regime_governor_bounds_and_shape():
@@ -30,3 +34,25 @@ def test_stability_governor_penalizes_high_churn():
     assert np.isfinite(g1).all() and np.isfinite(g2).all()
     assert float(np.mean(g2)) < float(np.mean(g1))
     assert float(np.min(g2)) >= 0.55 - 1e-9
+
+
+def test_turnover_budget_governor_enforces_rolling_limit():
+    T = 120
+    N = 4
+    w = np.zeros((T, N), dtype=float)
+    # High-churn rotating target.
+    for t in range(T):
+        k = t % N
+        w[t, k] = 0.45
+        w[t, (k + 1) % N] = -0.45
+
+    window = 5
+    limit = 0.9
+    res = apply_turnover_budget_governor(w, max_step_turnover=0.35, budget_window=window, budget_limit=limit)
+    assert res.weights.shape == w.shape
+    assert res.turnover_after.shape == (T - 1,)
+    assert res.rolling_turnover_after.shape == (T - 1,)
+    assert np.isfinite(res.weights).all()
+    assert np.max(res.turnover_after) <= 0.35 + 1e-6
+    assert np.max(res.rolling_turnover_after) <= limit + 1e-6
+    assert float(np.mean(res.turnover_after)) <= float(np.mean(res.turnover_before))

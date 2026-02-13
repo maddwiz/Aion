@@ -81,6 +81,7 @@ if __name__ == "__main__":
         RUNS / "legacy_exposure.csv",
         RUNS / "cross_hive_weights.csv",
         RUNS / "weights_cross_hive_governed.csv",
+        RUNS / "weights_turnover_budget_governed.csv",
     ]
     optional = [
         RUNS / "hive_wf_metrics.csv",
@@ -91,6 +92,7 @@ if __name__ == "__main__":
         RUNS / "hive_transparency.json",
         RUNS / "tune_best_config.json",
         RUNS / "quality_runtime_modifier.csv",
+        RUNS / "turnover_budget_rolling_after.csv",
         RUNS / "portfolio_weights_exec.csv",
         RUNS / "execution_constraints_info.json",
         RUNS / "q_signal_overlay.json",

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from qmods.guardrails_bundle import (
+    apply_turnover_budget_governor,
     apply_turnover_governor,
     disagreement_gate,
     parameter_stability_filter,
@@ -103,13 +104,34 @@ def main():
     if wts is not None and wts.shape[0] > 2:
         fee_bps = 5.0
         max_step = float(np.clip(float(os.getenv("TURNOVER_MAX_STEP", "0.35")), 0.0, 10.0))
+        budget_window = int(np.clip(int(float(os.getenv("TURNOVER_BUDGET_WINDOW", "5"))), 1, 252))
+        budget_limit = float(np.clip(float(os.getenv("TURNOVER_BUDGET_LIMIT", "1.00")), 0.0, 20.0))
         gov = apply_turnover_governor(wts, max_step_turnover=max_step)
-        np.savetxt(RUNS/"weights_turnover_governed.csv", gov.weights, delimiter=",")
+        w_governed = gov.weights
+        budget_info = {"enabled": False}
+        if budget_limit > 0.0:
+            bres = apply_turnover_budget_governor(
+                gov.weights,
+                max_step_turnover=max_step,
+                budget_window=budget_window,
+                budget_limit=budget_limit,
+            )
+            w_governed = bres.weights
+            np.savetxt(RUNS/"weights_turnover_budget_governed.csv", bres.weights, delimiter=",")
+            np.savetxt(RUNS/"turnover_budget_rolling_after.csv", bres.rolling_turnover_after, delimiter=",")
+            budget_info = {
+                "enabled": True,
+                "window": int(budget_window),
+                "limit": float(budget_limit),
+                "rolling_after_mean": float(np.mean(bres.rolling_turnover_after)) if bres.rolling_turnover_after.size else 0.0,
+                "rolling_after_max": float(np.max(bres.rolling_turnover_after)) if bres.rolling_turnover_after.size else 0.0,
+            }
+        np.savetxt(RUNS/"weights_turnover_governed.csv", w_governed, delimiter=",")
         np.savetxt(RUNS/"turnover_before.csv", gov.turnover_before, delimiter=",")
         np.savetxt(RUNS/"turnover_after.csv", gov.turnover_after, delimiter=",")
 
         cost_raw = turnover_cost_penalty(wts, fee_bps=fee_bps)
-        cost_gov = turnover_cost_penalty(gov.weights, fee_bps=fee_bps)
+        cost_gov = turnover_cost_penalty(w_governed, fee_bps=fee_bps)
         mean_scale = float(np.mean(gov.scale_applied)) if gov.scale_applied.size else 1.0
         cost = {
             "turnover_cost_sharpe_adj": float(cost_raw),
@@ -118,8 +140,9 @@ def main():
             "turnover_after_mean": float(np.mean(gov.turnover_after)) if gov.turnover_after.size else 0.0,
             "turnover_scale_mean": mean_scale,
             "turnover_max_step": max_step,
+            "turnover_budget": budget_info,
         }
-        wts_for_stability = gov.weights
+        wts_for_stability = w_governed
     else:
         cost = {"note": "portfolio_weights.csv not found; skipped"}
         if wts is not None:
@@ -231,6 +254,13 @@ def main():
             f"after {cost.get('turnover_after_mean', 0.0):.4f}, "
             f"scale mean {cost.get('turnover_scale_mean', 1.0):.3f}</p>"
         )
+        tb = cost.get("turnover_budget", {}) if isinstance(cost.get("turnover_budget"), dict) else {}
+        if tb.get("enabled"):
+            html_bits.append(
+                f"<p><b>Turnover budget:</b> window {tb.get('window')}, limit {tb.get('limit'):.3f}, "
+                f"rolling mean {tb.get('rolling_after_mean', 0.0):.3f}, "
+                f"rolling max {tb.get('rolling_after_max', 0.0):.3f}</p>"
+            )
     if "gate_mean" in gate_stats:
         html_bits.append(f"<p><b>Council gate:</b> mean {gate_stats['gate_mean']:.3f} (min {gate_stats['gate_min']:.3f}, max {gate_stats['gate_max']:.3f})</p>")
     if "dd_floor" in dd_out:

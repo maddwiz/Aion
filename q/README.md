@@ -172,3 +172,9 @@ export ECO_SPLIT_INTENSITY=0.25
 export ECO_FUSION_CORR=0.92
 export ECO_FUSION_INTENSITY=0.12
 ```
+Turnover throttle (live-ready budget):
+```bash
+export TURNOVER_MAX_STEP=0.35
+export TURNOVER_BUDGET_WINDOW=5
+export TURNOVER_BUDGET_LIMIT=1.00
+```

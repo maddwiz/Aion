@@ -19,6 +19,15 @@ class TurnoverGovernedResult:
     scale_applied: np.ndarray
 
 
+@dataclass
+class TurnoverBudgetResult:
+    weights: np.ndarray
+    turnover_before: np.ndarray
+    turnover_after: np.ndarray
+    scale_applied: np.ndarray
+    rolling_turnover_after: np.ndarray
+
+
 def parameter_stability_filter(params_history: np.ndarray, thresh: float = 0.6) -> StabilityResult:
     # params_history: [n_windows, n_params]
     if params_history.ndim != 2:
@@ -81,6 +90,79 @@ def apply_turnover_governor(weights_t: np.ndarray, max_step_turnover: float = 0.
         turnover_before=t_before,
         turnover_after=t_after,
         scale_applied=scales,
+    )
+
+
+def apply_turnover_budget_governor(
+    weights_t: np.ndarray,
+    max_step_turnover: float = 0.35,
+    budget_window: int = 5,
+    budget_limit: float = 1.00,
+) -> TurnoverBudgetResult:
+    """
+    Enforce both:
+      1) step cap: sum_i |w_t - w_{t-1}| <= max_step_turnover
+      2) rolling budget: sum_{k=t-window+1..t} turnover_k <= budget_limit
+    """
+    w = np.asarray(weights_t, float)
+    if w.ndim != 2 or w.shape[0] < 2:
+        empty = np.zeros(max(0, w.shape[0] - 1), dtype=float)
+        ones = np.ones_like(empty)
+        return TurnoverBudgetResult(
+            weights=w.copy(),
+            turnover_before=empty,
+            turnover_after=empty,
+            scale_applied=ones,
+            rolling_turnover_after=empty,
+        )
+
+    cap = float(max(0.0, max_step_turnover))
+    win = int(max(1, budget_window))
+    lim = float(max(0.0, budget_limit))
+
+    out = w.copy()
+    Tm1 = w.shape[0] - 1
+    t_before = np.zeros(Tm1, dtype=float)
+    t_after = np.zeros(Tm1, dtype=float)
+    scales = np.ones(Tm1, dtype=float)
+    roll_after = np.zeros(Tm1, dtype=float)
+
+    for t in range(1, w.shape[0]):
+        prev = out[t - 1]
+        target = w[t]
+        delta = target - prev
+        turn = float(np.sum(np.abs(delta)))
+        t_before[t - 1] = turn
+
+        # Remaining turnover budget for current window.
+        j0 = max(0, (t - 1) - (win - 1))
+        used = float(np.sum(t_after[j0 : t - 1])) if (t - 1) > j0 else 0.0
+        avail = max(0.0, lim - used)
+
+        eff_cap = cap
+        if lim > 0.0:
+            eff_cap = min(eff_cap, avail)
+
+        if eff_cap > 0.0 and turn > eff_cap:
+            alpha = eff_cap / (turn + 1e-12)
+            scales[t - 1] = alpha
+            out[t] = prev + alpha * delta
+        elif eff_cap <= 0.0:
+            scales[t - 1] = 0.0
+            out[t] = prev
+        else:
+            out[t] = target
+
+        t_after[t - 1] = float(np.sum(np.abs(out[t] - out[t - 1])))
+        j1 = max(0, (t - 1) - (win - 1))
+        roll_after[t - 1] = float(np.sum(t_after[j1 : t]))
+
+    return TurnoverBudgetResult(
+        weights=out,
+        turnover_before=t_before,
+        turnover_after=t_after,
+        scale_applied=scales,
+        rolling_turnover_after=roll_after,
     )
 
 
