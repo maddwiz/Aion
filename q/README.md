@@ -104,7 +104,10 @@ python tools/run_execution_constraints.py --replace-final
 Default is disabled (no runtime risk). Enable with env vars:
 ```bash
 export C3_MEMORY_ENABLE=1
-export C3_MEMORY_BACKEND=filesystem
+export C3_MEMORY_BACKEND=novaspine_api
+export C3_MEMORY_NOVASPINE_URL=http://127.0.0.1:8420
+# if NovaSpine auth is enabled:
+# export C3AE_API_TOKEN=your_token
 # optional:
 # export C3_MEMORY_NAMESPACE=private/nova/actions
 # export C3_MEMORY_DIR=/absolute/path/to/outbox

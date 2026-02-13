@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Optional NovaSpine bridge:
 # - Builds enriched decision/governance events from runs_plus artifacts.
-# - Publishes to filesystem outbox (default) or HTTP endpoint.
+# - Publishes to NovaSpine API (preferred), filesystem outbox, or custom HTTP endpoint.
 #
 # Writes:
 #   runs_plus/novaspine_last_batch.json
@@ -192,11 +192,13 @@ def build_events():
 
 if __name__ == "__main__":
     enabled = str(os.getenv("C3_MEMORY_ENABLE", "0")).strip().lower() in {"1", "true", "yes", "on"}
-    backend = str(os.getenv("C3_MEMORY_BACKEND", "filesystem")).strip().lower()
+    backend = str(os.getenv("C3_MEMORY_BACKEND", "novaspine_api")).strip().lower()
     namespace = str(os.getenv("C3_MEMORY_NAMESPACE", "private/nova/actions")).strip() or "private/nova/actions"
     outbox = Path(str(os.getenv("C3_MEMORY_DIR", str(RUNS / "novaspine_outbox"))))
     http_url = str(os.getenv("C3_MEMORY_HTTP_URL", "")).strip() or None
     http_token = str(os.getenv("C3_MEMORY_TOKEN", "")).strip() or None
+    novaspine_url = str(os.getenv("C3_MEMORY_NOVASPINE_URL", "http://127.0.0.1:8420")).strip() or "http://127.0.0.1:8420"
+    novaspine_token = str(os.getenv("C3AE_API_TOKEN", "")).strip() or http_token
 
     events = build_events()
     # Always materialize local batch artifacts for auditability.
@@ -209,6 +211,7 @@ if __name__ == "__main__":
         "enabled": bool(enabled),
         "backend": backend,
         "namespace": namespace,
+        "novaspine_url": novaspine_url,
         "events_count": int(len(events)),
         "events": events,
     }
@@ -222,12 +225,15 @@ if __name__ == "__main__":
             outbox_dir=outbox,
             http_url=http_url,
             http_token=http_token,
+            novaspine_base_url=novaspine_url,
+            novaspine_token=novaspine_token,
         )
         sync = {
             "timestamp_utc": _now_iso(),
             "enabled": True,
             "backend": backend,
             "namespace": namespace,
+            "novaspine_url": novaspine_url,
             "published": int(res.published),
             "queued": int(res.queued),
             "failed": int(res.failed),
@@ -241,6 +247,7 @@ if __name__ == "__main__":
             "enabled": False,
             "backend": backend,
             "namespace": namespace,
+            "novaspine_url": novaspine_url,
             "published": 0,
             "queued": int(len(events)),
             "failed": 0,
