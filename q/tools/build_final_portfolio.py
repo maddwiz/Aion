@@ -28,6 +28,7 @@ TRACE_STEPS = [
     "legacy_scaler",
     "dna_stress_governor",
     "dream_coherence",
+    "reflex_health_governor",
     "hive_diversification",
     "global_governor",
     "quality_governor",
@@ -204,7 +205,16 @@ if __name__ == "__main__":
         steps.append("dream_coherence")
         _trace_put("dream_coherence", ds.ravel())
 
-    # 13) Hive diversification governor from ecosystem layer.
+    # 13) Reflex health governor from reflexive feedback diagnostics.
+    rhg = load_series("runs_plus/reflex_health_governor.csv")
+    if rhg is not None:
+        L = min(len(rhg), W.shape[0])
+        rs = np.clip(rhg[:L], 0.70, 1.15).reshape(-1, 1)
+        W[:L] = W[:L] * rs
+        steps.append("reflex_health_governor")
+        _trace_put("reflex_health_governor", rs.ravel())
+
+    # 14) Hive diversification governor from ecosystem layer.
     hg = load_series("runs_plus/hive_diversification_governor.csv")
     if hg is not None:
         L = min(len(hg), W.shape[0])
@@ -213,7 +223,7 @@ if __name__ == "__main__":
         steps.append("hive_diversification")
         _trace_put("hive_diversification", hs.ravel())
 
-    # 14) Global governor (regime * stability) from guardrails.
+    # 15) Global governor (regime * stability) from guardrails.
     gg = load_series("runs_plus/global_governor.csv")
     if gg is None:
         rg = load_series("runs_plus/regime_governor.csv")
@@ -232,7 +242,7 @@ if __name__ == "__main__":
         steps.append("global_governor")
         _trace_put("global_governor", g.ravel())
 
-    # 15) Reliability quality governor from nested/hive/council diagnostics.
+    # 16) Reliability quality governor from nested/hive/council diagnostics.
     qg = load_series("runs_plus/quality_governor.csv")
     if qg is not None:
         L = min(len(qg), W.shape[0])
@@ -241,7 +251,7 @@ if __name__ == "__main__":
         steps.append("quality_governor")
         _trace_put("quality_governor", qs.ravel())
 
-    # 16) NovaSpine recall-context boost (if available).
+    # 17) NovaSpine recall-context boost (if available).
     ncb = load_series("runs_plus/novaspine_context_boost.csv")
     if ncb is not None:
         L = min(len(ncb), W.shape[0])
@@ -250,7 +260,7 @@ if __name__ == "__main__":
         steps.append("novaspine_context_boost")
         _trace_put("novaspine_context_boost", nb.ravel())
 
-    # 17) NovaSpine per-hive alignment boost (global projection).
+    # 18) NovaSpine per-hive alignment boost (global projection).
     nhb = load_series("runs_plus/novaspine_hive_boost.csv")
     if nhb is not None:
         L = min(len(nhb), W.shape[0])
@@ -259,7 +269,7 @@ if __name__ == "__main__":
         steps.append("novaspine_hive_boost")
         _trace_put("novaspine_hive_boost", hb.ravel())
 
-    # 18) Shock/news mask exposure cut.
+    # 19) Shock/news mask exposure cut.
     sm = load_series("runs_plus/shock_mask.csv")
     if sm is not None:
         L = min(len(sm), W.shape[0])
@@ -269,7 +279,7 @@ if __name__ == "__main__":
         steps.append("shock_mask_guard")
         _trace_put("shock_mask_guard", sc.ravel())
 
-    # 19) Concentration governor (top1/top3 + HHI caps).
+    # 20) Concentration governor (top1/top3 + HHI caps).
     use_conc = str(os.getenv("Q_USE_CONCENTRATION_GOV", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if use_conc:
         top1 = float(np.clip(float(os.getenv("Q_CONCENTRATION_TOP1_CAP", "0.18")), 0.01, 1.0))
@@ -306,11 +316,11 @@ if __name__ == "__main__":
         comments="",
     )
 
-    # 20) Save final
+    # 21) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 21) Small JSON breadcrumb
+    # 22) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps(
             {
@@ -326,7 +336,7 @@ if __name__ == "__main__":
         )
     )
 
-    # 22) Report card
+    # 23) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 

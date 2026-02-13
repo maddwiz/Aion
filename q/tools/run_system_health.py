@@ -106,6 +106,8 @@ if __name__ == "__main__":
         RUNS / "dream_coherence_info.json",
         RUNS / "dna_stress_governor.csv",
         RUNS / "dna_stress_info.json",
+        RUNS / "reflex_health_governor.csv",
+        RUNS / "reflex_health_info.json",
         RUNS / "portfolio_weights_exec.csv",
         RUNS / "execution_constraints_info.json",
         RUNS / "portfolio_drift_watch.json",
@@ -149,6 +151,7 @@ if __name__ == "__main__":
     meta_rel = _load_series(RUNS / "meta_mix_reliability_governor.csv")
     dream_gov = _load_series(RUNS / "dream_coherence_governor.csv")
     dna_gov = _load_series(RUNS / "dna_stress_governor.csv")
+    reflex_gov = _load_series(RUNS / "reflex_health_governor.csv")
     nsp_ctx_boost = _load_series(RUNS / "novaspine_context_boost.csv")
     nsp_hive_boost = _load_series(RUNS / "novaspine_hive_boost.csv")
     gov_trace_total = _load_series(RUNS / "final_governor_trace.csv")
@@ -189,6 +192,11 @@ if __name__ == "__main__":
         shape["dna_stress_governor_mean"] = float(np.mean(dna_gov))
         shape["dna_stress_governor_min"] = float(np.min(dna_gov))
         shape["dna_stress_governor_max"] = float(np.max(dna_gov))
+    if reflex_gov is not None:
+        shape["reflex_health_governor_rows"] = int(len(reflex_gov))
+        shape["reflex_health_governor_mean"] = float(np.mean(reflex_gov))
+        shape["reflex_health_governor_min"] = float(np.min(reflex_gov))
+        shape["reflex_health_governor_max"] = float(np.max(reflex_gov))
     if nsp_ctx_boost is not None:
         shape["novaspine_context_boost_rows"] = int(len(nsp_ctx_boost))
         shape["novaspine_context_boost_mean"] = float(np.mean(nsp_ctx_boost))

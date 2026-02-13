@@ -4,13 +4,14 @@
 import numpy as np
 import pandas as pd
 from pathlib import Path
+import json
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from qmods.reflex_health_index import reflex_health, gate_reflex
+from qmods.reflex_health_index import reflex_health, gate_reflex, reflex_health_governor
 
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
@@ -86,6 +87,8 @@ if __name__ == "__main__":
 
     H = reflex_health(r, lookback=126)
     np.savetxt(RUNS / "reflex_health.csv", H, delimiter=",")
+    Hg = reflex_health_governor(H, lo=0.72, hi=1.10, smooth=0.88)
+    np.savetxt(RUNS / "reflex_health_governor.csv", Hg, delimiter=",")
 
     sig = load_reflex_signal()
     wrote_gate = False
@@ -95,6 +98,17 @@ if __name__ == "__main__":
         np.savetxt(RUNS / "reflex_signal_gated.csv", gated, delimiter=",")
         wrote_gate = True
 
-    msg = "Saved reflex_health.csv" + (" + reflex_signal_gated.csv" if wrote_gate else "")
+    info = {
+        "length": int(len(H)),
+        "health_mean": float(np.mean(H)) if len(H) else 0.0,
+        "health_max": float(np.max(H)) if len(H) else 0.0,
+        "governor_mean": float(np.mean(Hg)) if len(Hg) else 1.0,
+        "governor_min": float(np.min(Hg)) if len(Hg) else 1.0,
+        "governor_max": float(np.max(Hg)) if len(Hg) else 1.0,
+        "wrote_reflex_signal_gated": bool(wrote_gate),
+    }
+    (RUNS / "reflex_health_info.json").write_text(json.dumps(info, indent=2))
+
+    msg = "Saved reflex_health.csv + reflex_health_governor.csv" + (" + reflex_signal_gated.csv" if wrote_gate else "")
     append_card("Reflex Health Gating ✔", f"<p>{msg}</p>")
     print("✅", msg)

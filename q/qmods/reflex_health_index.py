@@ -23,3 +23,22 @@ def gate_reflex(reflex_signal: np.ndarray, health: np.ndarray, min_h=0.5):
     scale = np.clip(h / (min_h + 1e-12), 0.0, 1.0)
     L = min(len(s), len(scale))
     return s[:L] * scale[:L]
+
+
+def reflex_health_governor(health: np.ndarray, lo: float = 0.72, hi: float = 1.10, smooth: float = 0.88):
+    """
+    Map reflex health (annualized Sharpe-like in [0,5]) to exposure governor.
+    """
+    h = np.asarray(health, float).ravel()
+    if h.size == 0:
+        return h
+    q = np.clip(np.tanh(np.clip(h, 0.0, 5.0) / 2.0), 0.0, 1.0)
+    g = float(lo) + (float(hi) - float(lo)) * q
+    g = np.clip(g, min(lo, hi), max(lo, hi))
+    a = float(np.clip(smooth, 0.0, 0.99))
+    if a > 0.0 and len(g) > 1:
+        out = g.copy()
+        for t in range(1, len(out)):
+            out[t] = a * out[t - 1] + (1.0 - a) * out[t]
+        g = np.clip(out, min(lo, hi), max(lo, hi))
+    return g
