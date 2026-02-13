@@ -50,3 +50,31 @@ python scripts/run_walkforward.py --data ./data --asset SPY.csv --vix VIXCLS.csv
 python scripts/make_report_html.py --run ./runs/spy_demo --out ./runs/spy_demo
 open runs/spy_demo/report.html
 ```
+
+## Current One-Command Pipeline (v2.5+)
+Run the integrated pipeline with all major layers:
+```bash
+python tools/run_all_in_one_plus.py
+```
+This now includes:
+- symbolic + heartbeat + reflexive generation
+- hive build + hive walk-forward diagnostics
+- guardrails, governors, councils, meta/synapses, cross-hive, ecosystem
+- final portfolio assembly + system health + alert gate
+
+### Strict production cycle
+```bash
+./tools/run_prod_cycle.sh
+```
+This runs strict mode (`Q_STRICT=1`) and fails if critical health alerts trigger.
+
+### Health artifacts
+- `runs_plus/system_health.json`
+- `runs_plus/health_alerts.json`
+- `runs_plus/pipeline_status.json`
+
+### Tests
+```bash
+python -m pytest -q tests
+```
+GitHub Actions CI is configured under `.github/workflows/ci.yml`.

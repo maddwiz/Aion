@@ -12,7 +12,7 @@ What it does, in order (skips missing pieces safely):
 Outputs go to runs_plus/ when possible.
 """
 
-import os, sys, subprocess, shutil
+import os, sys, subprocess, json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +38,16 @@ def run_script(relpath: str, args=None):
         print(f"(!) {relpath} exited with code {cp.returncode} — continuing.")
     return ok, cp.returncode
 
+def write_pipeline_status(failures, strict_mode: bool):
+    payload = {
+        "strict_mode": bool(strict_mode),
+        "failed_steps": failures,
+        "failed_count": int(len(failures)),
+        "ok": len(failures) == 0,
+    }
+    (RUNS / "pipeline_status.json").write_text(json.dumps(payload, indent=2))
+    print(f"✅ Wrote {RUNS/'pipeline_status.json'}")
+
 def try_open_report():
     # prefer best_plus, then all, then plus, then base
     names = ["report_best_plus.html", "report_all.html", "report_plus.html", "report.html"]
@@ -62,63 +72,95 @@ def ensure_env():
 
 if __name__ == "__main__":
     ensure_env()
+    strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    failures = []
 
     # ---------- PHASE 0: Primers / basics ----------
     # (A) Lightweight nested WF summary (scaffold)
-    run_script("tools/nested_wf_lite.py")
+    ok, rc = run_script("tools/nested_wf_lite.py")
+    if not ok and rc is not None: failures.append({"step": "tools/nested_wf_lite.py", "code": rc})
 
     # (B) Build minimal returns + base weights (so downstream steps have inputs)
-    run_script("tools/make_returns_and_weights.py")
+    ok, rc = run_script("tools/make_returns_and_weights.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_returns_and_weights.py", "code": rc})
 
     # (C) Build council votes (real if present, else sleeves or synthetic)
-    run_script("tools/make_council_votes.py")
+    ok, rc = run_script("tools/make_council_votes.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_council_votes.py", "code": rc})
     # (D) Build symbolic/heartbeat/reflexive layers
-    run_script("tools/make_symbolic.py")
-    run_script("tools/make_heartbeat.py")
-    run_script("tools/make_reflexive.py")
+    ok, rc = run_script("tools/make_symbolic.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_symbolic.py", "code": rc})
+    ok, rc = run_script("tools/make_heartbeat.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_heartbeat.py", "code": rc})
+    ok, rc = run_script("tools/make_reflexive.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_reflexive.py", "code": rc})
     # (E) Build hive signals + per-hive walk-forward diagnostics
-    run_script("tools/make_hive.py")
-    run_script("tools/run_hive_walkforward.py")
+    ok, rc = run_script("tools/make_hive.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_hive.py", "code": rc})
+    ok, rc = run_script("tools/run_hive_walkforward.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_hive_walkforward.py", "code": rc})
 
     # ---------- PHASE 1: Guardrails ----------
     # Parameter stability, turnover, disagreement gate + DD scaling + report card
-    run_script("tools/run_guardrails.py")
+    ok, rc = run_script("tools/run_guardrails.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_guardrails.py", "code": rc})
     # Disagreement heatmap (table) → report
-    run_script("tools/run_disagreement_heatmap.py")
+    ok, rc = run_script("tools/run_disagreement_heatmap.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_disagreement_heatmap.py", "code": rc})
 
     # ---------- PHASE 2: Hive Brain ----------
     # Leakage-safe ridge meta over councils → meta_stack_pred.csv
-    run_script("tools/run_meta_stack.py")
+    ok, rc = run_script("tools/run_meta_stack.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_meta_stack.py", "code": rc})
     # Tiny MLP fusion of councils → synapses_pred.csv
-    run_script("tools/run_synapses.py")
+    ok, rc = run_script("tools/run_synapses.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_synapses.py", "code": rc})
     # Confidence-aware blend of meta + synapses
-    run_script("tools/run_council_meta_mix.py")
+    ok, rc = run_script("tools/run_council_meta_mix.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_council_meta_mix.py", "code": rc})
     # Cross-hive arbitration (weights per hive)
-    run_script("tools/run_cross_hive.py")
+    ok, rc = run_script("tools/run_cross_hive.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_cross_hive.py", "code": rc})
     # Ecosystem age governor (atrophy/split/fusion dynamics on hive weights)
-    run_script("tools/run_ecosystem_age.py")
+    ok, rc = run_script("tools/run_ecosystem_age.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_ecosystem_age.py", "code": rc})
     # Tail-blender over base weights and hedges
-    run_script("tools/run_tail_blender.py")
+    ok, rc = run_script("tools/run_tail_blender.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_tail_blender.py", "code": rc})
 
     # ---------- PHASE 3: Refinements ----------
     # Reflex health (and optional gating of reflex signal)
-    run_script("tools/run_reflex_health.py")
+    ok, rc = run_script("tools/run_reflex_health.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_reflex_health.py", "code": rc})
     # Risk parity sleeve (T x N weights)
-    run_script("tools/run_risk_parity.py")
+    ok, rc = run_script("tools/run_risk_parity.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_risk_parity.py", "code": rc})
     # Adaptive caps on weights (vol-based clamps)
-    run_script("tools/run_adaptive_caps.py")
+    ok, rc = run_script("tools/run_adaptive_caps.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_adaptive_caps.py", "code": rc})
     # Feature neutralization between two feature sets
-    run_script("tools/run_feature_neutralizer.py")
+    ok, rc = run_script("tools/run_feature_neutralizer.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_feature_neutralizer.py", "code": rc})
     # Legacy smooth scaler from DNA/heartbeat/symbolic/reflexive layers
-    run_script("tools/tune_legacy_knobs.py")
+    ok, rc = run_script("tools/tune_legacy_knobs.py")
+    if not ok and rc is not None: failures.append({"step": "tools/tune_legacy_knobs.py", "code": rc})
     # Assemble final portfolio weights from available layers
-    run_script("tools/build_final_portfolio.py")
+    ok, rc = run_script("tools/build_final_portfolio.py")
+    if not ok and rc is not None: failures.append({"step": "tools/build_final_portfolio.py", "code": rc})
     # Emit a health snapshot for unattended operation
-    run_script("tools/run_system_health.py")
+    ok, rc = run_script("tools/run_system_health.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_system_health.py", "code": rc})
+    ok, rc = run_script("tools/run_health_alerts.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_health_alerts.py", "code": rc})
 
     # ---------- REPORT ----------
     # Many scripts already append cards; try to open the best report file.
     try_open_report()
 
+    write_pipeline_status(failures, strict_mode=strict)
+
     print("\n✅ All-in-one pipeline finished (with safe skips where inputs were missing).")
     print("   Check runs_plus/ for new CSVs and your report HTML for new cards.")
+    if strict and failures:
+        print("(!) Strict mode enabled and some steps failed.")
+        raise SystemExit(2)
