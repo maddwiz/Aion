@@ -6,9 +6,14 @@
 
 import numpy as np
 from pathlib import Path
+
+import json
+import sys
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 from qmods.synapses_small import SynapseSmall
 
-ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT/"runs_plus"; RUNS.mkdir(exist_ok=True)
 
 def load_first(paths):
@@ -48,9 +53,28 @@ if __name__ == "__main__":
     y = np.asarray(y).ravel()
     T = min(len(y), V.shape[0]); V = V[:T]; y = y[:T]
 
-    nn = SynapseSmall(hidden=8, lr=0.01, reg=1e-3, epochs=200).fit(V, y)
+    nn = SynapseSmall(hidden=12, lr=0.008, reg=2e-3, epochs=400, patience=40, grad_clip=2.0).fit(V, y)
     pred = nn.predict(V)
+    conf = nn.predict_confidence(V)
     np.savetxt(RUNS/"synapses_pred.csv", pred, delimiter=",")
-    html = f"<p>SynapsesSmall trained on {T} rows, K={V.shape[1]}. Saved synapses_pred.csv</p>"
+    np.savetxt(RUNS/"synapses_confidence.csv", conf, delimiter=",")
+
+    corr = float(np.corrcoef(pred[1:], y[1:])[0,1]) if len(pred) > 2 else 0.0
+    summary = {
+        "rows": int(T),
+        "features": int(V.shape[1]),
+        "train_loss": float(nn.last_train_loss_ or 0.0),
+        "val_loss": float(nn.last_val_loss_ or 0.0),
+        "pred_y_corr": corr,
+        "mean_confidence": float(np.mean(conf)) if len(conf) else 0.0,
+    }
+    (RUNS / "synapses_summary.json").write_text(json.dumps(summary, indent=2))
+
+    html = (
+        f"<p>SynapsesSmall trained on {T} rows, K={V.shape[1]}.</p>"
+        f"<p>corr(pred,y)={corr:.3f}, mean_conf={summary['mean_confidence']:.3f}</p>"
+    )
     append_card("Neural Synapses (Tiny MLP) ✔", html)
     print(f"✅ Wrote {RUNS/'synapses_pred.csv'}")
+    print(f"✅ Wrote {RUNS/'synapses_confidence.csv'}")
+    print(f"✅ Wrote {RUNS/'synapses_summary.json'}")
