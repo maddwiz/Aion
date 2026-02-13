@@ -197,6 +197,72 @@ def _hours_since_file(path: Path) -> float | None:
     return float((dt.datetime.now(dt.timezone.utc) - ts).total_seconds() / 3600.0)
 
 
+def _load_series(path: Path):
+    if not path.exists() or path.is_dir():
+        return None
+    try:
+        a = np.loadtxt(path, delimiter=",")
+    except Exception:
+        try:
+            a = np.loadtxt(path, delimiter=",", skiprows=1)
+        except Exception:
+            return None
+    a = np.asarray(a, float)
+    if a.ndim == 2 and a.shape[1] >= 1:
+        a = a[:, -1]
+    a = a.ravel()
+    return a if len(a) else None
+
+
+def _latest_series_value(path: Path, lo: float, hi: float, default: float = 1.0):
+    s = _load_series(path)
+    if s is None or len(s) == 0:
+        return float(default), False
+    v = _safe_float(s[-1], default=default)
+    return _clamp(v, lo, hi), True
+
+
+def _runtime_context(runs_dir: Path):
+    comps = {}
+    specs = {
+        "global_governor": ("global_governor.csv", 0.45, 1.10, 1.0),
+        "quality_governor": ("quality_governor.csv", 0.55, 1.15, 1.0),
+        "quality_runtime_modifier": ("quality_runtime_modifier.csv", 0.55, 1.15, 1.0),
+        "hive_diversification_governor": ("hive_diversification_governor.csv", 0.80, 1.05, 1.0),
+        "novaspine_context_boost": ("novaspine_context_boost.csv", 0.85, 1.15, 1.0),
+        "novaspine_hive_boost": ("novaspine_hive_boost.csv", 0.85, 1.15, 1.0),
+        "heartbeat_exposure_scaler": ("heartbeat_exposure_scaler.csv", 0.40, 1.20, 1.0),
+        "legacy_exposure": ("legacy_exposure.csv", 0.40, 1.30, 1.0),
+    }
+    active_vals = []
+    for k, (fname, lo, hi, dflt) in specs.items():
+        v, found = _latest_series_value(runs_dir / fname, lo=lo, hi=hi, default=dflt)
+        comps[k] = {"value": float(v), "found": bool(found)}
+        if found:
+            active_vals.append(float(v))
+
+    if active_vals:
+        arr = np.clip(np.asarray(active_vals, float), 0.20, 2.00)
+        mult = float(np.exp(np.mean(np.log(arr + 1e-12))))
+    else:
+        mult = 1.0
+    mult = float(np.clip(mult, 0.50, 1.10))
+
+    if mult < 0.72:
+        regime = "defensive"
+    elif mult > 0.98:
+        regime = "risk_on"
+    else:
+        regime = "balanced"
+
+    return {
+        "runtime_multiplier": mult,
+        "regime": regime,
+        "components": comps,
+        "active_component_count": int(len(active_vals)),
+    }
+
+
 def _quality_gate(
     health_json: Path,
     alerts_json: Path,
@@ -309,9 +375,22 @@ def main() -> int:
         min_health_score=float(args.min_health_score),
         max_health_age_hours=float(args.max_health_age_hours),
     )
+    ctx = _runtime_context(RUNS)
     degrade = (not qgate["ok"]) and (not bool(args.allow_degraded))
     if degrade:
         scored = scored.iloc[0:0].copy()
+    else:
+        health_scale = _clamp(_safe_float(qgate.get("score", 0.0), default=0.0) / 100.0, 0.70, 1.05)
+        runtime_scale = _clamp(_safe_float(ctx.get("runtime_multiplier", 1.0), default=1.0), 0.50, 1.10)
+        conf_scale = _clamp(health_scale * runtime_scale, 0.45, 1.10)
+        bias_scale = _clamp(math.sqrt(max(0.0, runtime_scale)), 0.70, 1.05)
+        if not scored.empty:
+            scored = scored.copy()
+            scored["confidence"] = np.clip(scored["confidence"].astype(float) * conf_scale, 0.0, 1.0)
+            scored["bias"] = np.clip(scored["bias"].astype(float) * bias_scale, -1.0, 1.0)
+            scored = scored[scored["confidence"] >= 0.05].copy()
+            scored["rank"] = scored["confidence"] * scored["bias"].abs()
+            scored = scored.sort_values("rank", ascending=False)
 
     ts = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     global_overlay = _build_global_overlay(scored)
@@ -332,6 +411,7 @@ def main() -> int:
             "symbols": int(len(scored)),
             "watchlist_filtered": bool(watchlist),
         },
+        "runtime_context": ctx,
         "quality_gate": qgate,
         "degraded_safe_mode": bool(degrade),
         "source_mode": "wf_table" if not used_fallback else "final_weights_fallback",

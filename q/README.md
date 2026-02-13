@@ -92,6 +92,7 @@ If your default Python is missing deps, set `Q_PYTHON=/absolute/path/to/venv/bin
 - `runs_plus/novaspine_hive_boost.csv`
 - `runs_plus/immune_drill.json`
 - `runs_plus/novaspine_replay_status.json`
+- `runs_plus/q_signal_overlay.json` now includes `runtime_context` (live risk multiplier + regime)
 
 ### Tests
 ```bash
