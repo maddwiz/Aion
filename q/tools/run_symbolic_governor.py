@@ -53,12 +53,29 @@ if __name__ == "__main__":
 
     df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
     df = df.dropna(subset=["DATE"]).sort_values("DATE")
-    agg = df.groupby("DATE", as_index=False).agg(
-        sym_signal=("sym_signal", "mean"),
-        sym_affect=("sym_affect", "mean") if "sym_affect" in df.columns else ("sym_signal", "mean"),
-        confidence=("confidence", "mean") if "confidence" in df.columns else ("sym_signal", "size"),
-        events_n=("events_n", "sum") if "events_n" in df.columns else ("sym_signal", "size"),
-    )
+    g = df.groupby("DATE", as_index=False)
+    agg = g.agg(sym_signal=("sym_signal", "mean"))
+    if "sym_affect" in df.columns:
+        agg = agg.merge(g.agg(sym_affect=("sym_affect", "mean")), on="DATE", how="left")
+        agg = agg.merge(g.agg(sym_affect_std=("sym_affect", "std")), on="DATE", how="left")
+    else:
+        agg["sym_affect"] = agg["sym_signal"]
+        agg["sym_affect_std"] = 0.0
+    if "confidence" in df.columns:
+        agg = agg.merge(g.agg(confidence=("confidence", "mean")), on="DATE", how="left")
+        agg = agg.merge(g.agg(confidence_std=("confidence", "std")), on="DATE", how="left")
+    else:
+        agg["confidence"] = 0.5
+        agg["confidence_std"] = 0.0
+    if "events_n" in df.columns:
+        agg = agg.merge(g.agg(events_n=("events_n", "sum")), on="DATE", how="left")
+    else:
+        agg = agg.merge(g.agg(events_n=("sym_signal", "size")), on="DATE", how="left")
+    if "sym_regime" in df.columns:
+        agg = agg.merge(g.agg(sym_regime=("sym_regime", "mean")), on="DATE", how="left")
+    else:
+        agg["sym_regime"] = 0.0
+
     if "confidence" not in agg.columns:
         agg["confidence"] = 0.5
     if "events_n" not in agg.columns:
@@ -67,12 +84,22 @@ if __name__ == "__main__":
     agg["events_n"] = pd.to_numeric(agg["events_n"], errors="coerce").fillna(1.0).clip(lower=0.0)
     agg["sym_affect"] = pd.to_numeric(agg["sym_affect"], errors="coerce").fillna(0.0)
     agg["sym_signal"] = pd.to_numeric(agg["sym_signal"], errors="coerce").fillna(0.0)
+    agg["sym_regime"] = pd.to_numeric(agg.get("sym_regime", 0.0), errors="coerce").fillna(0.0).clip(-1.0, 1.0)
+    agg["confidence_std"] = pd.to_numeric(agg.get("confidence_std", 0.0), errors="coerce").fillna(0.0).clip(lower=0.0)
+    agg["sym_affect_std"] = pd.to_numeric(agg.get("sym_affect_std", 0.0), errors="coerce").fillna(0.0).clip(lower=0.0)
+    cden = float(np.percentile(agg["confidence_std"].values, 90)) + 1e-9 if len(agg) else 1.0
+    aden = float(np.percentile(agg["sym_affect_std"].values, 90)) + 1e-9 if len(agg) else 1.0
+    agg["confidence_uncertainty"] = np.clip(agg["confidence_std"] / cden, 0.0, 1.0)
+    agg["affect_uncertainty"] = np.clip(agg["sym_affect_std"] / aden, 0.0, 1.0)
 
     stress, gov, info = build_symbolic_governor(
         agg["sym_signal"].values,
         sym_affect=agg["sym_affect"].values,
         confidence=agg["confidence"].values,
         events_n=agg["events_n"].values,
+        sym_regime=np.clip(agg["sym_regime"].values, 0.0, 1.0),
+        confidence_uncertainty=agg["confidence_uncertainty"].values,
+        affect_uncertainty=agg["affect_uncertainty"].values,
         lo=0.72,
         hi=1.12,
         smooth=0.88,

@@ -35,3 +35,33 @@ def test_symbolic_governor_penalizes_negative_affective_state():
     s2, g2, _ = build_symbolic_governor(risk_sig, risk_aff, conf, ev)
     assert float(np.mean(s2)) > float(np.mean(s1))
     assert float(np.mean(g2)) < float(np.mean(g1))
+
+
+def test_symbolic_governor_accounts_for_uncertainty():
+    T = 280
+    sig = np.full(T, -0.25, dtype=float)
+    aff = np.full(T, 0.45, dtype=float)
+    conf = np.full(T, 0.75, dtype=float)
+    ev = np.full(T, 3.0, dtype=float)
+
+    low_u = np.full(T, 0.05, dtype=float)
+    hi_u = np.full(T, 0.90, dtype=float)
+    s1, g1, i1 = build_symbolic_governor(
+        sig,
+        sym_affect=aff,
+        confidence=conf,
+        events_n=ev,
+        confidence_uncertainty=low_u,
+        affect_uncertainty=low_u,
+    )
+    s2, g2, i2 = build_symbolic_governor(
+        sig,
+        sym_affect=aff,
+        confidence=conf,
+        events_n=ev,
+        confidence_uncertainty=hi_u,
+        affect_uncertainty=hi_u,
+    )
+    assert float(np.mean(s2)) > float(np.mean(s1))
+    assert float(np.mean(g2)) < float(np.mean(g1))
+    assert float(i2["mean_uncertainty"]) > float(i1["mean_uncertainty"])
