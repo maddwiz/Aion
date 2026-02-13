@@ -83,6 +83,8 @@ if __name__ == "__main__":
     # (B) Build minimal returns + base weights (so downstream steps have inputs)
     ok, rc = run_script("tools/make_returns_and_weights.py")
     if not ok and rc is not None: failures.append({"step": "tools/make_returns_and_weights.py", "code": rc})
+    ok, rc = run_script("tools/make_asset_names.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_asset_names.py", "code": rc})
 
     # (C) Build council votes (real if present, else sleeves or synthetic)
     ok, rc = run_script("tools/make_council_votes.py")

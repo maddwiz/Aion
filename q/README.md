@@ -78,3 +78,10 @@ This runs strict mode (`Q_STRICT=1`) and fails if critical health alerts trigger
 python -m pytest -q tests
 ```
 GitHub Actions CI is configured under `.github/workflows/ci.yml`.
+
+### Importing large historical CSV sets
+If you have many raw CSVs, normalize them into `data/` first:
+```bash
+python tools/import_history_csvs.py --src "/absolute/path/to/your/csv_folder"
+python tools/make_asset_names.py
+```
