@@ -99,6 +99,7 @@ def govern_hive_weights(
     max_events = 64
     event_counts = {"atrophy_applied": 0, "split_applied": 0, "fusion_applied": 0}
     vitality_latest = {}
+    action_pressure = np.zeros(T, dtype=float)
 
     alpha = 1.0 - np.exp(np.log(0.5) / max(2.0, float(half_life_days)))
 
@@ -130,6 +131,7 @@ def govern_hive_weights(
         row = governed[t].copy()
         vrow = vitality[t]
         volrow = vol[t]
+        actions_t = 0
 
         # 1) Atrophy caps for weak hives with redistribution.
         for j in range(H):
@@ -140,6 +142,7 @@ def govern_hive_weights(
                 mask[j] = False
                 _redistribute_excess(row, excess, mask, vrow)
                 event_counts["atrophy_applied"] += 1
+                actions_t += 1
                 if len(events) < max_events:
                     events.append({"hive": hives[j], "event": "atrophy_applied", "score": float(vrow[j])})
 
@@ -158,6 +161,7 @@ def govern_hive_weights(
                     corr_pen = 1.0 - np.clip(np.abs(corr.loc[hives[dom], hives].values.astype(float)), 0.0, 1.0)
                 _redistribute_excess(row, cut, mask, vrow * corr_pen)
                 event_counts["split_applied"] += 1
+                actions_t += 1
                 if len(events) < max_events:
                     events.append({"hive": hives[dom], "event": "split_applied", "score": float(cut)})
 
@@ -177,8 +181,10 @@ def govern_hive_weights(
             row[donor] -= flow
             row[recv] += flow
             event_counts["fusion_applied"] += 1
+            actions_t += 1
 
         governed[t] = _renorm_row(row, H)
+        action_pressure[t] = float(actions_t) / float(max(1, H))
 
     # Inertia smoothing
     ib = float(np.clip(inertia, 0.0, 0.98))
@@ -206,6 +212,9 @@ def govern_hive_weights(
         "latest_governed_weights": {h: float(out[h].iloc[-1]) for h in hives},
         "latest_vitality": vitality_latest,
         "event_counts": event_counts,
+        "action_pressure_mean": float(np.mean(action_pressure)) if len(action_pressure) else 0.0,
+        "action_pressure_max": float(np.max(action_pressure)) if len(action_pressure) else 0.0,
+        "action_pressure_series": action_pressure.tolist(),
         "events": events,
     }
     return out, summary

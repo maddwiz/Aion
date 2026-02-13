@@ -82,6 +82,27 @@ if __name__ == "__main__":
     summary["diversification_governor"] = div_stats
     (RUNS / "hive_evolution.json").write_text(json.dumps(summary, indent=2))
 
+    # Persistence governor from ecosystem action pressure.
+    pres = np.asarray(summary.get("action_pressure_series", []), float)
+    if len(pres):
+        # More ecosystem actions => reduce risk slightly; smooth for runtime stability.
+        pg = np.clip(1.04 - 0.30 * np.clip(pres, 0.0, 1.0), 0.78, 1.04)
+        if len(pg) > 1:
+            out_pg = pg.copy()
+            a = 0.88
+            for i in range(1, len(out_pg)):
+                out_pg[i] = a * out_pg[i - 1] + (1.0 - a) * out_pg[i]
+            pg = np.clip(out_pg, 0.78, 1.04)
+        pd.DataFrame({"DATE": governed["DATE"], "hive_persistence_governor": pg}).to_csv(
+            RUNS / "hive_persistence_governor.csv", index=False
+        )
+        summary["persistence_governor"] = {
+            "mean": float(np.mean(pg)),
+            "min": float(np.min(pg)),
+            "max": float(np.max(pg)),
+        }
+        (RUNS / "hive_evolution.json").write_text(json.dumps(summary, indent=2))
+
     html = (
         f"<p>Governed hive weights saved to <b>weights_cross_hive_governed.csv</b>.</p>"
         f"<p>Latest governed: {summary.get('latest_governed_weights', {})}</p>"
@@ -93,3 +114,5 @@ if __name__ == "__main__":
     print(f"✅ Wrote {RUNS/'hive_evolution.json'}")
     if div_stats:
         print(f"✅ Wrote {RUNS/'hive_diversification_governor.csv'}")
+    if len(np.asarray(summary.get("action_pressure_series", []), float)):
+        print(f"✅ Wrote {RUNS/'hive_persistence_governor.csv'}")

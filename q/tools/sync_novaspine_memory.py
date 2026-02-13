@@ -139,6 +139,7 @@ def build_events():
     dna_gov = _load_series(RUNS / "dna_stress_governor.csv")
     reflex_gov = _load_series(RUNS / "reflex_health_governor.csv")
     sym_gov = _load_series(RUNS / "symbolic_governor.csv")
+    hive_pg = _load_series(RUNS / "hive_persistence_governor.csv")
 
     W = _load_matrix(RUNS / "portfolio_weights_final.csv")
     weights_info = {}
@@ -287,6 +288,11 @@ def build_events():
                     "mean_stress": _safe_float((sym or {}).get("mean_stress", 0.0)),
                     "max_stress": _safe_float((sym or {}).get("max_stress", 0.0)),
                     "mean_governor": float(np.mean(sym_gov)) if sym_gov is not None and len(sym_gov) else None,
+                },
+                "hive_persistence": {
+                    "mean_governor": float(np.mean(hive_pg)) if hive_pg is not None and len(hive_pg) else None,
+                    "min_governor": float(np.min(hive_pg)) if hive_pg is not None and len(hive_pg) else None,
+                    "max_governor": float(np.max(hive_pg)) if hive_pg is not None and len(hive_pg) else None,
                 },
                 "final_steps": list((final_info or {}).get("steps", []) or []),
                 "pipeline_failed_count": int((pipeline or {}).get("failed_count", 0)),

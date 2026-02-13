@@ -55,6 +55,7 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     np.savetxt(tmp_path / "dna_stress_governor.csv", np.array([1.00, 0.92], float), delimiter=",")
     np.savetxt(tmp_path / "reflex_health_governor.csv", np.array([0.95, 1.01], float), delimiter=",")
     np.savetxt(tmp_path / "symbolic_governor.csv", np.array([0.94, 0.99], float), delimiter=",")
+    np.savetxt(tmp_path / "hive_persistence_governor.csv", np.array([1.00, 0.97], float), delimiter=",")
 
     np.savetxt(tmp_path / "portfolio_weights_final.csv", np.array([[0.1, -0.1], [0.2, -0.2]], float), delimiter=",")
 
@@ -89,6 +90,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     sym = rc.get("payload", {}).get("symbolic", {})
     assert sym.get("status") == "ok"
     assert float(sym.get("mean_stress")) > 0.0
+    hp = rc.get("payload", {}).get("hive_persistence", {})
+    assert float(hp.get("mean_governor")) > 0.0
     trusts = [float(e.get("trust", 0.0)) for e in events]
     assert all(0.0 <= t <= 1.0 for t in trusts)
 

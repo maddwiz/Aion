@@ -230,6 +230,7 @@ def _runtime_context(runs_dir: Path):
         "quality_runtime_modifier": ("quality_runtime_modifier.csv", 0.55, 1.15, 1.0),
         "meta_mix_reliability_governor": ("meta_mix_reliability_governor.csv", 0.70, 1.20, 1.0),
         "hive_diversification_governor": ("hive_diversification_governor.csv", 0.80, 1.05, 1.0),
+        "hive_persistence_governor": ("hive_persistence_governor.csv", 0.75, 1.06, 1.0),
         "dream_coherence_governor": ("dream_coherence_governor.csv", 0.70, 1.20, 1.0),
         "novaspine_context_boost": ("novaspine_context_boost.csv", 0.85, 1.15, 1.0),
         "novaspine_hive_boost": ("novaspine_hive_boost.csv", 0.85, 1.15, 1.0),

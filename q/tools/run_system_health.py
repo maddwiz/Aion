@@ -89,6 +89,7 @@ if __name__ == "__main__":
         RUNS / "shock_mask.csv",
         RUNS / "shock_mask_info.json",
         RUNS / "hive_diversification_governor.csv",
+        RUNS / "hive_persistence_governor.csv",
         RUNS / "hive_dynamic_quality.csv",
         RUNS / "reflex_signal_gated.csv",
         RUNS / "synapses_summary.json",
@@ -149,6 +150,7 @@ if __name__ == "__main__":
     daily = _load_series(RUNS / "daily_returns.csv")
     gov = _load_series(RUNS / "global_governor.csv")
     hive_gov = _load_series(RUNS / "hive_diversification_governor.csv")
+    hive_pg = _load_series(RUNS / "hive_persistence_governor.csv")
     quality_gov = _load_series(RUNS / "quality_governor.csv")
     meta_rel = _load_series(RUNS / "meta_mix_reliability_governor.csv")
     dream_gov = _load_series(RUNS / "dream_coherence_governor.csv")
@@ -173,6 +175,11 @@ if __name__ == "__main__":
     if hive_gov is not None:
         shape["hive_governor_rows"] = int(len(hive_gov))
         shape["hive_governor_mean"] = float(np.mean(hive_gov))
+    if hive_pg is not None:
+        shape["hive_persistence_rows"] = int(len(hive_pg))
+        shape["hive_persistence_mean"] = float(np.mean(hive_pg))
+        shape["hive_persistence_min"] = float(np.min(hive_pg))
+        shape["hive_persistence_max"] = float(np.max(hive_pg))
     if quality_gov is not None:
         shape["quality_governor_rows"] = int(len(quality_gov))
         shape["quality_governor_mean"] = float(np.mean(quality_gov))

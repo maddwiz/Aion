@@ -31,6 +31,7 @@ TRACE_STEPS = [
     "dream_coherence",
     "reflex_health_governor",
     "hive_diversification",
+    "hive_persistence",
     "global_governor",
     "quality_governor",
     "novaspine_context_boost",
@@ -233,7 +234,16 @@ if __name__ == "__main__":
         steps.append("hive_diversification")
         _trace_put("hive_diversification", hs.ravel())
 
-    # 16) Global governor (regime * stability) from guardrails.
+    # 16) Hive persistence governor from ecosystem action pressure.
+    hpg = load_series("runs_plus/hive_persistence_governor.csv")
+    if hpg is not None:
+        L = min(len(hpg), W.shape[0])
+        hp = np.clip(hpg[:L], 0.75, 1.06).reshape(-1, 1)
+        W[:L] = W[:L] * hp
+        steps.append("hive_persistence")
+        _trace_put("hive_persistence", hp.ravel())
+
+    # 17) Global governor (regime * stability) from guardrails.
     gg = load_series("runs_plus/global_governor.csv")
     if gg is None:
         rg = load_series("runs_plus/regime_governor.csv")
@@ -252,7 +262,7 @@ if __name__ == "__main__":
         steps.append("global_governor")
         _trace_put("global_governor", g.ravel())
 
-    # 17) Reliability quality governor from nested/hive/council diagnostics.
+    # 18) Reliability quality governor from nested/hive/council diagnostics.
     qg = load_series("runs_plus/quality_governor.csv")
     if qg is not None:
         L = min(len(qg), W.shape[0])
@@ -261,7 +271,7 @@ if __name__ == "__main__":
         steps.append("quality_governor")
         _trace_put("quality_governor", qs.ravel())
 
-    # 18) NovaSpine recall-context boost (if available).
+    # 19) NovaSpine recall-context boost (if available).
     ncb = load_series("runs_plus/novaspine_context_boost.csv")
     if ncb is not None:
         L = min(len(ncb), W.shape[0])
@@ -270,7 +280,7 @@ if __name__ == "__main__":
         steps.append("novaspine_context_boost")
         _trace_put("novaspine_context_boost", nb.ravel())
 
-    # 19) NovaSpine per-hive alignment boost (global projection).
+    # 20) NovaSpine per-hive alignment boost (global projection).
     nhb = load_series("runs_plus/novaspine_hive_boost.csv")
     if nhb is not None:
         L = min(len(nhb), W.shape[0])
@@ -279,7 +289,7 @@ if __name__ == "__main__":
         steps.append("novaspine_hive_boost")
         _trace_put("novaspine_hive_boost", hb.ravel())
 
-    # 20) Shock/news mask exposure cut.
+    # 21) Shock/news mask exposure cut.
     sm = load_series("runs_plus/shock_mask.csv")
     if sm is not None:
         L = min(len(sm), W.shape[0])
@@ -289,7 +299,7 @@ if __name__ == "__main__":
         steps.append("shock_mask_guard")
         _trace_put("shock_mask_guard", sc.ravel())
 
-    # 21) Concentration governor (top1/top3 + HHI caps).
+    # 22) Concentration governor (top1/top3 + HHI caps).
     use_conc = str(os.getenv("Q_USE_CONCENTRATION_GOV", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if use_conc:
         top1 = float(np.clip(float(os.getenv("Q_CONCENTRATION_TOP1_CAP", "0.18")), 0.01, 1.0))
@@ -326,11 +336,11 @@ if __name__ == "__main__":
         comments="",
     )
 
-    # 22) Save final
+    # 23) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 23) Small JSON breadcrumb
+    # 24) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps(
             {
@@ -346,7 +356,7 @@ if __name__ == "__main__":
         )
     )
 
-    # 24) Report card
+    # 25) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 

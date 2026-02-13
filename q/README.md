@@ -108,6 +108,7 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/reflex_health_info.json`
 - `runs_plus/symbolic_governor.csv`
 - `runs_plus/symbolic_governor_info.json`
+- `runs_plus/hive_persistence_governor.csv`
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/final_governor_trace.csv`

@@ -39,3 +39,8 @@ def test_govern_hive_weights_actions_and_diag_passthrough_ignored():
     assert counts.get("atrophy_applied", 0) > 0
     assert counts.get("split_applied", 0) > 0
     assert counts.get("fusion_applied", 0) > 0
+    assert "action_pressure_mean" in summary
+    assert "action_pressure_max" in summary
+    aps = np.asarray(summary.get("action_pressure_series", []), float)
+    assert len(aps) == T
+    assert float(np.min(aps)) >= 0.0 - 1e-9

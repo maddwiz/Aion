@@ -176,6 +176,13 @@ if __name__ == "__main__":
         eco_q = float(np.clip(1.0 - action_density / 0.50, 0.0, 1.0))
     except Exception:
         eco_q = None
+    persistence_q = None
+    try:
+        pg = _load_series(RUNS / "hive_persistence_governor.csv")
+        if pg is not None and len(pg):
+            persistence_q = float(np.clip((float(np.mean(pg)) - 0.78) / (1.04 - 0.78 + 1e-9), 0.0, 1.0))
+    except Exception:
+        persistence_q = None
 
     nested_q, nested_detail = blend_quality(
         {
@@ -260,6 +267,7 @@ if __name__ == "__main__":
             "symbolic": (sym_q, 0.08),
             "system_health": (health_q, 0.13),
             "ecosystem": (eco_q, 0.07),
+            "ecosystem_persistence": (persistence_q, 0.06),
             "shock_env": (shock_q, 0.05),
             "novaspine_context": (nctx_q, 0.12),
         }
@@ -350,6 +358,13 @@ if __name__ == "__main__":
         sg = np.clip(np.asarray(sgg[:L], float), 0.70, 1.15)
         runtime_mod[:L] *= np.clip(sg, 0.75, 1.12)
 
+    # Ecosystem persistence governor modifier.
+    hpg = _load_series(RUNS / "hive_persistence_governor.csv")
+    if hpg is not None and len(hpg):
+        L = min(T, len(hpg))
+        hp = np.clip(np.asarray(hpg[:L], float), 0.75, 1.06)
+        runtime_mod[:L] *= np.clip(hp, 0.80, 1.08)
+
     qg = np.clip(qg * runtime_mod, 0.55, 1.15)
     if len(qg) > 1:
         for t in range(1, len(qg)):
@@ -374,6 +389,7 @@ if __name__ == "__main__":
             "reflex_health": {"score": float(reflex_q) if reflex_q is not None else None},
             "symbolic": {"score": float(sym_q) if sym_q is not None else None},
             "ecosystem": {"score": float(eco_q) if eco_q is not None else None},
+            "ecosystem_persistence": {"score": float(persistence_q) if persistence_q is not None else None},
             "shock_env": {"score": float(shock_q) if shock_q is not None else None},
             "system_health": {"score": float(health_q)},
             "novaspine_context": {"score": float(nctx_q) if nctx_q is not None else None},
@@ -398,6 +414,7 @@ if __name__ == "__main__":
             "reflex_health_governor": (RUNS / "reflex_health_governor.csv").exists(),
             "symbolic_governor_info": (RUNS / "symbolic_governor_info.json").exists(),
             "symbolic_governor": (RUNS / "symbolic_governor.csv").exists(),
+            "hive_persistence_governor": (RUNS / "hive_persistence_governor.csv").exists(),
             "system_health": (RUNS / "system_health.json").exists(),
             "novaspine_context": (RUNS / "novaspine_context.json").exists(),
         },
