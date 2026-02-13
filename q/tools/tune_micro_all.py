@@ -31,8 +31,36 @@ np.set_printoptions(suppress=True, linewidth=140)
 def load_series(rel):
     p = ROOT/rel
     if not p.exists(): return None
-    try:    return np.loadtxt(p, delimiter=",").ravel()
-    except: return np.loadtxt(p, delimiter=",", skiprows=1).ravel()
+    try:
+        a = np.loadtxt(p, delimiter=",")
+    except Exception:
+        try:
+            a = np.loadtxt(p, delimiter=",", skiprows=1)
+        except Exception:
+            vals = []
+            try:
+                with p.open("r", encoding="utf-8", errors="ignore") as f:
+                    first = True
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = [s.strip() for s in line.split(",")]
+                        if first and any(tok.lower() in ("date", "time", "timestamp") for tok in parts):
+                            first = False
+                            continue
+                        first = False
+                        try:
+                            vals.append(float(parts[-1]))
+                        except Exception:
+                            continue
+            except Exception:
+                return None
+            return np.asarray(vals, float).ravel() if vals else None
+    a = np.asarray(a, float)
+    if a.ndim == 2 and a.shape[1] >= 1:
+        a = a[:, -1]
+    return a.ravel()
 
 def load_matrix(rel):
     p = ROOT/rel
@@ -73,10 +101,30 @@ def sharpe(r):
     mu = np.nanmean(r); sd = np.nanstd(r) + 1e-12
     return float((mu/sd)*np.sqrt(252.0))
 
+def downside_vol(r):
+    r = np.asarray(r, float).ravel()
+    r = r[np.isfinite(r)]
+    if r.size == 0:
+        return 0.0
+    n = r[r < 0.0]
+    if n.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(n**2)) * np.sqrt(252.0))
+
+def max_dd(r):
+    r = np.asarray(r, float).ravel()
+    if r.size == 0:
+        return 0.0
+    eq = np.cumprod(1.0 + np.clip(r, -0.95, 0.95))
+    peak = np.maximum.accumulate(eq)
+    dd = eq / (peak + 1e-12) - 1.0
+    return float(np.min(dd))
+
 def zscore(x):
     x = np.asarray(x, float)
     mu = np.nanmean(x); sd = np.nanstd(x) + 1e-12
-    return (x - mu) / sd
+    z = (x - mu) / sd
+    return np.nan_to_num(z, nan=0.0, posinf=0.0, neginf=0.0)
 
 # ---------- Build asset return matrix (fallback) ----------
 def build_asset_returns():
@@ -180,6 +228,12 @@ if __name__ == "__main__":
         "runs_plus/weights_capped.csv"
     ])
 
+    # Fallbacks so tuner can run even when one sleeve is missing.
+    if W_on is not None and W_def is None:
+        W_def = 0.60 * np.asarray(W_on, float)
+    if W_on is None and W_def is not None:
+        W_on = np.asarray(W_def, float)
+
     if y is None and (A is None or W_on is None or W_def is None):
         print("(!) Need returns or asset/weight matrices; run your pipeline first.")
         raise SystemExit(0)
@@ -231,6 +285,12 @@ if __name__ == "__main__":
         except:
             clusters = None
 
+    # Optional governance scalers
+    hb_scale = load_series("runs_plus/heartbeat_exposure_scaler.csv"); hb_scale = trim(hb_scale)
+    legacy_scale = load_series("runs_plus/legacy_exposure.csv"); legacy_scale = trim(legacy_scale)
+    hive_scale = load_series("runs_plus/hive_diversification_governor.csv"); hive_scale = trim(hive_scale)
+    global_scale = load_series("runs_plus/global_governor.csv"); global_scale = trim(global_scale)
+
     # --------- Compact grids (fast & meaningful) ----------
     grid = {
         "alpha_meta": np.linspace(0.0, 1.0, 11),        # council mix
@@ -241,6 +301,7 @@ if __name__ == "__main__":
         "shock_alpha":np.array([0.5]),                  # mask strength
         "bags":       np.array([10, 20]),               # time bags
         "bag_size":   np.array([0.7]),                  # bag window size
+        "gov_strength": np.array([0.5, 1.0]),           # scaler influence
     }
 
     # --------- Scoring primitive ----------
@@ -269,11 +330,14 @@ if __name__ == "__main__":
                     pvec[start:end] = base_mix[start:end]
                     mats.append(pvec)
                 M = np.vstack(mats)
-                with np.errstate(all='ignore'):
-                    bagged = np.nanmean(M, axis=0)
+                finite = np.isfinite(M)
+                cnt = finite.sum(axis=0)
+                ssum = np.nansum(M, axis=0)
+                bagged = np.where(cnt > 0, ssum / (cnt + 1e-12), np.nan)
                 # if everything NaN (shouldn't happen), fall back
                 if np.all(~np.isfinite(bagged)):
                     bagged = base_mix
+                bagged = np.nan_to_num(bagged, nan=0.0, posinf=0.0, neginf=0.0)
                 mix_sig = bagged
             else:
                 mix_sig = base_mix
@@ -316,8 +380,21 @@ if __name__ == "__main__":
             z = zscore(mix_sig[:L])
             lev = 1.0 + 0.2 * np.tanh(z)
             W[:L] = W[:L] * lev.reshape(-1,1)
+        W = np.nan_to_num(W, nan=0.0, posinf=0.0, neginf=0.0)
 
         # 6) Portfolio returns
+        gs = float(params["gov_strength"])
+        if gs > 0.0:
+            for scl in [hb_scale, legacy_scale, hive_scale, global_scale]:
+                if scl is None:
+                    continue
+                Ls = min(len(scl), W.shape[0])
+                if Ls <= 0:
+                    continue
+                sf = np.clip(scl[:Ls], 0.30, 1.40)
+                eff = 1.0 + gs * (sf - 1.0)
+                W[:Ls] = W[:Ls] * eff.reshape(-1, 1)
+
         if A is not None and A.shape[1] == W.shape[1] and A.shape[0] >= W.shape[0]:
             pnl = np.sum(W * A[:W.shape[0]], axis=1)
         elif y is not None and len(y) >= W.shape[0]:
@@ -325,7 +402,14 @@ if __name__ == "__main__":
         else:
             return -1e9, None
 
-        return sharpe(pnl), W
+        sh = sharpe(pnl)
+        dsv = downside_vol(pnl)
+        ddm = abs(max_dd(pnl))
+        turn = float(np.nanmean(np.sum(np.abs(np.diff(W, axis=0)), axis=1))) if W.shape[0] > 2 else 0.0
+        score = sh - 0.10 * dsv - 0.05 * turn - 0.05 * ddm
+        if not np.isfinite(score):
+            return -1e9, None
+        return score, W
 
     # --------- Grid search ----------
     best = {"score": -1e9, "params": None, "W": None}
@@ -334,22 +418,24 @@ if __name__ == "__main__":
             for q in grid["reg_q"]:
                 for capc in grid["cap_cluster"]:
                     for capmn in grid["cap_minmax"]:
-                        for sa in grid["shock_alpha"]:
-                            for bags in grid["bags"]:
-                                for bsize in grid["bag_size"]:
-                                    params = {
-                                        "alpha_meta": float(a),
-                                        "reg_lb": int(lb),
-                                        "reg_q": float(q),
-                                        "cap_cluster": float(capc),
-                                        "cap_minmax": (float(capmn[0]), float(capmn[1])),
-                                        "shock_alpha": float(sa),
-                                        "bags": int(bags),
-                                        "bag_size": float(bsize),
-                                    }
-                                    score, W = score_combo(params)
-                                    if score > best["score"]:
-                                        best = {"score": score, "params": params, "W": W}
+                                for sa in grid["shock_alpha"]:
+                                    for bags in grid["bags"]:
+                                        for bsize in grid["bag_size"]:
+                                            for gstr in grid["gov_strength"]:
+                                                params = {
+                                                    "alpha_meta": float(a),
+                                                    "reg_lb": int(lb),
+                                                    "reg_q": float(q),
+                                                    "cap_cluster": float(capc),
+                                                    "cap_minmax": (float(capmn[0]), float(capmn[1])),
+                                                    "shock_alpha": float(sa),
+                                                    "bags": int(bags),
+                                                    "bag_size": float(bsize),
+                                                    "gov_strength": float(gstr),
+                                                }
+                                                score, W = score_combo(params)
+                                                if score > best["score"]:
+                                                    best = {"score": score, "params": params, "W": W}
 
     if best["W"] is None:
         print("(!) Tuning failed to build any weights. Ensure inputs exist (tail_blend, risk_parity, returns).")
@@ -359,7 +445,7 @@ if __name__ == "__main__":
     Wb = best["W"]
     np.savetxt(RUNS/"tune_best_weights.csv", Wb, delimiter=",")
     (RUNS/"tune_best_config.json").write_text(json.dumps({
-        "best_sharpe": best["score"],
+        "best_objective": best["score"],
         **best["params"]
     }, indent=2))
 
@@ -369,11 +455,12 @@ if __name__ == "__main__":
             f"ClusterCap={best['params']['cap_cluster']:.2f} | "
             f"Caps({best['params']['cap_minmax'][0]:.2f}–{best['params']['cap_minmax'][1]:.2f}) | "
             f"Shockα={best['params']['shock_alpha']:.2f} | "
-            f"Bags={best['params']['bags']}, size={best['params']['bag_size']:.2f}.</p>")
+            f"Bags={best['params']['bags']}, size={best['params']['bag_size']:.2f} | "
+            f"GovStrength={best['params']['gov_strength']:.2f}.</p>")
     append_card("Micro Tuning (P1–P3) ✔", html)
 
     # Terminal summary
     print("✅ Tuning complete")
-    print("Best Sharpe:", f"{best['score']:.3f}")
+    print("Best Objective:", f"{best['score']:.3f}")
     print("Best params:", json.dumps(best["params"], indent=2))
     print("Saved:", RUNS/"tune_best_weights.csv", "and", RUNS/"tune_best_config.json")
