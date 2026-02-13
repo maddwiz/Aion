@@ -76,6 +76,52 @@ def _build_scores(df: pd.DataFrame) -> pd.DataFrame:
     out["rank"] = out["confidence"] * out["bias"].abs()
     return out
 
+def _build_scores_from_final_weights(weights_path: Path) -> pd.DataFrame:
+    if not weights_path.exists():
+        return pd.DataFrame(columns=["symbol", "bias", "confidence", "sharpe", "hit", "rank"])
+    try:
+        w = np.loadtxt(weights_path, delimiter=",")
+    except Exception:
+        try:
+            w = np.loadtxt(weights_path, delimiter=",", skiprows=1)
+        except Exception:
+            return pd.DataFrame(columns=["symbol", "bias", "confidence", "sharpe", "hit", "rank"])
+    w = np.asarray(w, float)
+    if w.ndim == 1:
+        row = w.ravel()
+    elif w.ndim == 2 and w.shape[0] >= 1:
+        row = w[-1].ravel()
+    else:
+        return pd.DataFrame(columns=["symbol", "bias", "confidence", "sharpe", "hit", "rank"])
+
+    syms = []
+    an = RUNS / "asset_names.csv"
+    if an.exists():
+        try:
+            adf = pd.read_csv(an)
+            if len(adf.columns) >= 1:
+                c0 = adf.columns[0]
+                syms = [str(x).upper().strip() for x in adf[c0].tolist() if str(x).strip()]
+        except Exception:
+            syms = []
+    if not syms:
+        syms = sorted([p.stem.replace("_prices", "").upper() for p in (ROOT / "data").glob("*.csv") if p.is_file()])
+    if not syms:
+        syms = [f"ASSET_{i+1}" for i in range(len(row))]
+    n = min(len(syms), len(row))
+    syms = syms[:n]
+    vals = row[:n].astype(float)
+    absv = np.abs(vals)
+    scale = float(np.nanpercentile(absv, 75)) if np.isfinite(absv).any() else 1.0
+    scale = max(scale, 1e-6)
+    bias = np.clip(vals / (2.5 * scale), -1.0, 1.0)
+    confidence = np.clip(absv / (2.0 * scale), 0.0, 1.0)
+    out = pd.DataFrame({"symbol": syms, "bias": bias, "confidence": confidence})
+    out["sharpe"] = 0.0
+    out["hit"] = 0.5
+    out["rank"] = out["confidence"] * out["bias"].abs()
+    return out
+
 
 def _collapse_to_canonical(scored: pd.DataFrame) -> pd.DataFrame:
     if scored.empty:
@@ -135,6 +181,54 @@ def _load_watchlist(path_value: str) -> set[str]:
     return out
 
 
+def _load_json(path: Path):
+    if not path.exists() or path.is_dir():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _hours_since_file(path: Path) -> float | None:
+    if not path.exists():
+        return None
+    ts = dt.datetime.fromtimestamp(path.stat().st_mtime, tz=dt.timezone.utc)
+    return float((dt.datetime.now(dt.timezone.utc) - ts).total_seconds() / 3600.0)
+
+
+def _quality_gate(
+    health_json: Path,
+    alerts_json: Path,
+    min_health_score: float,
+    max_health_age_hours: float,
+):
+    issues = []
+    health = _load_json(health_json) or {}
+    alerts = _load_json(alerts_json) or {}
+
+    score = _safe_float(health.get("health_score", 0.0), default=0.0)
+    age_h = _hours_since_file(health_json)
+    alerts_ok = bool(alerts.get("ok", True))
+
+    if score < float(min_health_score):
+        issues.append(f"health_score<{min_health_score} ({score:.1f})")
+    if age_h is None:
+        issues.append("system_health missing")
+    elif age_h > float(max_health_age_hours):
+        issues.append(f"system_health stale>{max_health_age_hours}h ({age_h:.2f}h)")
+    if not alerts_ok:
+        issues.append("health alerts not clear")
+
+    return {
+        "ok": len(issues) == 0,
+        "score": score,
+        "health_age_hours": age_h,
+        "alerts_ok": alerts_ok,
+        "issues": issues,
+    }
+
+
 def _build_global_overlay(scored: pd.DataFrame) -> dict:
     if scored.empty:
         return {"bias": 0.0, "confidence": 0.0}
@@ -168,23 +262,40 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional watchlist file. If provided, exported symbols are filtered to this set.",
     )
+    ap.add_argument("--health-json", default=str(RUNS / "system_health.json"))
+    ap.add_argument("--alerts-json", default=str(RUNS / "health_alerts.json"))
+    ap.add_argument("--min-health-score", type=float, default=70.0)
+    ap.add_argument("--max-health-age-hours", type=float, default=8.0)
+    ap.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        help="If set, still export scored signals even when quality gate fails.",
+    )
     return ap.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     wf_path = Path(args.wf)
-    if not wf_path.exists():
-        raise SystemExit(f"Missing input: {wf_path}")
+    used_fallback = False
+    if wf_path.exists():
+        df = pd.read_csv(wf_path)
+        if "asset" not in df.columns:
+            raise SystemExit(f"{wf_path} must include an 'asset' column.")
+        scored = _build_scores(df)
+    else:
+        scored = _build_scores_from_final_weights(RUNS / "portfolio_weights_final.csv")
+        used_fallback = True
 
-    df = pd.read_csv(wf_path)
-    if "asset" not in df.columns:
-        raise SystemExit(f"{wf_path} must include an 'asset' column.")
-
-    scored = _build_scores(df)
+    scored_raw = scored.copy()
     scored = scored.replace([np.inf, -np.inf], np.nan).dropna(subset=["symbol", "bias", "confidence"])
     scored = scored[scored["confidence"] >= float(args.min_confidence)].copy()
     scored = scored[scored["bias"].abs() > 1e-6].copy()
+    if used_fallback and scored.empty and not scored_raw.empty:
+        alt = scored_raw.replace([np.inf, -np.inf], np.nan).dropna(subset=["symbol", "bias", "confidence"]).copy()
+        alt = alt[alt["bias"].abs() > 1e-6].copy()
+        alt = alt[alt["confidence"] >= 0.10].copy()
+        scored = alt.sort_values("rank", ascending=False).head(max(1, min(20, int(args.max_symbols))))
     scored = _collapse_to_canonical(scored)
 
     watchlist = _load_watchlist(args.watchlist_txt)
@@ -192,9 +303,20 @@ def main() -> int:
         scored = scored[scored["symbol"].isin(watchlist)].copy()
 
     scored = scored.sort_values("rank", ascending=False).head(max(1, int(args.max_symbols)))
+    qgate = _quality_gate(
+        health_json=Path(args.health_json),
+        alerts_json=Path(args.alerts_json),
+        min_health_score=float(args.min_health_score),
+        max_health_age_hours=float(args.max_health_age_hours),
+    )
+    degrade = (not qgate["ok"]) and (not bool(args.allow_degraded))
+    if degrade:
+        scored = scored.iloc[0:0].copy()
 
     ts = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     global_overlay = _build_global_overlay(scored)
+    if degrade:
+        global_overlay = {"bias": 0.0, "confidence": 0.0}
     payload = {
         "generated_at": ts,
         "source": "q.walk_forward_plus",
@@ -210,6 +332,9 @@ def main() -> int:
             "symbols": int(len(scored)),
             "watchlist_filtered": bool(watchlist),
         },
+        "quality_gate": qgate,
+        "degraded_safe_mode": bool(degrade),
+        "source_mode": "wf_table" if not used_fallback else "final_weights_fallback",
     }
 
     out_json = Path(args.out_json)
@@ -233,6 +358,8 @@ def main() -> int:
     print(f"✅ Wrote {out_csv}")
     print(f"Signals exported: {len(payload['signals'])}")
     print(f"Global overlay: bias={_safe_float(global_overlay.get('bias')):.4f}, confidence={_safe_float(global_overlay.get('confidence')):.4f}")
+    if degrade:
+        print(f"(!) Degraded safe mode enabled: {', '.join(qgate['issues'])}")
     return 0
 
 
