@@ -56,6 +56,7 @@ def build_alert_payload(
     max_conc_top1_after = float(thresholds.get("max_concentration_top1_after", 0.30))
     max_portfolio_l1_drift = float(thresholds.get("max_portfolio_l1_drift", 1.20))
     min_dream_coherence = float(thresholds.get("min_dream_coherence", 0.45))
+    max_heartbeat_stress = float(thresholds.get("max_heartbeat_stress", 0.85))
 
     issues = []
     score = float(health.get("health_score", 0.0))
@@ -64,6 +65,17 @@ def build_alert_payload(
         issues.append(f"health_score<{min_health} ({score:.1f})")
     if n_issues > max_issues:
         issues.append(f"health_issues>{max_issues} ({n_issues})")
+
+    hb_stress = None
+    if isinstance(health, dict):
+        shape = health.get("shape", {})
+        if isinstance(shape, dict):
+            try:
+                hb_stress = float(shape.get("heartbeat_stress_mean", np.nan))
+            except Exception:
+                hb_stress = None
+    if hb_stress is not None and np.isfinite(hb_stress) and hb_stress > max_heartbeat_stress:
+        issues.append(f"heartbeat_stress_mean>{max_heartbeat_stress} ({hb_stress:.3f})")
 
     gg = guards.get("global_governor", {}) if isinstance(guards, dict) else {}
     gmean = gg.get("mean", None)
@@ -185,10 +197,12 @@ def build_alert_payload(
             "max_concentration_top1_after": max_conc_top1_after,
             "max_portfolio_l1_drift": max_portfolio_l1_drift,
             "min_dream_coherence": min_dream_coherence,
+            "max_heartbeat_stress": max_heartbeat_stress,
         },
         "observed": {
             "health_score": score,
             "health_issues": n_issues,
+            "heartbeat_stress_mean": hb_stress,
             "global_governor_mean": gmean,
             "quality_governor_mean": q_mean,
             "quality_score": q_score,
@@ -222,6 +236,7 @@ if __name__ == "__main__":
     max_conc_hhi_after = float(os.getenv("Q_MAX_CONCENTRATION_HHI_AFTER", "0.18"))
     max_conc_top1_after = float(os.getenv("Q_MAX_CONCENTRATION_TOP1_AFTER", "0.30"))
     min_dream_coherence = float(os.getenv("Q_MIN_DREAM_COHERENCE", "0.45"))
+    max_heartbeat_stress = float(os.getenv("Q_MAX_HEARTBEAT_STRESS", "0.85"))
 
     health = _load_json(RUNS / "system_health.json") or {}
     guards = _load_json(RUNS / "guardrails_summary.json") or {}
@@ -256,6 +271,7 @@ if __name__ == "__main__":
             "max_concentration_top1_after": max_conc_top1_after,
             "max_portfolio_l1_drift": float(os.getenv("Q_MAX_PORTFOLIO_L1_DRIFT", "1.20")),
             "min_dream_coherence": min_dream_coherence,
+            "max_heartbeat_stress": max_heartbeat_stress,
         },
     )
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))

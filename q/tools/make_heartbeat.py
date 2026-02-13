@@ -73,6 +73,7 @@ if __name__ == "__main__":
         print("✅ Wrote", out_png)
         print("✅ Wrote runs_plus/heartbeat_bpm.csv")
         print("✅ Wrote runs_plus/heartbeat_exposure_scaler.csv")
+        print("✅ Wrote runs_plus/heartbeat_stress.csv")
     except (Exception, SystemExit):
         rets = load_returns()
         if rets is None:
@@ -82,3 +83,4 @@ if __name__ == "__main__":
         print("✅ Wrote", out_png)
         print("✅ Wrote runs_plus/heartbeat_bpm.csv")
         print("✅ Wrote runs_plus/heartbeat_exposure_scaler.csv")
+        print("✅ Wrote runs_plus/heartbeat_stress.csv")

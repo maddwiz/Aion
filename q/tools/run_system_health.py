@@ -78,6 +78,7 @@ if __name__ == "__main__":
         RUNS / "global_governor.csv",
         RUNS / "quality_governor.csv",
         RUNS / "heartbeat_exposure_scaler.csv",
+        RUNS / "heartbeat_stress.csv",
         RUNS / "legacy_exposure.csv",
         RUNS / "cross_hive_weights.csv",
         RUNS / "weights_cross_hive_governed.csv",
@@ -144,6 +145,7 @@ if __name__ == "__main__":
     nsp_ctx_boost = _load_series(RUNS / "novaspine_context_boost.csv")
     nsp_hive_boost = _load_series(RUNS / "novaspine_hive_boost.csv")
     gov_trace_total = _load_series(RUNS / "final_governor_trace.csv")
+    hb_stress = _load_series(RUNS / "heartbeat_stress.csv")
 
     shape = {}
     if w is not None:
@@ -161,6 +163,10 @@ if __name__ == "__main__":
     if quality_gov is not None:
         shape["quality_governor_rows"] = int(len(quality_gov))
         shape["quality_governor_mean"] = float(np.mean(quality_gov))
+    if hb_stress is not None:
+        shape["heartbeat_stress_rows"] = int(len(hb_stress))
+        shape["heartbeat_stress_mean"] = float(np.mean(hb_stress))
+        shape["heartbeat_stress_max"] = float(np.max(hb_stress))
     if dream_gov is not None:
         shape["dream_coherence_rows"] = int(len(dream_gov))
         shape["dream_coherence_mean"] = float(np.mean(dream_gov))

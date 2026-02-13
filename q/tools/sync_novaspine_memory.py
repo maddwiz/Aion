@@ -130,6 +130,7 @@ def build_events():
     htx = _load_json(RUNS / "hive_transparency.json") or {}
     drift_watch = _load_json(RUNS / "portfolio_drift_watch.json") or {}
     gov_trace = _load_series(RUNS / "final_governor_trace.csv")
+    hb_stress = _load_series(RUNS / "heartbeat_stress.csv")
 
     W = _load_matrix(RUNS / "portfolio_weights_final.csv")
     weights_info = {}
@@ -267,6 +268,11 @@ def build_events():
                     "latest_l1": _safe_float((drift_watch.get("drift", {}) if isinstance(drift_watch, dict) else {}).get("latest_l1", 0.0)),
                     "mean_l1": _safe_float((drift_watch.get("drift", {}) if isinstance(drift_watch, dict) else {}).get("mean_l1", 0.0)),
                     "p95_l1": _safe_float((drift_watch.get("drift", {}) if isinstance(drift_watch, dict) else {}).get("p95_l1", 0.0)),
+                },
+                "heartbeat_stress": {
+                    "latest": float(hb_stress[-1]) if hb_stress is not None and len(hb_stress) else None,
+                    "mean": float(np.mean(hb_stress)) if hb_stress is not None and len(hb_stress) else None,
+                    "max": float(np.max(hb_stress)) if hb_stress is not None and len(hb_stress) else None,
                 },
             },
             "trust": float(

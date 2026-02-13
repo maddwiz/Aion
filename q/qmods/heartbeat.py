@@ -51,6 +51,21 @@ def _robust_percentile_rank(x: pd.Series, win: int) -> pd.Series:
         return float((a <= v).mean())
     return x.rolling(win, min_periods=max(20, win // 4)).apply(_pct, raw=True)
 
+
+def heartbeat_stress_from_bpm(bpm: pd.Series, cfg: HBConfig) -> pd.Series:
+    """
+    Stress score in [0,1] from heartbeat level and acceleration.
+    Higher means harsher risk conditions.
+    """
+    b = pd.Series(pd.to_numeric(bpm, errors="coerce")).replace([np.inf, -np.inf], np.nan).fillna(cfg.base_bpm)
+    lvl = _robust_percentile_rank(b, win=cfg.percentile_win).fillna(0.5).clip(0.0, 1.0)
+    jerk = b.diff().abs().fillna(0.0)
+    jerk = jerk.rolling(21, min_periods=5).mean().fillna(0.0)
+    jrk = _robust_percentile_rank(jerk, win=cfg.percentile_win).fillna(0.5).clip(0.0, 1.0)
+    stress = np.clip(0.65 * lvl + 0.35 * jrk, 0.0, 1.0)
+    return pd.Series(stress, index=b.index, name="heartbeat_stress")
+
+
 def map_vol_to_bpm(vol: pd.Series, cfg: HBConfig) -> pd.Series:
     """
     Linearly map vol into [base_bpm, max_bpm] with clipping.
@@ -62,22 +77,25 @@ def map_vol_to_bpm(vol: pd.Series, cfg: HBConfig) -> pd.Series:
     return bpm.rename("heartbeat_bpm")
 
 def bpm_to_exposure_scaler(bpm: pd.Series, cfg: HBConfig) -> pd.Series:
-    # high BPM => lower risk budget
-    pct = _robust_percentile_rank(bpm, win=cfg.percentile_win).fillna(0.5).clip(0.0, 1.0)
-    scaler = 1.15 - 0.65 * pct
-    return scaler.clip(0.45, 1.15).rename("exposure_scaler")
+    # high BPM + high BPM acceleration => lower risk budget.
+    stress = heartbeat_stress_from_bpm(bpm, cfg)
+    scaler = 1.18 - 0.70 * stress
+    return scaler.clip(0.40, 1.15).rename("exposure_scaler")
 
 def _write_outputs(
     bpm: pd.Series,
     scaler: pd.Series,
+    stress: pd.Series,
     out_json: str,
     out_png: str,
     out_bpm_csv: str,
     out_scaler_csv: str,
+    out_stress_csv: str,
     source: str,
 ):
     d = bpm.dropna()
     s = scaler.reindex(d.index).ffill().fillna(1.0)
+    h = stress.reindex(d.index).ffill().fillna(0.5)
 
     def _fmt_ts(ts):
         try:
@@ -93,11 +111,14 @@ def _write_outputs(
 
     hb_map = {_fmt_ts(ts): float(val) for ts, val in d.items()}
     sc_map = {_fmt_ts(ts): float(val) for ts, val in s.items()}
+    hs_map = {_fmt_ts(ts): float(val) for ts, val in h.items()}
 
     payload = {
         "heartbeat": hb_map,
         "exposure_scaler_series": sc_map,
         "exposure_scaler": float(s.iloc[-1]) if len(s) else 1.0,
+        "stress_series": hs_map,
+        "stress": float(h.iloc[-1]) if len(h) else 0.5,
         "source": source,
     }
     Path(out_json).parent.mkdir(parents=True, exist_ok=True)
@@ -105,8 +126,10 @@ def _write_outputs(
 
     hb_csv = pd.DataFrame({"DATE": d.index, "heartbeat_bpm": d.values})
     sc_csv = pd.DataFrame({"DATE": s.index, "heartbeat_exposure_scaler": s.values})
+    hs_csv = pd.DataFrame({"DATE": h.index, "heartbeat_stress": h.values})
     hb_csv.to_csv(out_bpm_csv, index=False)
     sc_csv.to_csv(out_scaler_csv, index=False)
+    hs_csv.to_csv(out_stress_csv, index=False)
 
     if plt is not None and not d.empty:
         plt.figure(figsize=(8, 3))
@@ -127,7 +150,8 @@ def compute_heartbeat(prices: pd.DataFrame,
                       out_json: str = "runs_plus/heartbeat.json",
                       out_png: str = "runs_plus/heartbeat.png",
                       out_bpm_csv: str = "runs_plus/heartbeat_bpm.csv",
-                      out_scaler_csv: str = "runs_plus/heartbeat_exposure_scaler.csv"):
+                      out_scaler_csv: str = "runs_plus/heartbeat_exposure_scaler.csv",
+                      out_stress_csv: str = "runs_plus/heartbeat_stress.csv"):
     """
     Writes:
       - runs_plus/heartbeat.json  -> {"heartbeat": {"YYYY-MM-DD": bpm, ...}}
@@ -137,13 +161,16 @@ def compute_heartbeat(prices: pd.DataFrame,
     vol = realized_vol(prices, cfg.window)
     bpm = map_vol_to_bpm(vol, cfg)
     scaler = bpm_to_exposure_scaler(bpm, cfg)
+    stress = heartbeat_stress_from_bpm(bpm, cfg)
     _write_outputs(
         bpm=bpm,
         scaler=scaler,
+        stress=stress,
         out_json=out_json,
         out_png=out_png,
         out_bpm_csv=out_bpm_csv,
         out_scaler_csv=out_scaler_csv,
+        out_stress_csv=out_stress_csv,
         source="prices",
     )
     return out_json, out_png
@@ -154,18 +181,22 @@ def compute_heartbeat_from_returns(
     out_png: str = "runs_plus/heartbeat.png",
     out_bpm_csv: str = "runs_plus/heartbeat_bpm.csv",
     out_scaler_csv: str = "runs_plus/heartbeat_exposure_scaler.csv",
+    out_stress_csv: str = "runs_plus/heartbeat_stress.csv",
 ):
     cfg = HBConfig()
     vol = realized_vol_from_returns(returns, cfg.window)
     bpm = map_vol_to_bpm(vol, cfg)
     scaler = bpm_to_exposure_scaler(bpm, cfg)
+    stress = heartbeat_stress_from_bpm(bpm, cfg)
     _write_outputs(
         bpm=bpm,
         scaler=scaler,
+        stress=stress,
         out_json=out_json,
         out_png=out_png,
         out_bpm_csv=out_bpm_csv,
         out_scaler_csv=out_scaler_csv,
+        out_stress_csv=out_stress_csv,
         source="returns",
     )
     return out_json, out_png

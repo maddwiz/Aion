@@ -11,6 +11,7 @@ def test_compute_heartbeat_from_returns_writes_outputs(tmp_path: Path):
     out_png = tmp_path / "heartbeat.png"
     out_bpm_csv = tmp_path / "heartbeat_bpm.csv"
     out_scaler_csv = tmp_path / "heartbeat_exposure_scaler.csv"
+    out_stress_csv = tmp_path / "heartbeat_stress.csv"
 
     compute_heartbeat_from_returns(
         rets,
@@ -18,9 +19,11 @@ def test_compute_heartbeat_from_returns_writes_outputs(tmp_path: Path):
         out_png=str(out_png),
         out_bpm_csv=str(out_bpm_csv),
         out_scaler_csv=str(out_scaler_csv),
+        out_stress_csv=str(out_stress_csv),
     )
 
     assert out_json.exists()
     assert out_bpm_csv.exists()
     assert out_scaler_csv.exists()
+    assert out_stress_csv.exists()
     assert out_png.exists()

@@ -84,6 +84,7 @@ export Q_MAX_CONCENTRATION_HHI_AFTER=0.18
 export Q_MAX_CONCENTRATION_TOP1_AFTER=0.30
 export Q_MAX_PORTFOLIO_L1_DRIFT=1.20
 export Q_MIN_DREAM_COHERENCE=0.45
+export Q_MAX_HEARTBEAT_STRESS=0.85
 ```
 
 ### Health artifacts
@@ -95,6 +96,7 @@ export Q_MIN_DREAM_COHERENCE=0.45
 - `runs_plus/quality_runtime_modifier.csv`
 - `runs_plus/dream_coherence_governor.csv`
 - `runs_plus/dream_coherence_info.json`
+- `runs_plus/heartbeat_stress.csv`
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/final_governor_trace.csv`
