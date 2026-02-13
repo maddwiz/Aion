@@ -10,6 +10,7 @@
 #   runs_plus/meta_mix_info.json      (best params + diagnostics)
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from qmods.confidence_calibration import (
     fit_empirical_calibrator,
     reliability_governor_from_calibrated,
 )
+from qmods.council_meta_mix import adaptive_blend_series
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
 
@@ -169,11 +171,37 @@ if __name__ == "__main__":
                         }
                     )
 
-    best_raw = best["alpha_meta"] * zm_eff + (1.0 - best["alpha_meta"]) * zs_eff
+    use_adaptive = str(os.getenv("COUNCIL_MIX_ADAPTIVE", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    alpha_t = np.full(T, float(best["alpha_meta"]), dtype=float)
+    gross_t = np.full(T, float(best["gross"]), dtype=float)
+    qmix = np.full(T, 0.5, dtype=float)
+    disagree_n = np.zeros(T, dtype=float)
+    if use_adaptive:
+        ctx = adaptive_blend_series(
+            zm_eff,
+            zs_eff,
+            mc,
+            sc,
+            y_fwd,
+            base_alpha=float(best["alpha_meta"]),
+            base_gross=float(best["gross"]),
+            quality_sensitivity=float(np.clip(float(os.getenv("COUNCIL_MIX_QUALITY_SENS", "0.55")), 0.0, 1.50)),
+            conf_sensitivity=float(np.clip(float(os.getenv("COUNCIL_MIX_CONF_SENS", "0.25")), 0.0, 1.50)),
+            alpha_smooth=float(np.clip(float(os.getenv("COUNCIL_MIX_ALPHA_SMOOTH", "0.90")), 0.0, 0.99)),
+            gross_smooth=float(np.clip(float(os.getenv("COUNCIL_MIX_GROSS_SMOOTH", "0.88")), 0.0, 0.99)),
+            alpha_bounds=(0.05, 0.95),
+            gross_bounds=(0.12, 0.45),
+        )
+        alpha_t = np.asarray(ctx.get("alpha", alpha_t), float).ravel()[:T]
+        gross_t = np.asarray(ctx.get("gross", gross_t), float).ravel()[:T]
+        qmix = np.asarray(ctx.get("quality_mix", qmix), float).ravel()[:T]
+        disagree_n = np.asarray(ctx.get("disagreement_norm", disagree_n), float).ravel()[:T]
+
+    best_raw = alpha_t * zm_eff + (1.0 - alpha_t) * zs_eff
     best_smooth = smooth_signal(best_raw, beta=best["smooth_beta"])
-    best_pos = np.tanh(best["gross"] * best_smooth)
-    mix_conf = np.clip(best["alpha_meta"] * mc + (1.0 - best["alpha_meta"]) * sc, 0.0, 1.0)
-    raw_conf = np.clip(0.55 * mix_conf + 0.45 * np.abs(best_pos), 0.0, 1.0)
+    best_pos = np.tanh(gross_t * best_smooth)
+    mix_conf = np.clip(alpha_t * mc + (1.0 - alpha_t) * sc, 0.0, 1.0)
+    raw_conf = np.clip(0.40 * mix_conf + 0.35 * np.abs(best_pos) + 0.25 * qmix, 0.0, 1.0)
 
     # Confidence calibration: map raw confidence to empirical directional hit rates.
     # Pred at t maps to y[t+1], so use lag-aligned outcomes for fit.
@@ -184,10 +212,18 @@ if __name__ == "__main__":
     conf_cal = apply_empirical_calibrator(raw_conf, cal)
     rel_gov = reliability_governor_from_calibrated(conf_cal, lo=0.72, hi=1.16, smooth=0.88)
 
-    leverage = np.clip(1.0 + 0.25 * np.abs(best_pos) * mix_conf, 0.80, 1.35)
+    leverage = np.clip(
+        1.0 + 0.18 * np.abs(best_pos) * mix_conf + 0.12 * qmix - 0.06 * disagree_n,
+        0.78,
+        1.38,
+    )
 
     np.savetxt(RUNS / "meta_mix.csv", best_pos, delimiter=",")
     np.savetxt(RUNS / "meta_mix_leverage.csv", leverage, delimiter=",")
+    np.savetxt(RUNS / "meta_mix_alpha.csv", alpha_t, delimiter=",")
+    np.savetxt(RUNS / "meta_mix_gross.csv", gross_t, delimiter=",")
+    np.savetxt(RUNS / "meta_mix_quality.csv", qmix, delimiter=",")
+    np.savetxt(RUNS / "meta_mix_disagreement.csv", disagree_n, delimiter=",")
     np.savetxt(RUNS / "meta_mix_confidence_raw.csv", raw_conf, delimiter=",")
     np.savetxt(RUNS / "meta_mix_confidence_calibrated.csv", conf_cal, delimiter=",")
     np.savetxt(RUNS / "meta_mix_reliability_governor.csv", rel_gov, delimiter=",")
@@ -215,6 +251,13 @@ if __name__ == "__main__":
         "mean_confidence_calibrated": float(np.mean(conf_cal)) if len(conf_cal) else 0.0,
         "mean_leverage": float(np.mean(leverage)) if len(leverage) else 1.0,
         "mean_confidence": float(np.mean(mix_conf)) if len(mix_conf) else 0.0,
+        "adaptive_enabled": bool(use_adaptive),
+        "mean_alpha": float(np.mean(alpha_t)) if len(alpha_t) else best["alpha_meta"],
+        "min_alpha": float(np.min(alpha_t)) if len(alpha_t) else best["alpha_meta"],
+        "max_alpha": float(np.max(alpha_t)) if len(alpha_t) else best["alpha_meta"],
+        "mean_gross_dynamic": float(np.mean(gross_t)) if len(gross_t) else best["gross"],
+        "mean_quality_mix": float(np.mean(qmix)) if len(qmix) else 0.5,
+        "mean_disagreement_norm": float(np.mean(disagree_n)) if len(disagree_n) else 0.0,
         "mean_reliability_governor": float(np.mean(rel_gov)) if len(rel_gov) else 1.0,
         "calibration": cal,
     }
@@ -224,6 +267,9 @@ if __name__ == "__main__":
         "Best Council Mix ✔",
         (
             f"<p>alpha(meta)={best['alpha_meta']:.2f}, beta={best['smooth_beta']:.2f}, gross={best['gross']:.2f}</p>"
+            f"<p>adaptive={bool(use_adaptive)}, alpha(mean/min/max)="
+            f"{info['mean_alpha']:.3f}/{info['min_alpha']:.3f}/{info['max_alpha']:.3f}, "
+            f"gross(mean)={info['mean_gross_dynamic']:.3f}</p>"
             f"<p>Sharpe={best['sharpe']:.3f}, downside={best['downside_vol']:.3f}, turnover={best['turnover']:.3f}, "
             f"hit={best['hit_rate']:.3f}, mean lev={info['mean_leverage']:.3f}</p>"
             f"<p>Conf raw={info['mean_confidence_raw']:.3f}, cal={info['mean_confidence_calibrated']:.3f}, "
