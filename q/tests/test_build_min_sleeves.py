@@ -38,8 +38,8 @@ def test_build_min_sleeves_preserves_existing_symbolic_reflexive(tmp_path: Path)
 
     expected_sym = (0.80 * 0.80 + (-0.40) * 0.20) / (0.80 + 0.20)
     expected_ref = (0.50 * 0.70 + (-0.10) * 0.30) / (0.70 + 0.30)
-    assert float(out_sym["sym_signal"].iloc[0]) == np.clip(expected_sym, -1.0, 1.0)
-    assert float(out_ref["reflexive_signal"].iloc[0]) == np.clip(expected_ref, -1.0, 1.0)
+    assert np.isclose(float(out_sym["sym_signal"].iloc[0]), np.clip(expected_sym, -1.0, 1.0), atol=1e-9)
+    assert np.isclose(float(out_ref["reflexive_signal"].iloc[0]), np.clip(expected_ref, -1.0, 1.0), atol=1e-9)
 
     assert (tmp_path / "sleeve_vol.csv").exists()
     assert (tmp_path / "sleeve_osc.csv").exists()
