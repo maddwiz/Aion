@@ -79,6 +79,7 @@ def _dedupe_strs(values: list[str]) -> list[str]:
 
 
 AION_HOME = Path(os.getenv("AION_HOME", Path(__file__).resolve().parents[1]))
+Q_HOME = Path(os.getenv("AION_Q_HOME", AION_HOME.parent / "q"))
 LOG_DIR = Path(os.getenv("AION_LOG_DIR", AION_HOME / "logs"))
 STATE_DIR = Path(os.getenv("AION_STATE_DIR", AION_HOME / "state"))
 UNIVERSE_DIR = Path(os.getenv("AION_UNIVERSE_DIR", AION_HOME / "universe"))
@@ -219,7 +220,10 @@ RUNTIME_STATE_FILE = Path(os.getenv("AION_RUNTIME_STATE_FILE", str(STATE_DIR / "
 
 # Optional external signal overlay (e.g., Q -> AION bridge)
 EXT_SIGNAL_ENABLED = _bool_env("AION_EXT_SIGNAL_ENABLED", True)
-EXT_SIGNAL_FILE = Path(os.getenv("AION_EXT_SIGNAL_FILE", str(STATE_DIR / "q_signal_overlay.json")))
+_DEFAULT_EXT_SIGNAL_FILE = Q_HOME / "runs_plus" / "q_signal_overlay.json"
+if not _DEFAULT_EXT_SIGNAL_FILE.exists():
+    _DEFAULT_EXT_SIGNAL_FILE = STATE_DIR / "q_signal_overlay.json"
+EXT_SIGNAL_FILE = Path(os.getenv("AION_EXT_SIGNAL_FILE", str(_DEFAULT_EXT_SIGNAL_FILE)))
 EXT_SIGNAL_MIN_CONFIDENCE = float(os.getenv("AION_EXT_SIGNAL_MIN_CONFIDENCE", "0.55"))
 EXT_SIGNAL_MAX_BIAS = float(os.getenv("AION_EXT_SIGNAL_MAX_BIAS", "0.90"))
 EXT_SIGNAL_CONF_BOOST = float(os.getenv("AION_EXT_SIGNAL_CONF_BOOST", "0.10"))
