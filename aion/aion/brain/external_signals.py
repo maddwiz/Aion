@@ -31,6 +31,22 @@ def _uniq_flags(flags) -> list[str]:
     return out
 
 
+def _canonicalize_flags(flags) -> list[str]:
+    out = _uniq_flags(flags)
+    stronger_to_weaker = [
+        ("drift_alert", "drift_warn"),
+        ("fracture_alert", "fracture_warn"),
+        ("exec_risk_hard", "exec_risk_tight"),
+        ("nested_leakage_alert", "nested_leakage_warn"),
+        ("hive_stress_alert", "hive_stress_warn"),
+    ]
+    s = set(out)
+    for strong, weak in stronger_to_weaker:
+        if strong in s and weak in s:
+            s.discard(weak)
+    return [x for x in out if x in s]
+
+
 def _normalize_signal(payload: dict, min_confidence: float, max_bias: float):
     bias = _safe_float(payload.get("bias"), 0.0)
     conf = _safe_float(payload.get("confidence"), 0.0)
@@ -124,7 +140,7 @@ def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bi
             regime = str(ctx.get("regime", "unknown")).strip().lower()
             out["regime"] = regime or "unknown"
             flags = ctx.get("risk_flags", [])
-            out["risk_flags"] = _uniq_flags(flags)
+            out["risk_flags"] = _canonicalize_flags(flags)
 
         out["degraded_safe_mode"] = bool(payload.get("degraded_safe_mode", False))
         out["source_mode"] = str(payload.get("source_mode", "unknown")).strip() or "unknown"
@@ -193,7 +209,7 @@ def runtime_overlay_scale(
     degraded = bool(bundle.get("degraded_safe_mode", False))
     q_ok = bool(bundle.get("quality_gate_ok", True))
     flags = bundle.get("risk_flags", [])
-    flags = _uniq_flags(flags)
+    flags = _canonicalize_flags(flags)
     if degraded:
         scale *= float(_clamp(degraded_scale, 0.20, 1.20))
     if not q_ok:

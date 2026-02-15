@@ -48,6 +48,22 @@ def _uniq_str_flags(flags) -> list[str]:
     return out
 
 
+def _canonicalize_risk_flags(flags) -> list[str]:
+    out = _uniq_str_flags(flags)
+    stronger_to_weaker = [
+        ("drift_alert", "drift_warn"),
+        ("fracture_alert", "fracture_warn"),
+        ("exec_risk_hard", "exec_risk_tight"),
+        ("nested_leakage_alert", "nested_leakage_warn"),
+        ("hive_stress_alert", "hive_stress_warn"),
+    ]
+    s = set(out)
+    for strong, weak in stronger_to_weaker:
+        if strong in s and weak in s:
+            s.discard(weak)
+    return [x for x in out if x in s]
+
+
 def _canonical_symbol(sym: str) -> str:
     s = str(sym or "").strip().upper()
     if not s:
@@ -459,7 +475,7 @@ def _runtime_context(runs_dir: Path):
         "regime": regime,
         "components": comps,
         "active_component_count": int(len(active_vals)),
-        "risk_flags": _uniq_str_flags(risk_flags),
+        "risk_flags": _canonicalize_risk_flags(risk_flags),
     }
 
 

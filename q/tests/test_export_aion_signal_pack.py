@@ -151,3 +151,4 @@ def test_runtime_context_includes_hive_ecosystem_stress(tmp_path: Path):
     assert ctx["components"]["hive_evolution_modifier"]["found"] is True
     assert "hive_stress_alert" in ctx["risk_flags"]
     assert ctx["risk_flags"].count("hive_stress_alert") == 1
+    assert "hive_stress_warn" not in ctx["risk_flags"]

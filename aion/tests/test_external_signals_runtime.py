@@ -241,3 +241,29 @@ def test_runtime_overlay_scale_ignores_duplicate_flags():
         flag_scale=0.95,
     )
     assert dupes == base
+
+
+def test_runtime_overlay_scale_uses_stronger_flag_when_warn_and_alert_both_present():
+    scale_alert, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["hive_stress_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.95,
+    )
+    scale_both, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["hive_stress_warn", "hive_stress_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.95,
+    )
+    assert scale_both == scale_alert
