@@ -55,6 +55,8 @@ Useful tuning env vars:
 - `AION_EXT_SIGNAL_MAX_AGE_HOURS`, `AION_EXT_SIGNAL_REQUIRE_RUNTIME_CONTEXT`
 By default AION now reads Q overlay from `../q/runs_plus/q_signal_overlay.json`
 (`AION_Q_HOME` / `AION_EXT_SIGNAL_FILE` can override this).
+When Q runtime risk degrades, AION now automatically scales overlay impact and
+reduces effective trades-per-day cap for safer operation.
 
 ## Tasks
 

@@ -369,6 +369,7 @@ def main() -> int:
                 continue
 
             max_trades_cap = int(profile.get("max_trades_per_day", cfg.MAX_TRADES_PER_DAY))
+            max_trades_cap_runtime = max_trades_cap
 
             wl = load_watchlist()
             if not wl:
@@ -418,20 +419,29 @@ def main() -> int:
                     quality_fail_scale=cfg.EXT_SIGNAL_RUNTIME_QFAIL_SCALE,
                     flag_scale=cfg.EXT_SIGNAL_RUNTIME_FLAG_SCALE,
                 )
+                cap_scale = max(0.50, min(1.00, float(ext_runtime_scale)))
+                max_trades_cap_runtime = max(1, int(round(max_trades_cap * cap_scale)))
                 sig = (
                     round(float(ext_runtime_scale), 4),
                     tuple(sorted(str(x) for x in ext_runtime_diag.get("flags", []) if str(x))),
                     bool(ext_runtime_diag.get("degraded", False)),
                     bool(ext_runtime_diag.get("quality_gate_ok", True)),
                     str(ext_runtime_diag.get("regime", "unknown")),
+                    int(max_trades_cap_runtime),
                 )
                 if sig != last_ext_runtime_sig:
                     flag_txt = ",".join(sig[1]) if sig[1] else "none"
                     log_run(
                         "External runtime overlay "
                         f"scale={sig[0]:.3f} flags={flag_txt} "
-                        f"degraded={sig[2]} quality_ok={sig[3]} regime={sig[4]}"
+                        f"degraded={sig[2]} quality_ok={sig[3]} regime={sig[4]} "
+                        f"max_trades={sig[5]}/{max_trades_cap}"
                     )
+                    if cfg.MONITORING_ENABLED and (sig[2] or (not sig[3]) or bool(sig[1])):
+                        monitor.record_system_event(
+                            "external_overlay_runtime",
+                            f"scale={sig[0]:.3f} flags={flag_txt} max_trades={sig[5]}/{max_trades_cap}",
+                        )
                     last_ext_runtime_sig = sig
 
             for sym in wl:
@@ -610,7 +620,7 @@ def main() -> int:
                         continue
                     if sym in cooldown:
                         continue
-                    if trades_today >= max_trades_cap:
+                    if trades_today >= max_trades_cap_runtime:
                         continue
                     if signal["side"] is None:
                         continue
@@ -660,7 +670,7 @@ def main() -> int:
                     }
 
             for c in sorted(entry_candidates, key=lambda x: x["confidence"], reverse=True):
-                if trades_today >= max_trades_cap:
+                if trades_today >= max_trades_cap_runtime:
                     break
                 if len(open_positions) >= cfg.MAX_OPEN_POSITIONS:
                     break
