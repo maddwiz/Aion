@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import signal
 import subprocess
 import time
@@ -84,14 +85,18 @@ def start_task(task: str, *, root: Path | None = None, log_dir: Path | None = No
 
     log_dir.mkdir(parents=True, exist_ok=True)
     out_log = log_dir / f"{t}.out"
-    cmd = f'nohup env AION_TASK={t} "{run_script}" > "{out_log}" 2>&1 &'
     try:
-        subprocess.Popen(
-            ["/bin/bash", "-lc", cmd],
-            cwd=str(root),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        env = dict(os.environ)
+        env["AION_TASK"] = t
+        with out_log.open("ab") as fout:
+            subprocess.Popen(
+                [str(run_script)],
+                cwd=str(root),
+                env=env,
+                stdout=fout,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
         for _ in range(8):
             time.sleep(0.15)
             if find_task_pids(t):
