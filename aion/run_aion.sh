@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export AION_HOME="${AION_HOME:-$ROOT}"
 export AION_STATE_DIR="${AION_STATE_DIR:-$ROOT/state}"
 export AION_LOG_DIR="${AION_LOG_DIR:-$ROOT/logs}"
+export AION_Q_HOME="${AION_Q_HOME:-$ROOT/../q}"
 export IB_HOST="${IB_HOST:-127.0.0.1}"
 export IB_PORT="${IB_PORT:-4002}"
 export AION_MODE="${AION_MODE:-brain}"
@@ -30,6 +31,14 @@ export AION_IB_APP_CANDIDATES="${AION_IB_APP_CANDIDATES:-$HOME/Applications/IB G
 
 mkdir -p "$AION_STATE_DIR" "$AION_LOG_DIR"
 
+if [[ -z "${AION_EXT_SIGNAL_FILE:-}" ]]; then
+  if [[ -f "$AION_Q_HOME/runs_plus/q_signal_overlay.json" ]]; then
+    export AION_EXT_SIGNAL_FILE="$AION_Q_HOME/runs_plus/q_signal_overlay.json"
+  else
+    export AION_EXT_SIGNAL_FILE="$AION_STATE_DIR/q_signal_overlay.json"
+  fi
+fi
+
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN" ]]; then
   if [[ -x "/Users/desmondpottle/aion-venv/bin/python" ]]; then
@@ -45,6 +54,8 @@ echo "[AION] Task: $AION_TASK"
 echo "[AION] IB endpoint: ${IB_HOST}:${IB_PORT}"
 echo "[AION] State dir: $AION_STATE_DIR"
 echo "[AION] Log dir: $AION_LOG_DIR"
+echo "[AION] Q home: $AION_Q_HOME"
+echo "[AION] External overlay: $AION_EXT_SIGNAL_FILE"
 
 if [[ "$AION_MODE" == "brain" ]]; then
   export AION_UNIVERSE_DIR="${AION_UNIVERSE_DIR:-$ROOT/universe}"
