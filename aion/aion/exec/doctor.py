@@ -2,6 +2,7 @@ import csv
 import json
 import socket
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ib_insync import IB
@@ -155,6 +156,77 @@ def check_csv_schema(path: Path, expected: list[str]) -> tuple[bool, str]:
     return False, f"Schema mismatch in {path.name}"
 
 
+def _overlay_age_hours(path: Path):
+    try:
+        ts = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    except Exception:
+        return None
+    return float((datetime.now(timezone.utc) - ts).total_seconds() / 3600.0)
+
+
+def check_external_overlay(
+    path: Path,
+    max_age_hours: float = 12.0,
+    require_runtime_context: bool = False,
+):
+    if not path.exists():
+        return False, f"Missing external overlay file: {path}", {"exists": False}
+
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        return False, f"Invalid external overlay JSON: {exc}", {"exists": True}
+
+    if not isinstance(payload, dict):
+        return False, "External overlay payload must be a JSON object", {"exists": True}
+
+    age_h = _overlay_age_hours(path)
+    if age_h is None:
+        return False, "Cannot determine external overlay file age", {"exists": True}
+
+    signals = payload.get("signals", {})
+    sig_count = len(signals) if isinstance(signals, dict) else 0
+    degraded = bool(payload.get("degraded_safe_mode", False))
+    qg = payload.get("quality_gate", {})
+    qg_ok = bool(qg.get("ok", True)) if isinstance(qg, dict) else True
+    rc = payload.get("runtime_context", {})
+    rc_ok = isinstance(rc, dict) and len(rc) > 0
+    risk_flags = rc.get("risk_flags", []) if isinstance(rc, dict) else []
+    if not isinstance(risk_flags, list):
+        risk_flags = []
+    risk_flags = [str(x) for x in risk_flags if str(x).strip()]
+
+    max_age = max(0.5, float(max_age_hours))
+    issues = []
+    if age_h > max_age:
+        issues.append(f"stale>{max_age:.1f}h ({age_h:.2f}h)")
+    if degraded:
+        issues.append("degraded_safe_mode=true")
+    if not qg_ok:
+        issues.append("quality_gate_not_ok")
+    if require_runtime_context and not rc_ok:
+        issues.append("runtime_context_missing")
+
+    ok = len(issues) == 0
+    msg = (
+        "External overlay healthy"
+        if ok
+        else "External overlay issues: " + ", ".join(issues)
+    )
+    details = {
+        "exists": True,
+        "age_hours": age_h,
+        "max_age_hours": max_age,
+        "signals": int(sig_count),
+        "degraded_safe_mode": degraded,
+        "quality_gate_ok": qg_ok,
+        "runtime_context_present": rc_ok,
+        "risk_flags": risk_flags,
+        "source_mode": payload.get("source_mode"),
+    }
+    return ok, msg, details
+
+
 def _ib_remediation(checks: list[dict], host: str, ports: list[int], hosts: list[str]) -> list[str]:
     tips = []
     if not checks:
@@ -269,6 +341,31 @@ def main() -> int:
         ok, msg = check_csv_schema(cfg.LOG_DIR / file_name, expected)
         checks.append({"ok": ok, "msg": msg, "critical": False})
 
+    if cfg.EXT_SIGNAL_ENABLED:
+        ok_ext, msg_ext, ext_details = check_external_overlay(
+            cfg.EXT_SIGNAL_FILE,
+            max_age_hours=cfg.EXT_SIGNAL_MAX_AGE_HOURS,
+            require_runtime_context=cfg.EXT_SIGNAL_REQUIRE_RUNTIME_CONTEXT,
+        )
+        checks.append(
+            {
+                "name": "external_overlay",
+                "ok": ok_ext,
+                "msg": msg_ext,
+                "critical": False,
+                "details": ext_details,
+            }
+        )
+    else:
+        checks.append(
+            {
+                "name": "external_overlay",
+                "ok": True,
+                "msg": "External overlay disabled by config",
+                "critical": False,
+            }
+        )
+
     summary = {
         "ok": all(c["ok"] for c in checks if c.get("critical", False)),
         "checks": checks,
@@ -279,6 +376,12 @@ def main() -> int:
             "candidate_ports": ports,
             "recommended_host": (selected_hs_port or selected_port or {}).get("host"),
             "recommended_port": (selected_hs_port or selected_port or {}).get("port"),
+        },
+        "external_overlay": {
+            "enabled": bool(cfg.EXT_SIGNAL_ENABLED),
+            "path": str(cfg.EXT_SIGNAL_FILE),
+            "max_age_hours": float(cfg.EXT_SIGNAL_MAX_AGE_HOURS),
+            "require_runtime_context": bool(cfg.EXT_SIGNAL_REQUIRE_RUNTIME_CONTEXT),
         },
         "paths": {
             "state": str(cfg.STATE_DIR),
