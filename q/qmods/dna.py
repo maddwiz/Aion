@@ -7,9 +7,14 @@ import numpy as np
 import pandas as pd
 
 # headless plotting
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except Exception:
+    matplotlib = None
+    plt = None
 
 
 @dataclass
@@ -17,6 +22,74 @@ class DNAConfig:
     fast: int = 20    # ~1 trading month
     slow: int = 126   # ~6 months
     step: int = 21    # compare to ~1 month ago
+
+
+def _clean_series(x) -> np.ndarray:
+    a = np.asarray(x, dtype=float).ravel()
+    return np.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def fft_topk_dna(x, topk: int = 12) -> dict:
+    """
+    Compact spectral fingerprint for drift/similarity comparisons.
+    """
+    a = _clean_series(x)
+    if a.size == 0:
+        return {"idx": [], "amp": []}
+    if a.size < 16:
+        a = np.pad(a, (0, 16 - a.size), mode="edge")
+    a = a - float(np.mean(a))
+    spec = np.abs(np.fft.rfft(a))
+    if spec.size == 0:
+        return {"idx": [], "amp": []}
+    k = int(max(1, min(int(topk), spec.size)))
+    idx = np.argpartition(spec, -k)[-k:]
+    amp = spec[idx]
+    order = np.argsort(idx)
+    idx = idx[order].astype(int)
+    amp = amp[order].astype(float)
+    den = float(np.sum(np.abs(amp))) + 1e-12
+    amp = (amp / den).tolist()
+    return {"idx": idx.tolist(), "amp": amp}
+
+
+def _dna_to_dense(dna) -> dict[int, float]:
+    if isinstance(dna, dict):
+        idx = dna.get("idx", [])
+        amp = dna.get("amp", [])
+    elif isinstance(dna, (list, tuple)) and len(dna) == 2:
+        idx, amp = dna
+    else:
+        return {}
+    try:
+        idx_arr = np.asarray(idx, dtype=int).ravel()
+        amp_arr = np.asarray(amp, dtype=float).ravel()
+    except Exception:
+        return {}
+    n = min(len(idx_arr), len(amp_arr))
+    out = {}
+    for i, a in zip(idx_arr[:n], amp_arr[:n]):
+        if not np.isfinite(a):
+            continue
+        out[int(i)] = float(a)
+    return out
+
+
+def dna_distance(a, b) -> float:
+    """
+    1 - cosine similarity between two DNA fingerprints.
+    """
+    da = _dna_to_dense(a)
+    db = _dna_to_dense(b)
+    keys = sorted(set(da.keys()) | set(db.keys()))
+    if not keys:
+        return 0.0
+    va = np.array([da.get(k, 0.0) for k in keys], dtype=float)
+    vb = np.array([db.get(k, 0.0) for k in keys], dtype=float)
+    den = float(np.linalg.norm(va) * np.linalg.norm(vb)) + 1e-12
+    cos = float(np.dot(va, vb) / den)
+    cos = float(np.clip(cos, -1.0, 1.0))
+    return float(1.0 - cos)
 
 
 def _moments(ret: pd.Series, w: int):
@@ -97,12 +170,16 @@ def compute_dna(
         df = pd.concat(avg_series, axis=1)
         df.columns = prices.columns
         avg_drift = df.mean(axis=1).rolling(5).mean()
-        plt.figure(figsize=(8, 3))
-        avg_drift.plot()
-        plt.title("DNA Drift (avg across symbols)")
-        plt.xlabel("")
-        plt.tight_layout()
-        plt.savefig(out_png, dpi=150)
-        plt.close()
+        if plt is not None:
+            plt.figure(figsize=(8, 3))
+            avg_drift.plot()
+            plt.title("DNA Drift (avg across symbols)")
+            plt.xlabel("")
+            plt.tight_layout()
+            plt.savefig(out_png, dpi=150)
+            plt.close()
+        else:
+            Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_png).touch(exist_ok=True)
 
     return out_json, out_png

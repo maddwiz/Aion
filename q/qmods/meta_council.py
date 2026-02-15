@@ -70,3 +70,31 @@ def meta_v2_bundle(close: pd.Series) -> dict:
         "vbo":   volatility_breakout(close),
         "tp":    trend_persistence(close),
     }
+
+
+def meta_council(
+    close: pd.Series,
+    weights: tuple[float, float, float] = (0.40, 0.30, 0.30),
+    include_v2: bool = False,
+    v2_weight: float = 0.15,
+) -> np.ndarray:
+    """
+    Canonical council blend used by pipeline scripts.
+    Returns a raw score series (not position-sized) aligned to `close.index`.
+    """
+    w_mom, w_mr, w_car = (float(weights[0]), float(weights[1]), float(weights[2]))
+    core = np.asarray(
+        w_mom * momentum_signal(close)
+        + w_mr * meanrev_signal(close)
+        + w_car * carry_signal(close),
+        float,
+    )
+    core = np.nan_to_num(core, nan=0.0, posinf=0.0, neginf=0.0)
+    if not include_v2:
+        return core
+
+    v2 = meta_v2_bundle(close)
+    aug = np.asarray(0.5 * v2["vbo"] + 0.5 * v2["tp"], float)
+    aug = np.nan_to_num(aug, nan=0.0, posinf=0.0, neginf=0.0)
+    a = float(np.clip(v2_weight, 0.0, 0.5))
+    return (1.0 - a) * core + a * aug

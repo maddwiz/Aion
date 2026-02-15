@@ -257,7 +257,8 @@ def guard_cycle(state: dict) -> dict:
             stop_task(task)
         ok = start_task(task)
         if ok:
-            hist.append(now_ts)
+            if "duplicate_instances" not in reasons:
+                hist.append(now_ts)
             restarted[task] = "started"
             msg = "task auto-restarted"
             if reasons:

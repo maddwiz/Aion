@@ -1,6 +1,16 @@
 # qmods/dreams.py — v0.5 moving dreams (feature-aware RGB dreams)
 import numpy as np
-import imageio.v2 as imageio
+from pathlib import Path
+
+try:
+    import imageio.v2 as imageio
+except Exception:
+    imageio = None
+
+try:
+    from PIL import Image
+except Exception:
+    Image = None
 
 def _norm01(x):
     x = np.asarray(x, dtype=float)
@@ -58,9 +68,27 @@ def save_dream_gif(series, out_path, frames=120, step=3, fps=14):
         b = np.clip(0.9*b_layer + 0.1*np.abs(swirl), 0.0, 1.0)
         rgb = np.stack([r, g, b], axis=-1)
         imgs.append((255*rgb).astype(np.uint8))
-    imageio.mimsave(out_path, imgs, duration=1.0/max(fps,1))
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if imageio is not None:
+        imageio.mimsave(out, imgs, duration=1.0/max(fps,1))
+        return
+    if Image is not None and imgs:
+        pil = [Image.fromarray(im) for im in imgs]
+        pil[0].save(
+            out,
+            save_all=True,
+            append_images=pil[1:],
+            duration=int(1000.0 / max(1, fps)),
+            loop=0,
+            optimize=False,
+        )
+        return
+    out.touch(exist_ok=True)
 
 def save_dream_mp4(series, out_path, frames=180, step=2, fps=18):
+    if imageio is None:
+        return
     try:
         import imageio_ffmpeg  # noqa: F401
     except Exception:
@@ -89,3 +117,37 @@ def save_dream_mp4(series, out_path, frames=180, step=2, fps=18):
         frame = (255*np.stack([r, g, b], axis=-1)).astype(np.uint8)
         writer.append_data(frame)
     writer.close()
+
+
+def save_dream_png(series, out_path):
+    """
+    Backward-compatible static dream snapshot.
+    """
+    lvl, mom, vol = _dream_features(series)
+    H, W = 192, 192
+    sl = _tile_strip(lvl, H, W)
+    sm = _tile_strip(mom, H, W)
+    sv = _tile_strip(vol, H, W)
+    r = np.clip(0.75 * sl + 0.25 * np.abs(sm), 0.0, 1.0)
+    g = np.clip(0.80 * np.clip(sm + 0.5, 0.0, 1.0), 0.0, 1.0)
+    b = np.clip(0.85 * sv + 0.15 * (1.0 - sl), 0.0, 1.0)
+    frame = (255 * np.stack([r, g, b], axis=-1)).astype(np.uint8)
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if imageio is not None:
+        imageio.imwrite(out, frame)
+    elif Image is not None:
+        Image.fromarray(frame).save(out)
+    else:
+        out.touch(exist_ok=True)
+
+
+def save_dream_video(series, out_dir, frames=120, step=3, fps=14):
+    """
+    Backward-compatible animated dream export.
+    Writes GIF always, MP4 when ffmpeg backend is available.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    save_dream_gif(series, out / "dream.gif", frames=frames, step=step, fps=fps)
+    save_dream_mp4(series, out / "dream.mp4", frames=max(frames, 140), step=step, fps=max(fps, 12))

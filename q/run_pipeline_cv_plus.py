@@ -66,17 +66,30 @@ def main():
     drift = rolling_dna_drift(close, 126)
     dna   = fft_topk_dna(close.values)
 
-    # 6) save summary
+    # 6) save summary + simple risk alerts for unattended runs
+    alarms = []
+    if float(sh) < 0.0:
+        alarms.append({"level": "warn", "msg": f"negative_sharpe:{float(sh):.3f}"})
+    if float(mdd) <= -0.45:
+        alarms.append({"level": "warn", "msg": f"deep_drawdown:{float(mdd):.3f}"})
+    if abs(float(w_mom) - float(w_mr)) > 0.70:
+        alarms.append({"level": "info", "msg": "high_weight_concentration"})
+    latest_drift = float(drift.ffill().iloc[-1]) if drift.notna().any() else None
+    if latest_drift is not None and latest_drift > 0.35:
+        alarms.append({"level": "warn", "msg": f"dna_drift_high:{latest_drift:.3f}"})
+
     summary = {
         "weights": {"mom": w_mom, "mr": w_mr, "carry": w_car},
         "hit_rate": float(hit),
         "sharpe": float(sh),
         "max_dd": float(mdd),
         "dna": dna,
+        "dna_drift_pct": latest_drift,
+        "alarms_count": int(len(alarms)),
         "heartbeat_bpm_latest": "-"
     }
     (out_dir/"summary.json").write_text(json.dumps(summary, indent=2))
-    (out_dir/"alarms.json").write_text("[]")  # placeholder
+    (out_dir/"alarms.json").write_text(json.dumps(alarms, indent=2))
 
     # 7) dream gif (optional; if missing module, skip gracefully)
     try:
@@ -85,16 +98,21 @@ def main():
     except Exception:
         pass
 
-    # 8) tiny price plot
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    plt.figure(figsize=(7,3))
-    plt.plot(close.index, close.values)
-    plt.title(data_path.name)
-    plt.tight_layout()
-    plt.savefig(out_dir/"signals.png", dpi=120)
-    plt.close()
+    # 8) tiny price plot (best effort)
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(7, 3))
+        plt.plot(close.index, close.values)
+        plt.title(data_path.name)
+        plt.tight_layout()
+        plt.savefig(out_dir / "signals.png", dpi=120)
+        plt.close()
+    except Exception:
+        (out_dir / "signals.png").touch(exist_ok=True)
 
 if __name__ == "__main__":
     main()

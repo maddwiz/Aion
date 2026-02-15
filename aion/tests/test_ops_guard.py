@@ -191,6 +191,7 @@ def test_guard_cycle_restarts_trade_when_duplicate_instances(tmp_path: Path, mon
     payload = og.guard_cycle({"restart_history": {}})
     assert stopped["n"] == 1
     assert payload["restarts"]["trade"]["attempt"] == "started"
+    assert payload["restarts"]["trade"]["restarts_last_hour"] == 0
 
 
 def test_guard_cycle_forces_duplicate_cleanup_during_cooldown(tmp_path: Path, monkeypatch):
@@ -220,3 +221,4 @@ def test_guard_cycle_forces_duplicate_cleanup_during_cooldown(tmp_path: Path, mo
     assert stopped["n"] == 1
     assert payload["restarts"]["trade"]["attempt"] == "started"
     assert payload["restarts"]["trade"]["skip"] is None
+    assert payload["restarts"]["trade"]["restarts_last_hour"] == 1

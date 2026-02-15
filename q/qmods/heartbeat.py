@@ -236,3 +236,19 @@ def compute_heartbeat_from_returns(
         source="returns",
     )
     return out_json, out_png
+
+
+def heartbeat_bpm(close: pd.Series) -> pd.Series:
+    """
+    Backward-compatible helper used by legacy pipeline scripts.
+    Computes heartbeat BPM directly from a close-price series.
+    """
+    c = pd.Series(pd.to_numeric(close, errors="coerce")).replace([np.inf, -np.inf], np.nan).ffill().dropna()
+    if c.empty:
+        return pd.Series(dtype=float, name="heartbeat_bpm")
+    cfg = HBConfig()
+    ret = c.pct_change().fillna(0.0)
+    vol = realized_vol_from_returns(ret, cfg.window)
+    bpm = map_vol_to_bpm(vol, cfg)
+    bpm.index = c.index
+    return bpm.rename("heartbeat_bpm")

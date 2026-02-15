@@ -6,6 +6,7 @@ from qmods.heartbeat import (
     HBConfig,
     bpm_to_exposure_scaler,
     compute_heartbeat_from_returns,
+    heartbeat_bpm,
     heartbeat_stress_from_bpm,
     map_vol_to_bpm,
 )
@@ -66,3 +67,10 @@ def test_heartbeat_stress_penalizes_rising_bpm_more_than_falling():
 
     assert float(su.tail(80).mean()) > float(sd.tail(80).mean())
     assert float(eu.tail(80).mean()) < float(ed.tail(80).mean())
+
+
+def test_heartbeat_bpm_from_close_series():
+    close = pd.Series([100.0, 100.2, 99.9, 100.4, 100.1] * 70)
+    bpm = heartbeat_bpm(close)
+    assert len(bpm) == len(close)
+    assert bpm.notna().any()

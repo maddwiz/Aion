@@ -1,6 +1,6 @@
 import argparse, pathlib, json
 import numpy as np
-import pandas as pd
+from qmods.io import load_close
 from qmods.meta_council import momentum_signal, meanrev_signal, carry_signal
 from qmods.council_train import train_council
 from qmods.dna import fft_topk_dna
@@ -62,8 +62,7 @@ def main():
     args = ap.parse_args()
 
     outdir = pathlib.Path(args.out); outdir.mkdir(parents=True, exist_ok=True)
-    df = pd.read_csv(pathlib.Path(args.data)/args.asset, parse_dates=["Date"], index_col="Date")
-    close = df["Close"].astype(float)
+    close = load_close(pathlib.Path(args.data) / args.asset)
 
     # === base signals ===
     mom = momentum_signal(close)
