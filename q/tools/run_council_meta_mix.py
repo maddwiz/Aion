@@ -86,6 +86,34 @@ def smooth_signal(sig, beta):
     return out
 
 
+def robust_time_split_score(pos, y_fwd, n_folds=4, min_fold=80):
+    lag_pos = np.asarray(pos, float).ravel()[:-1]
+    y = np.asarray(y_fwd, float).ravel()
+    n = min(len(lag_pos), len(y))
+    if n < max(int(min_fold) * max(1, int(n_folds)), 128):
+        return None, []
+    lag_pos = lag_pos[:n]
+    y = y[:n]
+    edges = np.linspace(0, n, int(max(2, n_folds)) + 1, dtype=int)
+    fold_scores = []
+    for i in range(len(edges) - 1):
+        a, b = int(edges[i]), int(edges[i + 1])
+        if b - a < int(min_fold):
+            continue
+        lp = lag_pos[a:b]
+        yf = y[a:b]
+        pnl = lp * yf
+        sh = annualized_sharpe(pnl)
+        dsv = downside_vol(pnl)
+        to = float(np.mean(np.abs(np.diff(lp)))) if len(lp) > 2 else 0.0
+        fold_scores.append(float(sh - 0.15 * dsv - 0.08 * to))
+    if not fold_scores:
+        return None, []
+    fold_scores = np.asarray(fold_scores, float)
+    robust = float(np.mean(fold_scores) - 0.25 * np.std(fold_scores))
+    return robust, fold_scores.tolist()
+
+
 def append_card(title, html):
     for name in ["report_all.html", "report_best_plus.html", "report_plus.html", "report.html"]:
         f = ROOT / name
@@ -141,7 +169,12 @@ if __name__ == "__main__":
         "downside_vol": 0.0,
         "turnover": 0.0,
         "hit_rate": 0.0,
+        "cv_score_mean": 0.0,
+        "cv_score_std": 0.0,
+        "cv_folds_used": 0,
     }
+    cv_folds = int(np.clip(int(float(os.getenv("COUNCIL_MIX_CV_FOLDS", "4"))), 2, 12))
+    cv_min_fold = int(np.clip(int(float(os.getenv("COUNCIL_MIX_CV_MIN_FOLD", "80"))), 20, 2000))
 
     for a in grid_a:
         for beta in grid_beta:
@@ -156,7 +189,17 @@ if __name__ == "__main__":
                 dsv = downside_vol(pnl)
                 to = float(np.mean(np.abs(np.diff(pos)))) if len(pos) > 2 else 0.0
                 hit = float(np.mean(np.sign(lag_pos) == np.sign(y_fwd))) if len(lag_pos) > 0 else 0.0
-                score = sh - 0.15 * dsv - 0.08 * to
+                cv_score, cv_parts = robust_time_split_score(pos, y_fwd, n_folds=cv_folds, min_fold=cv_min_fold)
+                if cv_score is None:
+                    score = sh - 0.15 * dsv - 0.08 * to
+                    cv_mean = score
+                    cv_std = 0.0
+                    cv_used = 0
+                else:
+                    score = float(cv_score)
+                    cv_mean = float(np.mean(cv_parts))
+                    cv_std = float(np.std(cv_parts))
+                    cv_used = int(len(cv_parts))
                 if score > best["score"]:
                     best.update(
                         {
@@ -168,6 +211,9 @@ if __name__ == "__main__":
                             "downside_vol": float(dsv),
                             "turnover": float(to),
                             "hit_rate": float(hit),
+                            "cv_score_mean": cv_mean,
+                            "cv_score_std": cv_std,
+                            "cv_folds_used": cv_used,
                         }
                     )
 
@@ -259,6 +305,11 @@ if __name__ == "__main__":
         "mean_quality_mix": float(np.mean(qmix)) if len(qmix) else 0.5,
         "mean_disagreement_norm": float(np.mean(disagree_n)) if len(disagree_n) else 0.0,
         "mean_reliability_governor": float(np.mean(rel_gov)) if len(rel_gov) else 1.0,
+        "cv_folds": int(cv_folds),
+        "cv_min_fold": int(cv_min_fold),
+        "cv_score_mean": float(best["cv_score_mean"]),
+        "cv_score_std": float(best["cv_score_std"]),
+        "cv_folds_used": int(best["cv_folds_used"]),
         "calibration": cal,
     }
     (RUNS / "meta_mix_info.json").write_text(json.dumps(info, indent=2))

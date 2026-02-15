@@ -219,6 +219,11 @@ export SYNAPSES_ENSEMBLE=1
 export SYNAPSES_ENSEMBLE_N=5
 export SYNAPSES_HIDDEN=12
 ```
+Council blend CV robustness:
+```bash
+export COUNCIL_MIX_CV_FOLDS=4
+export COUNCIL_MIX_CV_MIN_FOLD=80
+```
 Ecosystem evolution governors:
 ```bash
 export ECO_ATROPHY_TRIGGER=0.32
