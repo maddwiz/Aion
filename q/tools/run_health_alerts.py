@@ -236,6 +236,8 @@ def build_alert_payload(
     if drift_latest_l1 is not None and np.isfinite(drift_latest_l1) and drift_status != "bootstrap":
         if drift_latest_l1 > max_portfolio_l1_drift:
             issues.append(f"portfolio_latest_l1_drift>{max_portfolio_l1_drift} ({drift_latest_l1:.3f})")
+    if drift_status == "alert":
+        issues.append("portfolio_drift_status=alert")
 
     immune_ok = bool(immune.get("ok", False)) if isinstance(immune, dict) else False
     immune_pass = bool(immune.get("pass", False)) if isinstance(immune, dict) else False
