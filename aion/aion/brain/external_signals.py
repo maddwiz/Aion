@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -46,6 +47,21 @@ def _canonicalize_flags(flags) -> list[str]:
         if strong in s and weak in s:
             s.discard(weak)
     return [x for x in out if x in s]
+
+
+def _parse_utc_timestamp(raw) -> datetime | None:
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _normalize_signal(payload: dict, min_confidence: float, max_bias: float):
@@ -114,6 +130,7 @@ def load_external_signal_bundle(
         "degraded_safe_mode": bool,
         "quality_gate_ok": bool,
         "overlay_age_hours": float|None,
+        "overlay_age_source": str,
         "overlay_stale": bool,
       }
     """
@@ -126,6 +143,7 @@ def load_external_signal_bundle(
         "degraded_safe_mode": False,
         "quality_gate_ok": True,
         "overlay_age_hours": None,
+        "overlay_age_source": "unknown",
         "overlay_stale": False,
     }
     try:
@@ -142,13 +160,27 @@ def load_external_signal_bundle(
 
     out = dict(empty)
     out["signals"] = _as_signal_map_from_payload(payload, min_confidence=min_confidence, max_bias=max_bias)
+    age_mtime_h = None
     try:
-        age_h = max(0.0, (time.time() - float(p.stat().st_mtime)) / 3600.0)
-        out["overlay_age_hours"] = float(age_h)
+        age_mtime_h = max(0.0, (time.time() - float(p.stat().st_mtime)) / 3600.0)
     except Exception:
-        out["overlay_age_hours"] = None
+        age_mtime_h = None
 
     if isinstance(payload, dict):
+        gen_raw = payload.get("generated_at_utc", payload.get("generated_at"))
+        gen_dt = _parse_utc_timestamp(gen_raw)
+        if gen_dt is not None:
+            now_utc = datetime.now(timezone.utc)
+            age_payload_h = max(0.0, (now_utc - gen_dt).total_seconds() / 3600.0)
+            out["overlay_age_hours"] = float(age_payload_h)
+            out["overlay_age_source"] = "payload"
+        elif isinstance(age_mtime_h, float):
+            out["overlay_age_hours"] = float(age_mtime_h)
+            out["overlay_age_source"] = "mtime"
+        else:
+            out["overlay_age_hours"] = None
+            out["overlay_age_source"] = "unknown"
+
         ctx = payload.get("runtime_context", {})
         if isinstance(ctx, dict):
             out["runtime_multiplier"] = _clamp(_safe_float(ctx.get("runtime_multiplier", 1.0), 1.0), 0.20, 1.20)
@@ -162,6 +194,9 @@ def load_external_signal_bundle(
         qg = payload.get("quality_gate", {})
         if isinstance(qg, dict):
             out["quality_gate_ok"] = bool(qg.get("ok", True))
+    elif isinstance(age_mtime_h, float):
+        out["overlay_age_hours"] = float(age_mtime_h)
+        out["overlay_age_source"] = "mtime"
 
     if max_age_hours is not None and float(max_age_hours) > 0 and isinstance(out.get("overlay_age_hours"), float):
         if float(out["overlay_age_hours"]) > float(max_age_hours):
@@ -273,6 +308,7 @@ def runtime_overlay_scale(
         "degraded": degraded,
         "overlay_stale": overlay_stale,
         "overlay_age_hours": bundle.get("overlay_age_hours", None),
+        "overlay_age_source": bundle.get("overlay_age_source", "unknown"),
         "quality_gate_ok": q_ok,
         "runtime_multiplier": _safe_float(bundle.get("runtime_multiplier", 1.0), 1.0),
         "regime": str(bundle.get("regime", "unknown")),

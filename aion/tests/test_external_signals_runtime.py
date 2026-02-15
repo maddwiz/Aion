@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aion.brain.external_signals import load_external_signal_bundle, runtime_overlay_scale
@@ -30,6 +31,7 @@ def test_load_external_signal_bundle_reads_runtime_context(tmp_path: Path):
     assert "drift_warn" in b["risk_flags"]
     assert b["quality_gate_ok"] is True
     assert isinstance(b["overlay_age_hours"], float)
+    assert b["overlay_age_source"] in {"payload", "mtime", "unknown"}
 
 
 def test_runtime_overlay_scale_penalizes_flags_and_degraded():
@@ -319,3 +321,52 @@ def test_runtime_overlay_scale_penalizes_overlay_stale():
     assert stale < clean
     assert diag["overlay_stale"] is True
     assert "overlay_age_hours" in diag
+    assert "overlay_age_source" in diag
+
+
+def test_load_external_signal_bundle_prefers_payload_timestamp_over_mtime(tmp_path: Path):
+    p = tmp_path / "overlay.json"
+    fresh = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    p.write_text(
+        json.dumps(
+            {
+                "generated_at_utc": fresh,
+                "signals": {"AAPL": {"bias": 0.2, "confidence": 0.8}},
+                "runtime_context": {"runtime_multiplier": 1.0, "risk_flags": []},
+                "quality_gate": {"ok": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    old_ts = 946684800  # 2000-01-01
+    os.utime(p, (old_ts, old_ts))
+
+    b = load_external_signal_bundle(p, min_confidence=0.55, max_bias=0.9, max_age_hours=1.0)
+    assert b["overlay_age_source"] == "payload"
+    assert b["overlay_stale"] is False
+    assert "AAPL" in b["signals"]
+
+
+def test_load_external_signal_bundle_marks_stale_from_payload_timestamp(tmp_path: Path):
+    p = tmp_path / "overlay.json"
+    stale = (datetime.now(timezone.utc) - timedelta(hours=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    p.write_text(
+        json.dumps(
+            {
+                "generated_at_utc": stale,
+                "signals": {"AAPL": {"bias": 0.2, "confidence": 0.8}},
+                "runtime_context": {"runtime_multiplier": 1.0, "risk_flags": []},
+                "quality_gate": {"ok": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Make mtime fresh to ensure stale decision comes from payload timestamp.
+    now_ts = datetime.now(timezone.utc).timestamp()
+    os.utime(p, (now_ts, now_ts))
+
+    b = load_external_signal_bundle(p, min_confidence=0.55, max_bias=0.9, max_age_hours=12.0)
+    assert b["overlay_age_source"] == "payload"
+    assert b["overlay_stale"] is True
+    assert "overlay_stale" in b["risk_flags"]
+    assert b["signals"] == {}

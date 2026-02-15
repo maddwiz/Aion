@@ -614,6 +614,7 @@ def main() -> int:
         global_overlay = {"bias": 0.0, "confidence": 0.0}
     payload = {
         "generated_at": ts,
+        "generated_at_utc": ts,
         "source": "q.walk_forward_plus",
         "global": global_overlay,
         "signals": {
