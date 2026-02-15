@@ -19,8 +19,10 @@ import sys
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from qmods.concentration_governor import govern_matrix
+from qmods.guardrails_bundle import apply_turnover_budget_governor
 
 TRACE_STEPS = [
+    "turnover_governor",
     "council_gate",
     "meta_mix_leverage",
     "meta_mix_reliability",
@@ -39,6 +41,56 @@ TRACE_STEPS = [
     "novaspine_hive_boost",
     "shock_mask_guard",
 ]
+
+
+def _auto_turnover_govern(w: np.ndarray):
+    """
+    Optional fallback turnover throttle when no precomputed turnover-governed
+    matrix is present in runs_plus/.
+    """
+    enabled = str(os.getenv("Q_ENABLE_AUTO_TURNOVER_GOV", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None, None, None
+
+    arr = np.asarray(w, float)
+    if arr.ndim != 2 or arr.shape[0] < 2:
+        return None, None, None
+
+    max_step = float(np.clip(float(os.getenv("Q_AUTO_TURNOVER_MAX_STEP", "0.30")), 0.01, 5.0))
+    budget_window = int(max(1, int(float(os.getenv("Q_AUTO_TURNOVER_BUDGET_WINDOW", "5")))))
+    budget_limit = float(np.clip(float(os.getenv("Q_AUTO_TURNOVER_BUDGET_LIMIT", "1.00")), 0.01, 20.0))
+
+    res = apply_turnover_budget_governor(
+        arr,
+        max_step_turnover=max_step,
+        budget_window=budget_window,
+        budget_limit=budget_limit,
+    )
+
+    np.savetxt(RUNS / "weights_turnover_budget_governed.csv", res.weights, delimiter=",")
+    np.savetxt(RUNS / "turnover_before.csv", res.turnover_before, delimiter=",")
+    np.savetxt(RUNS / "turnover_after.csv", res.turnover_after, delimiter=",")
+    np.savetxt(RUNS / "turnover_budget_rolling_after.csv", res.rolling_turnover_after, delimiter=",")
+    (RUNS / "turnover_governor_auto_info.json").write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "source": "build_final_portfolio:auto",
+                "max_step_turnover": max_step,
+                "budget_window": budget_window,
+                "budget_limit": budget_limit,
+                "turnover_before_mean": float(np.mean(res.turnover_before)) if res.turnover_before.size else 0.0,
+                "turnover_after_mean": float(np.mean(res.turnover_after)) if res.turnover_after.size else 0.0,
+                "turnover_after_max": float(np.max(res.turnover_after)) if res.turnover_after.size else 0.0,
+            },
+            indent=2,
+        )
+    )
+
+    tscale = np.ones(arr.shape[0], dtype=float)
+    if res.scale_applied.size:
+        tscale[1 : 1 + len(res.scale_applied)] = np.asarray(res.scale_applied, float).ravel()[: arr.shape[0] - 1]
+    return res.weights, "turnover_budget_auto", tscale
 
 def load_mat(rel):
     p = ROOT/rel
@@ -137,9 +189,20 @@ if __name__ == "__main__":
         W = Wdd; steps.append("drawdown_floor")
 
     # 5) Turnover governor (guardrails)
-    Wtg = load_mat("runs_plus/weights_turnover_governed.csv")
+    Wtg, wtg_source = first_mat([
+        "runs_plus/weights_turnover_budget_governed.csv",
+        "runs_plus/weights_turnover_governed.csv",
+    ])
     if Wtg is not None and Wtg.shape[:2] == W.shape:
         W = Wtg; steps.append("turnover_governor")
+        steps.append(f"turnover_source={wtg_source}")
+    else:
+        Wauto, auto_tag, auto_scale = _auto_turnover_govern(W)
+        if Wauto is not None and Wauto.shape[:2] == W.shape:
+            W = Wauto
+            steps.append("turnover_governor")
+            steps.append(f"turnover_source={auto_tag}")
+            _trace_put("turnover_governor", auto_scale)
 
     # 6) Council disagreement gate (scalar per t) → scale exposure
     gate = load_series("runs_plus/disagreement_gate.csv")
