@@ -198,7 +198,9 @@ def check_external_overlay(
 
     max_age = max(0.5, float(max_age_hours))
     issues = []
+    is_stale = False
     if age_h > max_age:
+        is_stale = True
         issues.append(f"stale>{max_age:.1f}h ({age_h:.2f}h)")
     if degraded:
         issues.append("degraded_safe_mode=true")
@@ -206,6 +208,8 @@ def check_external_overlay(
         issues.append("quality_gate_not_ok")
     if require_runtime_context and not rc_ok:
         issues.append("runtime_context_missing")
+    if is_stale and "overlay_stale" not in [str(x).strip().lower() for x in risk_flags]:
+        risk_flags.append("overlay_stale")
 
     ok = len(issues) == 0
     msg = (

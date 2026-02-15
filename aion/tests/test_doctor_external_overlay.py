@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from aion.exec.doctor import _overlay_remediation, check_external_overlay
@@ -57,6 +58,25 @@ def test_check_external_overlay_requires_runtime_context(tmp_path: Path):
     ok, msg, _details = check_external_overlay(p, max_age_hours=24.0, require_runtime_context=True)
     assert ok is False
     assert "runtime_context_missing" in msg
+
+
+def test_check_external_overlay_adds_overlay_stale_risk_flag(tmp_path: Path):
+    p = tmp_path / "overlay.json"
+    _write(
+        p,
+        {
+            "signals": {"AAPL": {"bias": 0.2, "confidence": 0.7}},
+            "quality_gate": {"ok": True},
+            "runtime_context": {"runtime_multiplier": 0.9, "risk_flags": []},
+            "degraded_safe_mode": False,
+        },
+    )
+    old_ts = 946684800  # 2000-01-01 UTC
+    os.utime(p, (old_ts, old_ts))
+    ok, msg, details = check_external_overlay(p, max_age_hours=1.0, require_runtime_context=False)
+    assert ok is False
+    assert "stale>" in msg
+    assert "overlay_stale" in details["risk_flags"]
 
 
 def test_overlay_remediation_provides_actionable_tips(tmp_path: Path):
