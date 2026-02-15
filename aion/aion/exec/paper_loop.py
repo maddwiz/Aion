@@ -11,7 +11,11 @@ from ..brain.signals import (
     multi_timeframe_alignment,
     opposite_confidence,
 )
-from ..brain.external_signals import blend_external_signals, load_external_signal_map
+from ..brain.external_signals import (
+    blend_external_signals,
+    load_external_signal_bundle,
+    runtime_overlay_scale,
+)
 from ..data.ib_client import disconnect, hist_bars_cached, ib
 from ..execution.simulator import ExecutionSimulator
 from ..ml.meta_label import MetaLabelModel
@@ -69,6 +73,17 @@ def _safe_float(x, default=0.0):
         return v if math.isfinite(v) else default
     except Exception:
         return default
+
+
+def _scale_external_signal(sig: dict | None, scale: float, max_bias: float):
+    if not isinstance(sig, dict):
+        return None
+    s = max(0.0, min(2.0, _safe_float(scale, 1.0)))
+    conf = max(0.0, min(1.0, _safe_float(sig.get("confidence"), 0.0) * s))
+    bias = _safe_float(sig.get("bias"), 0.0) * math.sqrt(max(0.0, s))
+    mb = abs(float(max_bias))
+    bias = max(-mb, min(mb, bias))
+    return {"bias": float(bias), "confidence": float(conf)}
 
 
 def _normalize_position(raw: dict):
@@ -313,6 +328,7 @@ def main() -> int:
     meta_model = MetaLabelModel(cfg)
     monitor = RuntimeMonitor(cfg)
     ib_fail_streak = 0
+    last_ext_runtime_sig = None
 
     if cfg.META_LABEL_ENABLED:
         samples = meta_model.fit_from_trades(cfg.LOG_DIR / "shadow_trades.csv")
@@ -384,13 +400,39 @@ def main() -> int:
             entry_candidates = []
             external_signals = {}
             global_external = None
+            ext_runtime_scale = 1.0
+            ext_runtime_diag = {"active": False, "flags": [], "degraded": False, "quality_gate_ok": True}
             if cfg.EXT_SIGNAL_ENABLED:
-                external_signals = load_external_signal_map(
+                ext_bundle = load_external_signal_bundle(
                     path=cfg.EXT_SIGNAL_FILE,
                     min_confidence=cfg.EXT_SIGNAL_MIN_CONFIDENCE,
                     max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
                 )
+                external_signals = ext_bundle.get("signals", {}) if isinstance(ext_bundle, dict) else {}
                 global_external = external_signals.get("__GLOBAL__")
+                ext_runtime_scale, ext_runtime_diag = runtime_overlay_scale(
+                    ext_bundle,
+                    min_scale=cfg.EXT_SIGNAL_RUNTIME_MIN_SCALE,
+                    max_scale=cfg.EXT_SIGNAL_RUNTIME_MAX_SCALE,
+                    degraded_scale=cfg.EXT_SIGNAL_RUNTIME_DEGRADED_SCALE,
+                    quality_fail_scale=cfg.EXT_SIGNAL_RUNTIME_QFAIL_SCALE,
+                    flag_scale=cfg.EXT_SIGNAL_RUNTIME_FLAG_SCALE,
+                )
+                sig = (
+                    round(float(ext_runtime_scale), 4),
+                    tuple(sorted(str(x) for x in ext_runtime_diag.get("flags", []) if str(x))),
+                    bool(ext_runtime_diag.get("degraded", False)),
+                    bool(ext_runtime_diag.get("quality_gate_ok", True)),
+                    str(ext_runtime_diag.get("regime", "unknown")),
+                )
+                if sig != last_ext_runtime_sig:
+                    flag_txt = ",".join(sig[1]) if sig[1] else "none"
+                    log_run(
+                        "External runtime overlay "
+                        f"scale={sig[0]:.3f} flags={flag_txt} "
+                        f"degraded={sig[2]} quality_ok={sig[3]} regime={sig[4]}"
+                    )
+                    last_ext_runtime_sig = sig
 
             for sym in wl:
                 try:
@@ -418,6 +460,13 @@ def main() -> int:
                     high = float(df["high"].iloc[-lookback:].max())
                     low = float(df["low"].iloc[-lookback:].min())
 
+                    ext_sig = blend_external_signals(
+                        external_signals.get(sym),
+                        global_external,
+                        max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
+                    )
+                    ext_sig = _scale_external_signal(ext_sig, ext_runtime_scale, cfg.EXT_SIGNAL_MAX_BIAS)
+
                     signal = build_trade_signal(
                         last,
                         price,
@@ -425,11 +474,7 @@ def main() -> int:
                         low,
                         cfg,
                         profile=profile,
-                        external=blend_external_signals(
-                            external_signals.get(sym),
-                            global_external,
-                            max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
-                        ),
+                        external=ext_sig,
                     )
                     base_conf = float(signal.get("confidence", 0.0))
                     mtf_score = 1.0
