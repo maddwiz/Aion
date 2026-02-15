@@ -57,6 +57,7 @@ def _canonicalize_risk_flags(flags) -> list[str]:
         ("nested_leakage_alert", "nested_leakage_warn"),
         ("hive_stress_alert", "hive_stress_warn"),
         ("heartbeat_alert", "heartbeat_warn"),
+        ("council_divergence_alert", "council_divergence_warn"),
     ]
     s = set(out)
     for strong, weak in stronger_to_weaker:
@@ -440,6 +441,11 @@ def _runtime_context(runs_dir: Path):
         risk_flags.append("drift_alert")
     if math.isfinite(q_step) and q_step > 0.10:
         risk_flags.append("quality_governor_step_spike")
+    if dsf:
+        if dsv >= 0.82:
+            risk_flags.append("council_divergence_alert")
+        elif dsv >= 0.66:
+            risk_flags.append("council_divergence_warn")
 
     # Regime fracture signal from disagreement/volatility/breadth stress.
     rf = _load_json(runs_dir / "regime_fracture_info.json") or {}

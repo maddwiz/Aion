@@ -42,6 +42,7 @@ def _canonicalize_flags(flags) -> list[str]:
         ("nested_leakage_alert", "nested_leakage_warn"),
         ("hive_stress_alert", "hive_stress_warn"),
         ("heartbeat_alert", "heartbeat_warn"),
+        ("council_divergence_alert", "council_divergence_warn"),
     ]
     s = set(out)
     for strong, weak in stronger_to_weaker:
@@ -259,6 +260,8 @@ def runtime_overlay_scale(
     hive_stress_alert_scale: float = 0.74,
     heartbeat_warn_scale: float = 0.88,
     heartbeat_alert_scale: float = 0.72,
+    council_divergence_warn_scale: float = 0.90,
+    council_divergence_alert_scale: float = 0.74,
     overlay_stale_scale: float = 0.82,
 ):
     """
@@ -311,6 +314,10 @@ def runtime_overlay_scale(
             scale *= float(_clamp(heartbeat_alert_scale, 0.20, 1.20))
         elif "heartbeat_warn" in flags:
             scale *= float(_clamp(heartbeat_warn_scale, 0.20, 1.20))
+        if "council_divergence_alert" in flags:
+            scale *= float(_clamp(council_divergence_alert_scale, 0.20, 1.20))
+        elif "council_divergence_warn" in flags:
+            scale *= float(_clamp(council_divergence_warn_scale, 0.20, 1.20))
     scale = _clamp(scale, float(min_scale), float(max_scale))
     diag = {
         "active": bool((degraded or (not q_ok) or bool(flags) or abs(scale - 1.0) > 1e-6)),

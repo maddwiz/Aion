@@ -251,6 +251,36 @@ def test_runtime_overlay_scale_applies_heartbeat_penalty():
     assert scale_alert < scale_warn < 1.0
 
 
+def test_runtime_overlay_scale_applies_council_divergence_penalty():
+    scale_warn, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["council_divergence_warn"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.35,
+        max_scale=1.10,
+        flag_scale=0.96,
+        council_divergence_warn_scale=0.90,
+        council_divergence_alert_scale=0.74,
+    )
+    scale_alert, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["council_divergence_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.35,
+        max_scale=1.10,
+        flag_scale=0.96,
+        council_divergence_warn_scale=0.90,
+        council_divergence_alert_scale=0.74,
+    )
+    assert scale_alert < scale_warn < 1.0
+
+
 def test_runtime_overlay_scale_ignores_duplicate_flags():
     base, _ = runtime_overlay_scale(
         {

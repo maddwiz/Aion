@@ -69,6 +69,14 @@ def test_runtime_context_includes_drift_and_quality_step_modifiers(tmp_path: Pat
     assert 0.50 <= ctx["runtime_multiplier"] <= 1.0
 
 
+def test_runtime_context_flags_council_divergence_alert(tmp_path: Path):
+    _write_series(tmp_path / "meta_mix_disagreement.csv", [0.30, 0.86])
+    ctx = ex._runtime_context(tmp_path)
+    assert ctx["components"]["meta_mix_disagreement_modifier"]["found"] is True
+    assert "council_divergence_alert" in ctx["risk_flags"]
+    assert "council_divergence_warn" not in ctx["risk_flags"]
+
+
 def test_runtime_context_includes_execution_adaptive_risk_modifier(tmp_path: Path):
     (tmp_path / "execution_constraints_info.json").write_text(
         '{"adaptive_risk_scale": 0.52}',
