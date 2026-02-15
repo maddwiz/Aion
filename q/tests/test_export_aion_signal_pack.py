@@ -152,3 +152,13 @@ def test_runtime_context_includes_hive_ecosystem_stress(tmp_path: Path):
     assert "hive_stress_alert" in ctx["risk_flags"]
     assert ctx["risk_flags"].count("hive_stress_alert") == 1
     assert "hive_stress_warn" not in ctx["risk_flags"]
+
+
+def test_runtime_context_includes_heartbeat_stress_flags(tmp_path: Path):
+    _write_series(tmp_path / "heartbeat_stress.csv", [0.55, 0.86])
+    _write_series(tmp_path / "heartbeat_bpm.csv", [88, 89, 91, 93, 96, 99])
+
+    ctx = ex._runtime_context(tmp_path)
+    assert ctx["components"]["heartbeat_stress_modifier"]["found"] is True
+    assert "heartbeat_alert" in ctx["risk_flags"]
+    assert "heartbeat_warn" not in ctx["risk_flags"]

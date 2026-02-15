@@ -56,6 +56,7 @@ def _canonicalize_risk_flags(flags) -> list[str]:
         ("exec_risk_hard", "exec_risk_tight"),
         ("nested_leakage_alert", "nested_leakage_warn"),
         ("hive_stress_alert", "hive_stress_warn"),
+        ("heartbeat_alert", "heartbeat_warn"),
     ]
     s = set(out)
     for strong, weak in stronger_to_weaker:
@@ -349,6 +350,20 @@ def _runtime_context(runs_dir: Path):
         comps["execution_adaptive_risk_modifier"] = {"value": float(emod), "found": True}
         active_vals.append(float(emod))
 
+    # Heartbeat stress diagnostics (volatility-metabolism stress state).
+    hb_stress, hb_stress_found = _latest_series_value(runs_dir / "heartbeat_stress.csv", lo=0.0, hi=1.0, default=0.5)
+    hb_mod = _clamp(1.02 - 0.42 * max(0.0, hb_stress - 0.55), 0.70, 1.02)
+    comps["heartbeat_stress_modifier"] = {"value": float(hb_mod), "found": bool(hb_stress_found)}
+    if hb_stress_found:
+        active_vals.append(float(hb_mod))
+
+    hb_bpm = _load_series(runs_dir / "heartbeat_bpm.csv")
+    hb_rise = np.nan
+    if hb_bpm is not None and len(hb_bpm) >= 6:
+        tail = np.asarray(hb_bpm[-6:], float)
+        dif = np.diff(tail)
+        hb_rise = float(np.mean(np.clip(dif, -10.0, 10.0)))
+
     # Nested WF leakage/coverage diagnostics modifier.
     nested = _load_json(runs_dir / "nested_wf_summary.json") or {}
     n_assets = _safe_float(nested.get("assets", np.nan), default=np.nan)
@@ -446,6 +461,12 @@ def _runtime_context(runs_dir: Path):
             risk_flags.append("exec_risk_hard")
         elif exec_adapt < 0.75:
             risk_flags.append("exec_risk_tight")
+
+    if hb_stress_found:
+        if (hb_stress >= 0.84) or (math.isfinite(hb_rise) and hb_stress >= 0.70 and hb_rise >= 2.0):
+            risk_flags.append("heartbeat_alert")
+        elif (hb_stress >= 0.68) or (math.isfinite(hb_rise) and hb_stress >= 0.60 and hb_rise >= 1.0):
+            risk_flags.append("heartbeat_warn")
 
     if math.isfinite(n_assets) and n_assets >= 5 and math.isfinite(n_util):
         if (n_util < 0.30) or (math.isfinite(low_frac) and low_frac > 0.65):
