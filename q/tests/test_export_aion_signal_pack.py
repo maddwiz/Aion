@@ -21,6 +21,11 @@ def test_runtime_context_uses_governor_components(tmp_path: Path):
     _write_series(tmp_path / "meta_mix_disagreement.csv", [0.30, 0.20])
     _write_series(tmp_path / "meta_mix_alpha.csv", [0.52, 0.58])
     _write_series(tmp_path / "meta_mix_gross.csv", [0.20, 0.26])
+    _write_series(tmp_path / "regime_fracture_governor.csv", [1.00, 0.86])
+    (tmp_path / "regime_fracture_info.json").write_text(
+        '{"state":"fracture_warn","latest_score":0.76}',
+        encoding="utf-8",
+    )
 
     ctx = ex._runtime_context(tmp_path)
     assert 0.50 <= ctx["runtime_multiplier"] <= 1.10
@@ -35,6 +40,8 @@ def test_runtime_context_uses_governor_components(tmp_path: Path):
     assert ctx["components"]["meta_mix_disagreement_modifier"]["found"] is True
     assert ctx["components"]["meta_mix_alpha_balance_modifier"]["found"] is True
     assert ctx["components"]["meta_mix_gross_modifier"]["found"] is True
+    assert ctx["components"]["regime_fracture_governor"]["found"] is True
+    assert "fracture_warn" in ctx["risk_flags"]
 
 
 def test_runtime_context_defaults_to_neutral_when_missing(tmp_path: Path):

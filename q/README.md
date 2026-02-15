@@ -118,6 +118,9 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/symbolic_governor.csv`
 - `runs_plus/symbolic_governor_info.json`
 - `runs_plus/hive_persistence_governor.csv`
+- `runs_plus/regime_fracture_signal.csv`
+- `runs_plus/regime_fracture_governor.csv`
+- `runs_plus/regime_fracture_info.json`
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/final_governor_trace.csv`
@@ -221,6 +224,13 @@ export CROSS_HIVE_ENTROPY_TARGET=0.60
 export CROSS_HIVE_ENTROPY_STRENGTH=0.25
 export CROSS_HIVE_USE_ECOSYSTEM_PRIOR=1
 ```
+Regime fracture controls (early instability detector):
+```bash
+export Q_FRACTURE_ALPHA=0.32
+export Q_FRACTURE_MIN_GOV=0.72
+export Q_FRACTURE_MAX_GOV=1.04
+export Q_FRACTURE_SMOOTH_INERTIA=0.85
+```
 Synapses ensemble fusion:
 ```bash
 export SYNAPSES_ENSEMBLE=1
@@ -289,4 +299,5 @@ export Q_SYSTEM_HEALTH_MAX_OPTIONAL_HOURS=72
 export Q_DRIFT_ALERT_L1=1.20
 export Q_DRIFT_ALERT_RATIO=3.0
 export Q_DRIFT_WARN_RATIO=1.8
+export Q_MAX_FRACTURE_SCORE=0.78
 ```

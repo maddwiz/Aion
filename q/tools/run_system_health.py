@@ -197,6 +197,9 @@ if __name__ == "__main__":
         RUNS / "meta_mix_disagreement.csv",
         RUNS / "tune_best_config.json",
         RUNS / "quality_runtime_modifier.csv",
+        RUNS / "regime_fracture_signal.csv",
+        RUNS / "regime_fracture_governor.csv",
+        RUNS / "regime_fracture_info.json",
         RUNS / "turnover_budget_rolling_after.csv",
         RUNS / "concentration_governor_info.json",
         RUNS / "final_governor_trace.csv",
@@ -260,6 +263,7 @@ if __name__ == "__main__":
     dna_gov = _load_series(RUNS / "dna_stress_governor.csv")
     reflex_gov = _load_series(RUNS / "reflex_health_governor.csv")
     sym_gov = _load_series(RUNS / "symbolic_governor.csv")
+    rf_gov = _load_series(RUNS / "regime_fracture_governor.csv")
     nsp_ctx_boost = _load_series(RUNS / "novaspine_context_boost.csv")
     nsp_hive_boost = _load_series(RUNS / "novaspine_hive_boost.csv")
     gov_trace_total = _load_series(RUNS / "final_governor_trace.csv")
@@ -334,6 +338,9 @@ if __name__ == "__main__":
     if sym_gov is not None:
         shape["symbolic_governor_rows"] = int(len(sym_gov))
         shape["symbolic_governor_mean"] = float(np.mean(sym_gov))
+    if rf_gov is not None:
+        shape["regime_fracture_governor_rows"] = int(len(rf_gov))
+        shape["regime_fracture_governor_mean"] = float(np.mean(rf_gov))
         shape["symbolic_governor_min"] = float(np.min(sym_gov))
         shape["symbolic_governor_max"] = float(np.max(sym_gov))
     if nsp_ctx_boost is not None:

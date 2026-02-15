@@ -34,6 +34,7 @@ TRACE_STEPS = [
     "hive_persistence",
     "global_governor",
     "quality_governor",
+    "regime_fracture_governor",
     "novaspine_context_boost",
     "novaspine_hive_boost",
     "shock_mask_guard",
@@ -272,6 +273,15 @@ if __name__ == "__main__":
         _trace_put("quality_governor", qs.ravel())
 
     # 19) NovaSpine recall-context boost (if available).
+    rfg = load_series("runs_plus/regime_fracture_governor.csv")
+    if rfg is not None:
+        L = min(len(rfg), W.shape[0])
+        rf = np.clip(rfg[:L], 0.70, 1.06).reshape(-1, 1)
+        W[:L] = W[:L] * rf
+        steps.append("regime_fracture_governor")
+        _trace_put("regime_fracture_governor", rf.ravel())
+
+    # 20) NovaSpine recall-context boost (if available).
     ncb = load_series("runs_plus/novaspine_context_boost.csv")
     if ncb is not None:
         L = min(len(ncb), W.shape[0])
@@ -280,7 +290,7 @@ if __name__ == "__main__":
         steps.append("novaspine_context_boost")
         _trace_put("novaspine_context_boost", nb.ravel())
 
-    # 20) NovaSpine per-hive alignment boost (global projection).
+    # 21) NovaSpine per-hive alignment boost (global projection).
     nhb = load_series("runs_plus/novaspine_hive_boost.csv")
     if nhb is not None:
         L = min(len(nhb), W.shape[0])
@@ -289,7 +299,7 @@ if __name__ == "__main__":
         steps.append("novaspine_hive_boost")
         _trace_put("novaspine_hive_boost", hb.ravel())
 
-    # 21) Shock/news mask exposure cut.
+    # 22) Shock/news mask exposure cut.
     sm = load_series("runs_plus/shock_mask.csv")
     if sm is not None:
         L = min(len(sm), W.shape[0])
@@ -299,7 +309,7 @@ if __name__ == "__main__":
         steps.append("shock_mask_guard")
         _trace_put("shock_mask_guard", sc.ravel())
 
-    # 22) Concentration governor (top1/top3 + HHI caps).
+    # 23) Concentration governor (top1/top3 + HHI caps).
     use_conc = str(os.getenv("Q_USE_CONCENTRATION_GOV", "1")).strip().lower() in {"1", "true", "yes", "on"}
     if use_conc:
         top1 = float(np.clip(float(os.getenv("Q_CONCENTRATION_TOP1_CAP", "0.18")), 0.01, 1.0))
@@ -336,11 +346,11 @@ if __name__ == "__main__":
         comments="",
     )
 
-    # 23) Save final
+    # 24) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 24) Small JSON breadcrumb
+    # 25) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps(
             {
@@ -356,7 +366,7 @@ if __name__ == "__main__":
         )
     )
 
-    # 25) Report card
+    # 26) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 

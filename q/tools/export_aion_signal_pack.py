@@ -239,6 +239,7 @@ def _runtime_context(runs_dir: Path):
         "reflex_health_governor": ("reflex_health_governor.csv", 0.70, 1.15, 1.0),
         "symbolic_governor": ("symbolic_governor.csv", 0.70, 1.15, 1.0),
         "legacy_exposure": ("legacy_exposure.csv", 0.40, 1.30, 1.0),
+        "regime_fracture_governor": ("regime_fracture_governor.csv", 0.70, 1.06, 1.0),
     }
     active_vals = []
     for k, (fname, lo, hi, dflt) in specs.items():
@@ -317,6 +318,21 @@ def _runtime_context(runs_dir: Path):
         risk_flags.append("drift_alert")
     if math.isfinite(q_step) and q_step > 0.10:
         risk_flags.append("quality_governor_step_spike")
+
+    # Regime fracture signal from disagreement/volatility/breadth stress.
+    rf = _load_json(runs_dir / "regime_fracture_info.json") or {}
+    rf_state = str(rf.get("state", "")).lower()
+    rf_score = _safe_float(rf.get("latest_score", np.nan), default=np.nan)
+    if rf_state:
+        if rf_state == "fracture_warn":
+            risk_flags.append("fracture_warn")
+        elif rf_state == "fracture_alert":
+            risk_flags.append("fracture_alert")
+    elif math.isfinite(rf_score):
+        if rf_score >= 0.85:
+            risk_flags.append("fracture_alert")
+        elif rf_score >= 0.72:
+            risk_flags.append("fracture_warn")
 
     return {
         "runtime_multiplier": mult,

@@ -42,6 +42,7 @@ def build_alert_payload(
     concentration: dict,
     drift_watch: dict,
     thresholds: dict,
+    fracture: dict | None = None,
 ):
     min_health = float(thresholds.get("min_health_score", 70.0))
     min_global = float(thresholds.get("min_global_governor_mean", 0.45))
@@ -62,6 +63,7 @@ def build_alert_payload(
     max_exec_turnover_retention = float(thresholds.get("max_exec_turnover_retention", 1.10))
     max_stale_required = int(thresholds.get("max_stale_required_count", 0))
     max_quality_gov_step = float(thresholds.get("max_quality_governor_abs_step", 0.12))
+    max_fracture_score = float(thresholds.get("max_fracture_score", 0.78))
 
     issues = []
     score = float(health.get("health_score", 0.0))
@@ -239,6 +241,19 @@ def build_alert_payload(
     if drift_status == "alert":
         issues.append("portfolio_drift_status=alert")
 
+    fracture_score = None
+    fracture_state = None
+    if isinstance(fracture, dict):
+        try:
+            fracture_score = float(fracture.get("latest_score", np.nan))
+        except Exception:
+            fracture_score = None
+        fracture_state = str(fracture.get("state", "na")).lower()
+    if fracture_state == "fracture_alert":
+        issues.append("regime_fracture_state=alert")
+    if fracture_score is not None and np.isfinite(fracture_score) and fracture_score > max_fracture_score:
+        issues.append(f"regime_fracture_score>{max_fracture_score} ({fracture_score:.3f})")
+
     immune_ok = bool(immune.get("ok", False)) if isinstance(immune, dict) else False
     immune_pass = bool(immune.get("pass", False)) if isinstance(immune, dict) else False
     if require_immune_pass:
@@ -273,6 +288,7 @@ def build_alert_payload(
             "max_exec_turnover_retention": max_exec_turnover_retention,
             "max_stale_required_count": max_stale_required,
             "max_quality_governor_abs_step": max_quality_gov_step,
+            "max_fracture_score": max_fracture_score,
         },
         "observed": {
             "health_score": score,
@@ -300,6 +316,8 @@ def build_alert_payload(
             "concentration_top1_after": conc_top1_after,
             "portfolio_latest_l1_drift": drift_latest_l1,
             "portfolio_drift_status": drift_status,
+            "regime_fracture_score": fracture_score,
+            "regime_fracture_state": fracture_state,
         },
         "alerts": issues,
     }
@@ -335,6 +353,7 @@ if __name__ == "__main__":
     shock = _load_json(RUNS / "shock_mask_info.json") or {}
     concentration = _load_json(RUNS / "concentration_governor_info.json") or {}
     drift_watch = _load_json(RUNS / "portfolio_drift_watch.json") or {}
+    fracture = _load_json(RUNS / "regime_fracture_info.json") or {}
     payload = build_alert_payload(
         health=health,
         guards=guards,
@@ -345,6 +364,7 @@ if __name__ == "__main__":
         shock=shock,
         concentration=concentration,
         drift_watch=drift_watch,
+        fracture=fracture,
         thresholds={
             "min_health_score": min_health,
             "min_global_governor_mean": min_global,
@@ -365,6 +385,7 @@ if __name__ == "__main__":
             "max_exec_turnover_retention": max_exec_turnover_retention,
             "max_stale_required_count": max_stale_required,
             "max_quality_governor_abs_step": max_quality_gov_step,
+            "max_fracture_score": float(os.getenv("Q_MAX_FRACTURE_SCORE", "0.78")),
         },
     )
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))
