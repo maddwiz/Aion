@@ -110,3 +110,25 @@ def test_apply_session_cap_scales_value_by_session():
 def test_apply_session_cap_returns_none_for_missing_base():
     scales = {"regular": 1.0, "after_hours": 0.6}
     assert rec._apply_session_cap(None, "after_hours", scales) is None
+
+
+def test_apply_symbol_caps_supports_side_specific_limits():
+    w = np.array(
+        [
+            [0.30, -0.30],
+            [0.10, -0.10],
+        ],
+        dtype=float,
+    )
+    idx = {"AAPL": 0, "TSLA": 1}
+    out = rec._apply_symbol_caps(
+        w,
+        idx,
+        symbol_caps={"AAPL": 0.25},
+        symbol_long_caps={"AAPL": 0.12},
+        symbol_short_caps={"TSLA": 0.08},
+    )
+    # AAPL symmetric cap first (0.25), then long cap (0.12)
+    assert np.allclose(out[:, 0], np.array([0.12, 0.10], dtype=float))
+    # TSLA short cap prevents values below -0.08
+    assert np.allclose(out[:, 1], np.array([-0.08, -0.08], dtype=float))

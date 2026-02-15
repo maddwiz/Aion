@@ -153,6 +153,7 @@ Key knobs:
 - `max_asset_step_change`: per-asset max weight delta per step.
 - `max_step_turnover`: max per-step portfolio turnover (`sum(abs(dw))`).
 - `rolling_turnover_window` + `rolling_turnover_limit`: trailing turnover budget.
+- `symbol_long_caps` and `symbol_short_caps`: side-specific per-symbol limits.
 - `session_turnover_scales`: per-session multiplier for turnover caps.
 - `session_asset_step_scales`: per-session multiplier for per-asset step caps.
 

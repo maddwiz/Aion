@@ -132,6 +132,8 @@ def _load_config():
         "short_blocklist": [],
         "long_blocklist": [],
         "symbol_caps": {},
+        "symbol_long_caps": {},
+        "symbol_short_caps": {},
         "session_scales": {"regular": 1.0, "after_hours": 0.60, "closed": 0.0},
         "session_turnover_scales": {"regular": 1.0, "after_hours": 0.70, "closed": 0.0},
         "session_asset_step_scales": {"regular": 1.0, "after_hours": 0.70, "closed": 0.0},
@@ -261,6 +263,41 @@ def _apply_turnover_caps(
     return w, t_before, t_after
 
 
+def _apply_symbol_caps(
+    weights: np.ndarray,
+    idx: dict[str, int],
+    symbol_caps: dict | None = None,
+    symbol_long_caps: dict | None = None,
+    symbol_short_caps: dict | None = None,
+):
+    out = np.asarray(weights, float).copy()
+    sym_caps = symbol_caps or {}
+    if isinstance(sym_caps, dict):
+        for sym, cap in sym_caps.items():
+            s = str(sym).upper()
+            if s not in idx:
+                continue
+            c = float(np.clip(float(cap), 0.0, 2.0))
+            out[:, idx[s]] = np.clip(out[:, idx[s]], -c, c)
+    long_caps = symbol_long_caps or {}
+    if isinstance(long_caps, dict):
+        for sym, cap in long_caps.items():
+            s = str(sym).upper()
+            if s not in idx:
+                continue
+            c = float(np.clip(float(cap), 0.0, 2.0))
+            out[:, idx[s]] = np.clip(out[:, idx[s]], None, c)
+    short_caps = symbol_short_caps or {}
+    if isinstance(short_caps, dict):
+        for sym, cap in short_caps.items():
+            s = str(sym).upper()
+            if s not in idx:
+                continue
+            c = float(np.clip(float(cap), 0.0, 2.0))
+            out[:, idx[s]] = np.clip(out[:, idx[s]], -c, None)
+    return out
+
+
 if __name__ == "__main__":
     args = parse_args()
     W = _load_weights()
@@ -288,14 +325,13 @@ if __name__ == "__main__":
         if sym in idx:
             out[:, idx[sym]] = np.clip(out[:, idx[sym]], None, 0.0)
 
-    sym_caps = cfg.get("symbol_caps", {}) or {}
-    if isinstance(sym_caps, dict):
-        for sym, cap in sym_caps.items():
-            s = str(sym).upper()
-            if s not in idx:
-                continue
-            c = float(np.clip(float(cap), 0.0, 2.0))
-            out[:, idx[s]] = np.clip(out[:, idx[s]], -c, c)
+    out = _apply_symbol_caps(
+        out,
+        idx,
+        symbol_caps=cfg.get("symbol_caps", {}) or {},
+        symbol_long_caps=cfg.get("symbol_long_caps", {}) or {},
+        symbol_short_caps=cfg.get("symbol_short_caps", {}) or {},
+    )
 
     session = str(os.getenv("Q_SESSION_MODE", "regular")).strip().lower()
     session_scales = cfg.get("session_scales", {}) or {}

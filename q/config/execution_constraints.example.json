@@ -7,6 +7,12 @@
     "TSLA": 0.12,
     "NVDA": 0.12
   },
+  "symbol_long_caps": {
+    "AAPL": 0.15
+  },
+  "symbol_short_caps": {
+    "TSLA": 0.10
+  },
   "session_scales": {
     "regular": 1.0,
     "after_hours": 0.6,
