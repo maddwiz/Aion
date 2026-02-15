@@ -297,6 +297,14 @@ def _runtime_context(runs_dir: Path):
         comps["portfolio_drift_modifier"] = {"value": float(d_mod), "found": True}
         active_vals.append(float(d_mod))
 
+    # Execution constraints adaptive-risk scalar (from fracture + quality feedback).
+    exec_info = _load_json(runs_dir / "execution_constraints_info.json") or {}
+    exec_adapt = _safe_float(exec_info.get("adaptive_risk_scale", np.nan), default=np.nan)
+    if math.isfinite(exec_adapt):
+        emod = _clamp(exec_adapt, 0.40, 1.05)
+        comps["execution_adaptive_risk_modifier"] = {"value": float(emod), "found": True}
+        active_vals.append(float(emod))
+
     if active_vals:
         arr = np.clip(np.asarray(active_vals, float), 0.20, 2.00)
         mult = float(np.exp(np.mean(np.log(arr + 1e-12))))
@@ -333,6 +341,12 @@ def _runtime_context(runs_dir: Path):
             risk_flags.append("fracture_alert")
         elif rf_score >= 0.72:
             risk_flags.append("fracture_warn")
+
+    if math.isfinite(exec_adapt):
+        if exec_adapt < 0.55:
+            risk_flags.append("exec_risk_hard")
+        elif exec_adapt < 0.75:
+            risk_flags.append("exec_risk_tight")
 
     return {
         "runtime_multiplier": mult,

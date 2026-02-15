@@ -67,3 +67,13 @@ def test_runtime_context_includes_drift_and_quality_step_modifiers(tmp_path: Pat
     assert "drift_alert" in ctx["risk_flags"]
     assert "quality_governor_step_spike" in ctx["risk_flags"]
     assert 0.50 <= ctx["runtime_multiplier"] <= 1.0
+
+
+def test_runtime_context_includes_execution_adaptive_risk_modifier(tmp_path: Path):
+    (tmp_path / "execution_constraints_info.json").write_text(
+        '{"adaptive_risk_scale": 0.52}',
+        encoding="utf-8",
+    )
+    ctx = ex._runtime_context(tmp_path)
+    assert ctx["components"]["execution_adaptive_risk_modifier"]["found"] is True
+    assert "exec_risk_hard" in ctx["risk_flags"]
