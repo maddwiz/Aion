@@ -174,12 +174,20 @@ if [[ "$AION_MODE" == "brain" ]]; then
       echo "[AION] Starting local dashboard..."
       exec "$PYTHON_BIN" -m aion.exec.dashboard
       ;;
+    ops-guard)
+      echo "[AION] Starting ops guard..."
+      exec "$PYTHON_BIN" -m aion.exec.ops_guard
+      ;;
+    operator)
+      echo "[AION] Showing operator status..."
+      exec "$PYTHON_BIN" -m aion.exec.operator
+      ;;
     doctor)
       echo "[AION] Running environment doctor checks..."
       exec "$PYTHON_BIN" -m aion.exec.doctor
       ;;
     *)
-      echo "[AION] ERROR: unknown AION_TASK '$AION_TASK' (trade|backtest|report|tune|gate|recalibrate|recover-ib|dashboard|doctor)."
+      echo "[AION] ERROR: unknown AION_TASK '$AION_TASK' (trade|backtest|report|tune|gate|recalibrate|recover-ib|dashboard|ops-guard|operator|doctor)."
       exit 1
       ;;
   esac

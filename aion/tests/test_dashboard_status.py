@@ -12,8 +12,11 @@ def _write(path: Path, payload):
 def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeypatch):
     log_dir = tmp_path / "logs"
     state_dir = tmp_path / "state"
+    ops_status = tmp_path / "ops_guard_status.json"
     monkeypatch.setattr(dash.cfg, "LOG_DIR", log_dir)
     monkeypatch.setattr(dash.cfg, "STATE_DIR", state_dir)
+    monkeypatch.setattr(dash.cfg, "OPS_GUARD_STATUS_FILE", ops_status)
+    monkeypatch.setattr(dash.cfg, "OPS_GUARD_TARGETS", ["trade", "dashboard"])
 
     _write(
         log_dir / "doctor_report.json",
@@ -32,6 +35,15 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     _write(log_dir / "runtime_monitor.json", {"alerts": [], "system_events": []})
     _write(log_dir / "performance_report.json", {"trade_metrics": {"closed_trades": 5}, "equity_metrics": {}})
     _write(state_dir / "strategy_profile.json", {"trading_enabled": True, "adaptive_stats": {}})
+    _write(
+        ops_status,
+        {
+            "running": {
+                "trade": {"running": True, "pids": [123]},
+                "dashboard": {"running": True, "pids": [456]},
+            }
+        },
+    )
     (state_dir / "watchlist.txt").write_text("AAPL\nMSFT\n", encoding="utf-8")
 
     s = dash._status_payload()
@@ -40,4 +52,5 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     assert s["external_overlay"]["signals"] == 0
     assert "fracture_alert" in s["external_overlay_risk_flags"]
     assert s["external_fracture_state"] == "alert"
+    assert s["ops_guard_ok"] is True
     assert s["watchlist_count"] == 2

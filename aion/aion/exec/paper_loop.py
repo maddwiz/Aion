@@ -24,6 +24,7 @@ from ..monitoring.runtime_monitor import RuntimeMonitor
 from ..portfolio.optimizer import allocate_candidates
 from ..risk.event_filter import EventRiskFilter
 from ..risk.kill_switch import KillSwitch
+from ..risk.policy import apply_policy_caps, load_policy, symbol_allowed
 from ..risk.position_sizing import gross_leverage_ok, risk_qty
 from ..utils.logging_utils import log_alert, log_equity, log_run, log_signal, log_trade
 
@@ -163,6 +164,18 @@ def _runtime_risk_caps(
     max_open_positions_runtime = max(1, min(int(max_open_positions_cap), int(max_open_positions_runtime)))
     max_trades_cap_runtime = max(1, min(int(max_trades_cap), int(max_trades_cap_runtime)))
     return int(max_trades_cap_runtime), int(max_open_positions_runtime)
+
+
+def _daily_loss_limits_hit(caps: dict, day_start_equity: float, equity: float):
+    start = max(1.0, _safe_float(day_start_equity, 0.0))
+    eq = _safe_float(equity, start)
+    daily_loss_abs = max(0.0, start - eq)
+    daily_loss_pct = daily_loss_abs / start
+    lim_abs = _safe_float(caps.get("daily_loss_limit_abs"), None)
+    lim_pct = _safe_float(caps.get("daily_loss_limit_pct"), None)
+    hit_abs = bool(lim_abs is not None and lim_abs > 0 and daily_loss_abs >= lim_abs)
+    hit_pct = bool(lim_pct is not None and lim_pct > 0 and daily_loss_pct >= lim_pct)
+    return hit_abs or hit_pct, daily_loss_abs, daily_loss_pct
 
 
 def _normalize_position(raw: dict):
@@ -441,6 +454,7 @@ def main() -> int:
     closed_pnl = 0.0
     trades_today = 0
     day_key = dt.datetime.now().strftime("%Y-%m-%d")
+    day_start_equity = float(equity)
 
     restored = load_runtime_state(day_key)
     if restored:
@@ -452,6 +466,7 @@ def main() -> int:
         log_run(
             f"Runtime state restored: positions={len(open_positions)} trades_today={trades_today} cash={cash:.2f}"
         )
+        day_start_equity = float(_equity_from_cash_and_positions(cash, open_positions, {}))
 
     ks = KillSwitch(
         cfg.LOG_DIR / "killswitch.json",
@@ -473,6 +488,8 @@ def main() -> int:
     monitor = RuntimeMonitor(cfg)
     ib_fail_streak = 0
     last_ext_runtime_sig = None
+    last_policy_sig = None
+    last_policy_loss_hit = False
 
     if cfg.META_LABEL_ENABLED:
         samples = meta_model.fit_from_trades(cfg.LOG_DIR / "shadow_trades.csv")
@@ -516,6 +533,16 @@ def main() -> int:
             max_open_positions_cap = int(profile.get("max_open_positions", cfg.MAX_OPEN_POSITIONS))
             max_trades_cap_runtime = max_trades_cap
             max_open_positions_runtime = max_open_positions_cap
+            risk_per_trade_runtime = float(cfg.RISK_PER_TRADE)
+            max_position_notional_pct_runtime = float(cfg.MAX_POSITION_NOTIONAL_PCT)
+            max_gross_leverage_runtime = float(cfg.MAX_GROSS_LEVERAGE)
+            policy_caps = {
+                "block_new_entries": False,
+                "blocked_symbols": set(),
+                "allowed_symbols": set(),
+                "daily_loss_limit_abs": None,
+                "daily_loss_limit_pct": None,
+            }
 
             wl = load_watchlist()
             if not wl:
@@ -528,6 +555,7 @@ def main() -> int:
             if today != day_key:
                 day_key = today
                 trades_today = 0
+                day_start_equity = float(equity)
                 if cfg.META_LABEL_ENABLED:
                     samples = meta_model.fit_from_trades(cfg.LOG_DIR / "shadow_trades.csv")
                     if samples > 0:
@@ -599,6 +627,55 @@ def main() -> int:
                             f"max_trades={sig[6]}/{max_trades_cap} max_open={sig[7]}/{max_open_positions_cap}",
                         )
                     last_ext_runtime_sig = sig
+
+            if cfg.RISK_POLICY_ENFORCE:
+                loaded_policy = load_policy(cfg.RISK_POLICY_FILE)
+                policy_caps = apply_policy_caps(
+                    loaded_policy,
+                    max_trades_per_day=max_trades_cap_runtime,
+                    max_open_positions=max_open_positions_runtime,
+                    risk_per_trade=risk_per_trade_runtime,
+                    max_position_notional_pct=max_position_notional_pct_runtime,
+                    max_gross_leverage=max_gross_leverage_runtime,
+                )
+                max_trades_cap_runtime = int(policy_caps["max_trades_per_day"])
+                max_open_positions_runtime = int(policy_caps["max_open_positions"])
+                risk_per_trade_runtime = float(policy_caps["risk_per_trade"])
+                max_position_notional_pct_runtime = float(policy_caps["max_position_notional_pct"])
+                max_gross_leverage_runtime = float(policy_caps["max_gross_leverage"])
+
+                policy_sig = (
+                    bool(policy_caps.get("block_new_entries", False)),
+                    int(max_trades_cap_runtime),
+                    int(max_open_positions_runtime),
+                    round(float(risk_per_trade_runtime), 6),
+                    round(float(max_position_notional_pct_runtime), 6),
+                    round(float(max_gross_leverage_runtime), 6),
+                    len(policy_caps.get("blocked_symbols", set()) or set()),
+                    len(policy_caps.get("allowed_symbols", set()) or set()),
+                    policy_caps.get("daily_loss_limit_abs"),
+                    policy_caps.get("daily_loss_limit_pct"),
+                )
+                if policy_sig != last_policy_sig:
+                    log_run(
+                        "Risk policy active "
+                        f"block_new={policy_sig[0]} max_trades={policy_sig[1]} max_open={policy_sig[2]} "
+                        f"risk_per_trade={policy_sig[3]:.4f} max_notional_pct={policy_sig[4]:.4f} "
+                        f"max_gross_lev={policy_sig[5]:.3f} blocked={policy_sig[6]} allowed={policy_sig[7]} "
+                        f"daily_loss_abs={policy_sig[8]} daily_loss_pct={policy_sig[9]}"
+                    )
+                    last_policy_sig = policy_sig
+
+            policy_loss_hit, policy_daily_loss_abs, policy_daily_loss_pct = _daily_loss_limits_hit(
+                policy_caps, day_start_equity, equity
+            )
+            policy_block_new_entries = bool(policy_caps.get("block_new_entries", False) or policy_loss_hit)
+            if policy_loss_hit and (not last_policy_loss_hit):
+                log_run(
+                    "Risk policy halted new entries "
+                    f"(daily_loss_abs={policy_daily_loss_abs:.2f}, daily_loss_pct={policy_daily_loss_pct:.2%})"
+                )
+            last_policy_loss_hit = bool(policy_loss_hit)
 
             for sym in wl:
                 try:
@@ -779,6 +856,10 @@ def main() -> int:
                     # Candidate collection for portfolio allocator
                     if killswitch_block_new_entries:
                         continue
+                    if policy_block_new_entries:
+                        continue
+                    if not symbol_allowed(sym, policy_caps):
+                        continue
                     if sym in cooldown:
                         continue
                     if trades_today >= max_trades_cap_runtime:
@@ -823,7 +904,7 @@ def main() -> int:
                 if cfg.PORTFOLIO_ENABLE:
                     allocations = allocate_candidates(entry_candidates, equity, cfg)
                 else:
-                    gross = equity * cfg.MAX_GROSS_LEVERAGE
+                    gross = equity * max_gross_leverage_runtime
                     per = gross / max(len(entry_candidates), 1)
                     allocations = {
                         c["symbol"]: {"target_notional": per, "weight": 1.0 / len(entry_candidates), "side": c["side"]}
@@ -831,6 +912,8 @@ def main() -> int:
                     }
 
             for c in sorted(entry_candidates, key=lambda x: x["confidence"], reverse=True):
+                if killswitch_block_new_entries or policy_block_new_entries:
+                    break
                 if trades_today >= max_trades_cap_runtime:
                     break
                 if len(open_positions) >= max_open_positions_runtime:
@@ -839,19 +922,21 @@ def main() -> int:
                 sym = c["symbol"]
                 if sym in open_positions:
                     continue
+                if not symbol_allowed(sym, policy_caps):
+                    continue
 
                 alloc = allocations.get(sym, {})
-                target_notional = float(alloc.get("target_notional", equity * cfg.MAX_POSITION_NOTIONAL_PCT))
+                target_notional = float(alloc.get("target_notional", equity * max_position_notional_pct_runtime))
                 qty_port = int(target_notional / max(c["price"], 1e-6))
 
                 qty_risk = risk_qty(
                     equity=equity,
-                    risk_per_trade=cfg.RISK_PER_TRADE,
+                    risk_per_trade=risk_per_trade_runtime,
                     atr=c["atr"],
                     price=c["price"],
                     confidence=c["confidence"],
                     stop_atr_mult=float(c["signal"]["stop_atr_mult"]),
-                    max_notional_pct=cfg.MAX_POSITION_NOTIONAL_PCT,
+                    max_notional_pct=max_position_notional_pct_runtime,
                 )
                 qty = min(qty_port, qty_risk)
                 if qty <= 0:
@@ -875,7 +960,7 @@ def main() -> int:
                     cash=cash,
                     open_positions=open_positions,
                     next_notional=notional,
-                    max_gross_leverage=cfg.MAX_GROSS_LEVERAGE,
+                    max_gross_leverage=max_gross_leverage_runtime,
                     equity=max(equity, 1.0),
                 ):
                     continue

@@ -82,6 +82,7 @@ def _status_payload():
     monitor = _read_json(cfg.LOG_DIR / "runtime_monitor.json", {})
     perf = _read_json(cfg.LOG_DIR / "performance_report.json", {})
     profile = _read_json(cfg.STATE_DIR / "strategy_profile.json", {})
+    ops_guard = _read_json(cfg.OPS_GUARD_STATUS_FILE, {})
     watchlist = _tail_lines(cfg.STATE_DIR / "watchlist.txt", limit=200)
 
     trade_metrics = perf.get("trade_metrics", {})
@@ -98,6 +99,18 @@ def _status_payload():
     elif "fracture_warn" in risk_flags:
         fracture_state = "warn"
 
+    guard_running = {}
+    if isinstance(ops_guard, dict):
+        guard_running = ops_guard.get("running", {})
+    if not isinstance(guard_running, dict):
+        guard_running = {}
+    target_states = []
+    for target in cfg.OPS_GUARD_TARGETS:
+        item = guard_running.get(str(target), {}) if isinstance(guard_running, dict) else {}
+        running = bool(item.get("running")) if isinstance(item, dict) else False
+        target_states.append(running)
+    ops_guard_ok = bool(target_states) and all(target_states)
+
     return {
         "ib": doctor.get("ib", {}),
         "doctor_ok": bool(doctor.get("ok", False)),
@@ -107,6 +120,8 @@ def _status_payload():
         "external_overlay": ext_details,
         "external_overlay_risk_flags": risk_flags,
         "external_fracture_state": fracture_state,
+        "ops_guard_ok": ops_guard_ok,
+        "ops_guard": ops_guard if isinstance(ops_guard, dict) else {},
         "monitor_ts": monitor.get("ts"),
         "alert_count": len(monitor.get("alerts", [])),
         "system_event_count": len(monitor.get("system_events", [])),
@@ -160,6 +175,7 @@ def _html_template():
       <div class="card kpi"><div class="k">Watchlist</div><div class="v" id="watchlist_count">-</div></div>
       <div class="card kpi"><div class="k">Closed Trades</div><div class="v" id="closed_trades">-</div></div>
       <div class="card kpi"><div class="k">Q Overlay</div><div class="v" id="overlay_ok">-</div></div>
+      <div class="card kpi"><div class="k">Ops Guard</div><div class="v" id="ops_guard_ok">-</div></div>
 
       <div class="card wide">
         <div class="k">System Snapshot</div>
@@ -210,6 +226,7 @@ def _html_template():
       txt('watchlist_count', s.watchlist_count ?? 0);
       txt('closed_trades', s.trade_metrics?.closed_trades ?? 0);
       txt('overlay_ok', s.external_overlay_ok ? 'OK' : 'WARN'); cls('overlay_ok', !!s.external_overlay_ok);
+      txt('ops_guard_ok', s.ops_guard_ok ? 'OK' : 'WARN'); cls('ops_guard_ok', !!s.ops_guard_ok);
       txt('snapshot', JSON.stringify({
         ib: s.ib,
         external_overlay_ok: s.external_overlay_ok,
@@ -217,6 +234,8 @@ def _html_template():
         external_overlay_risk_flags: s.external_overlay_risk_flags,
         external_fracture_state: s.external_fracture_state,
         external_overlay_msg: s.external_overlay_msg,
+        ops_guard_ok: s.ops_guard_ok,
+        ops_guard: s.ops_guard,
         monitor_ts: s.monitor_ts,
         winrate: s.trade_metrics?.winrate,
         expectancy: s.trade_metrics?.expectancy,

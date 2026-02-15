@@ -300,3 +300,15 @@ DASHBOARD_PORT = int(os.getenv("AION_DASHBOARD_PORT", "8787"))
 
 # Recalibration schedule metadata/config
 RECALIBRATION_MIN_DAYS_BETWEEN = int(os.getenv("AION_RECALIBRATION_MIN_DAYS_BETWEEN", "5"))
+
+# Hard risk-policy layer (optional JSON file with non-negotiable limits).
+RISK_POLICY_ENFORCE = _bool_env("AION_RISK_POLICY_ENFORCE", True)
+RISK_POLICY_FILE = Path(os.getenv("AION_RISK_POLICY_FILE", str(STATE_DIR / "risk_policy.json")))
+
+# Ops guard / operator UX
+OPS_GUARD_INTERVAL_SEC = int(os.getenv("AION_OPS_GUARD_INTERVAL_SEC", "20"))
+OPS_GUARD_RESTART_COOLDOWN_SEC = int(os.getenv("AION_OPS_GUARD_RESTART_COOLDOWN_SEC", "120"))
+OPS_GUARD_MAX_RESTARTS_PER_HOUR = int(os.getenv("AION_OPS_GUARD_MAX_RESTARTS_PER_HOUR", "6"))
+OPS_GUARD_TARGETS = _dedupe_strs(_str_list_env("AION_OPS_GUARD_TARGETS", ["trade", "dashboard"]))
+OPS_GUARD_STATUS_FILE = Path(os.getenv("AION_OPS_GUARD_STATUS_FILE", str(LOG_DIR / "ops_guard_status.json")))
+OPS_GUARD_INCIDENT_LOG = Path(os.getenv("AION_OPS_GUARD_INCIDENT_LOG", str(LOG_DIR / "ops_incidents.log")))
