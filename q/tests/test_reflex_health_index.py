@@ -30,3 +30,17 @@ def test_reflex_health_penalizes_deep_drawdown():
 
     assert h_steady.shape == h_stress.shape == (T,)
     assert float(np.mean(h_stress[190:260])) < float(np.mean(h_steady[190:260]))
+
+
+def test_reflex_health_penalizes_persistent_downside_tail():
+    T = 320
+    rng = np.random.default_rng(42)
+    balanced = 0.0002 + 0.0035 * rng.standard_normal(T)
+    tailed = balanced.copy()
+    tailed[::5] -= 0.018  # repeated left-tail hits
+
+    h_bal = reflex_health(balanced, lookback=126)
+    h_tail = reflex_health(tailed, lookback=126)
+
+    assert h_bal.shape == h_tail.shape == (T,)
+    assert float(np.mean(h_tail[200:300])) < float(np.mean(h_bal[200:300]))

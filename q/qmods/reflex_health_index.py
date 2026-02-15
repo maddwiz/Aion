@@ -19,6 +19,7 @@ def reflex_health(latent_returns: np.ndarray, lookback=126, return_components: b
     base_sharpe = np.zeros_like(r, float)
     dd_pen = np.zeros_like(r, float)
     instab_pen = np.zeros_like(r, float)
+    downside_pen = np.zeros_like(r, float)
     for i in range(len(r)):
         j = max(0, i - lookback + 1)
         w = r[j:i+1]
@@ -34,17 +35,25 @@ def reflex_health(latent_returns: np.ndarray, lookback=126, return_components: b
         inst = float(np.nanstd(np.diff(w))) if len(w) > 1 else 0.0
         inst_ref = float(np.nanstd(w) + 1e-6)
         ip = float(np.clip(inst / (2.5 * inst_ref + 1e-12), 0.0, 1.0))
-        adj = base * (1.0 - 0.35 * ddp) * (1.0 - 0.12 * ip)
+        # Downside pressure from persistent losses + left-tail severity.
+        neg_freq = float(np.mean(w < 0.0)) if len(w) else 0.0
+        q10 = float(np.nanpercentile(w, 10)) if len(w) else 0.0
+        tail_mag = float(np.clip(abs(min(q10, 0.0)) / (2.2 * (inst_ref + 1e-12)), 0.0, 1.0))
+        dsp = float(np.clip(0.55 * neg_freq + 0.45 * tail_mag, 0.0, 1.0))
+
+        adj = base * (1.0 - 0.35 * ddp) * (1.0 - 0.12 * ip) * (1.0 - 0.18 * dsp)
         # Clamp to avoid exploding values when window std is tiny.
         out[i] = float(np.clip(adj, 0.0, 5.0))
         base_sharpe[i] = base
         dd_pen[i] = ddp
         instab_pen[i] = ip
+        downside_pen[i] = dsp
     if return_components:
         return out, {
             "base_sharpe": base_sharpe,
             "drawdown_penalty": dd_pen,
             "instability_penalty": instab_pen,
+            "downside_penalty": downside_pen,
         }
     return out
 
