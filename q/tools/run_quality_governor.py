@@ -57,6 +57,27 @@ def _load_series(path: Path):
     return a.ravel()
 
 
+def _load_row_mean_series(path: Path):
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+    cols = [c for c in df.columns if str(c).lower() not in {"date", "timestamp", "time"}]
+    if not cols:
+        return None
+    vals = []
+    for c in cols:
+        vals.append(pd.to_numeric(df[c], errors="coerce").fillna(0.0).values.astype(float))
+    if not vals:
+        return None
+    mat = np.column_stack(vals)
+    return np.nan_to_num(np.mean(mat, axis=1), nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def _infer_length():
     # Keep priority aligned with final portfolio flow.
     for rel in [
@@ -107,6 +128,7 @@ if __name__ == "__main__":
     dna_info = _load_json(RUNS / "dna_stress_info.json") or {}
     reflex_info = _load_json(RUNS / "reflex_health_info.json") or {}
     sym_info = _load_json(RUNS / "symbolic_governor_info.json") or {}
+    cross_info = _load_json(RUNS / "cross_hive_summary.json") or {}
 
     hive_sh = None
     hive_hit = None
@@ -261,6 +283,29 @@ if __name__ == "__main__":
             sym_q = float(np.clip(1.0 - ms, 0.0, 1.0))
     except Exception:
         sym_q = None
+    hive_downside_q = None
+    try:
+        dn = cross_info.get("downside_penalty_mean", {})
+        if isinstance(dn, dict) and dn:
+            vals = [float(v) for v in dn.values() if np.isfinite(float(v))]
+            if vals:
+                hive_downside_q = float(np.clip(1.0 - float(np.mean(vals)), 0.0, 1.0))
+    except Exception:
+        hive_downside_q = None
+    reflex_downside_q = None
+    try:
+        d = float(reflex_info.get("downside_penalty_mean", np.nan))
+        if np.isfinite(d):
+            reflex_downside_q = float(np.clip(1.0 - d, 0.0, 1.0))
+    except Exception:
+        reflex_downside_q = None
+    dna_downside_q = None
+    try:
+        d = float(dna_info.get("mean_downside_stress", np.nan))
+        if np.isfinite(d):
+            dna_downside_q = float(np.clip(1.0 - d, 0.0, 1.0))
+    except Exception:
+        dna_downside_q = None
 
     # Blend across subsystems, using whatever is available.
     quality, quality_detail = blend_quality(
@@ -272,6 +317,9 @@ if __name__ == "__main__":
             "dna_stress": (dna_q, 0.08),
             "reflex_health": (reflex_q, 0.06),
             "symbolic": (sym_q, 0.08),
+            "hive_downside": (hive_downside_q, 0.10),
+            "reflex_downside": (reflex_downside_q, 0.08),
+            "dna_downside": (dna_downside_q, 0.06),
             "system_health": (health_q, 0.13),
             "ecosystem": (eco_q, 0.07),
             "ecosystem_persistence": (persistence_q, 0.06),
@@ -372,6 +420,26 @@ if __name__ == "__main__":
         hp = np.clip(np.asarray(hpg[:L], float), 0.75, 1.06)
         runtime_mod[:L] *= np.clip(hp, 0.80, 1.08)
 
+    # Hive downside penalty modifier (mean across hives).
+    hdp = _load_row_mean_series(RUNS / "hive_downside_penalty.csv")
+    if hdp is not None and len(hdp):
+        L = min(T, len(hdp))
+        dn = np.clip(np.asarray(hdp[:L], float), 0.0, 1.0)
+        runtime_mod[:L] *= np.clip(1.02 - 0.22 * dn, 0.78, 1.02)
+
+    # Reflex downside penalty modifier.
+    rcomp = RUNS / "reflex_health_components.csv"
+    if rcomp.exists():
+        try:
+            rdf = pd.read_csv(rcomp)
+            if "downside_penalty" in rdf.columns:
+                rd = pd.to_numeric(rdf["downside_penalty"], errors="coerce").fillna(0.0).values.astype(float)
+                L = min(T, len(rd))
+                dn = np.clip(rd[:L], 0.0, 1.0)
+                runtime_mod[:L] *= np.clip(1.02 - 0.16 * dn, 0.82, 1.02)
+        except Exception:
+            pass
+
     qg = np.clip(qg * runtime_mod, 0.55, 1.15)
     if len(qg) > 1:
         for t in range(1, len(qg)):
@@ -395,6 +463,9 @@ if __name__ == "__main__":
             "dna_stress": {"score": float(dna_q) if dna_q is not None else None},
             "reflex_health": {"score": float(reflex_q) if reflex_q is not None else None},
             "symbolic": {"score": float(sym_q) if sym_q is not None else None},
+            "hive_downside": {"score": float(hive_downside_q) if hive_downside_q is not None else None},
+            "reflex_downside": {"score": float(reflex_downside_q) if reflex_downside_q is not None else None},
+            "dna_downside": {"score": float(dna_downside_q) if dna_downside_q is not None else None},
             "ecosystem": {"score": float(eco_q) if eco_q is not None else None},
             "ecosystem_persistence": {"score": float(persistence_q) if persistence_q is not None else None},
             "shock_env": {"score": float(shock_q) if shock_q is not None else None},
@@ -410,6 +481,7 @@ if __name__ == "__main__":
             "synapses_ensemble_dispersion": (RUNS / "synapses_ensemble_dispersion.csv").exists(),
             "meta_mix_info": (RUNS / "meta_mix_info.json").exists(),
             "hive_evolution": (RUNS / "hive_evolution.json").exists(),
+            "hive_downside_penalty": (RUNS / "hive_downside_penalty.csv").exists(),
             "meta_mix_reliability_governor": (RUNS / "meta_mix_reliability_governor.csv").exists(),
             "shock_mask_info": (RUNS / "shock_mask_info.json").exists(),
             "shock_mask": (RUNS / "shock_mask.csv").exists(),
@@ -418,6 +490,7 @@ if __name__ == "__main__":
             "dna_stress_info": (RUNS / "dna_stress_info.json").exists(),
             "dna_stress_governor": (RUNS / "dna_stress_governor.csv").exists(),
             "reflex_health_info": (RUNS / "reflex_health_info.json").exists(),
+            "reflex_health_components": (RUNS / "reflex_health_components.csv").exists(),
             "reflex_health_governor": (RUNS / "reflex_health_governor.csv").exists(),
             "symbolic_governor_info": (RUNS / "symbolic_governor_info.json").exists(),
             "symbolic_governor": (RUNS / "symbolic_governor.csv").exists(),
