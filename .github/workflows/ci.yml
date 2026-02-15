@@ -39,4 +39,5 @@ jobs:
             aion/tests/test_runtime_risk_caps.py \
             aion/tests/test_risk_policy.py \
             aion/tests/test_ops_guard.py \
-            aion/tests/test_operator.py
+            aion/tests/test_operator.py \
+            aion/tests/test_ib_client.py

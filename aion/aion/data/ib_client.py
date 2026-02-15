@@ -13,6 +13,7 @@ _hist_cache: dict[tuple[str, str, str], tuple[float, pd.DataFrame]] = {}
 _last_hist_req_ts: float = 0.0
 _resolved_port: Optional[int] = None
 _resolved_host: Optional[str] = None
+_resolved_client_id: Optional[int] = None
 
 
 def _candidate_ports() -> list[int]:
@@ -49,20 +50,40 @@ def _candidate_hosts() -> list[str]:
     return uniq
 
 
-def _connect_ib_with_retries(client: IB):
+def _candidate_client_ids() -> list[int]:
+    ids = [int(cfg.IB_CLIENT_ID)]
+    for cid in getattr(cfg, "IB_CLIENT_ID_CANDIDATES", []):
+        try:
+            ids.append(int(cid))
+        except Exception:
+            continue
+    # Safety fallback offsets if caller did not configure candidates.
     base = int(cfg.IB_CLIENT_ID)
-    attempts = [(base, 8), (base + 1, 10), (base + 2, 12)]
+    ids.extend([base + 1, base + 2, base + 3, base + 4, base + 5])
+    uniq = []
+    seen = set()
+    for cid in ids:
+        if cid <= 0 or cid in seen:
+            continue
+        uniq.append(cid)
+        seen.add(cid)
+    return uniq
+
+
+def _connect_ib_with_retries(client: IB):
+    client_ids = _candidate_client_ids()
     hosts = _candidate_hosts()
     ports = _candidate_ports()
 
     last_exc = None
     for host in hosts:
         for port in ports:
-            for client_id, timeout in attempts:
+            for i, client_id in enumerate(client_ids):
+                timeout = int(8 + min(i, 6))
                 try:
                     ok = client.connect(host, int(port), clientId=client_id, timeout=timeout)
                     if ok and client.isConnected():
-                        return str(host), int(port)
+                        return str(host), int(port), int(client_id)
                 except Exception as exc:
                     last_exc = exc
                 finally:
@@ -112,31 +133,35 @@ def _symbol_candidates(symbol: str) -> list[str]:
 
 
 def ib() -> IB:
-    global _ib, _resolved_port, _resolved_host
+    global _ib, _resolved_port, _resolved_host, _resolved_client_id
     if _ib and _ib.isConnected():
         return _ib
     _ib = IB()
     connected = _connect_ib_with_retries(_ib)
     if connected is None:
         raise RuntimeError(f"Unable to connect to IBKR at {cfg.IB_HOST}:{cfg.IB_PORT}")
-    connected_host, connected_port = connected
+    connected_host, connected_port, connected_client_id = connected
     _resolved_host = str(connected_host)
     _resolved_port = int(connected_port)
+    _resolved_client_id = int(connected_client_id)
     if str(cfg.IB_HOST) != _resolved_host:
         cfg.IB_HOST = _resolved_host
     if int(cfg.IB_PORT) != _resolved_port:
         cfg.IB_PORT = _resolved_port
+    if int(cfg.IB_CLIENT_ID) != _resolved_client_id:
+        cfg.IB_CLIENT_ID = _resolved_client_id
     _ib.reqMarketDataType(cfg.IB_MARKET_DATA_TYPE)
     return _ib
 
 
 def disconnect() -> None:
-    global _ib, _last_hist_req_ts, _resolved_port, _resolved_host
+    global _ib, _last_hist_req_ts, _resolved_port, _resolved_host, _resolved_client_id
     if _ib and _ib.isConnected():
         _ib.disconnect()
     _ib = None
     _resolved_port = None
     _resolved_host = None
+    _resolved_client_id = None
     _contract_cache.clear()
     _hist_cache.clear()
     _last_hist_req_ts = 0.0
