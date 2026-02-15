@@ -656,6 +656,8 @@ def main() -> int:
                     fracture_alert_scale=cfg.EXT_SIGNAL_RUNTIME_FRACTURE_ALERT_SCALE,
                     exec_risk_tight_scale=cfg.EXT_SIGNAL_RUNTIME_EXEC_RISK_TIGHT_SCALE,
                     exec_risk_hard_scale=cfg.EXT_SIGNAL_RUNTIME_EXEC_RISK_HARD_SCALE,
+                    nested_leak_warn_scale=cfg.EXT_SIGNAL_RUNTIME_NESTED_LEAK_WARN_SCALE,
+                    nested_leak_alert_scale=cfg.EXT_SIGNAL_RUNTIME_NESTED_LEAK_ALERT_SCALE,
                 )
                 max_trades_cap_runtime, max_open_positions_runtime = _runtime_risk_caps(
                     max_trades_cap=max_trades_cap,
