@@ -158,6 +158,14 @@ def _runtime_risk_caps(
     elif "fracture_warn" in flags:
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(3, int(max_open_positions_cap))))
 
+    # Execution-aware hard/tight flags from Q constraint runtime.
+    if "exec_risk_hard" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(2, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.55))))
+    elif "exec_risk_tight" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(3, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.80))))
+
     if degraded or (not quality_ok) or regime == "defensive":
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, int(round(int(max_open_positions_cap) * 0.75))))
 
@@ -594,6 +602,8 @@ def main() -> int:
                     flag_scale=cfg.EXT_SIGNAL_RUNTIME_FLAG_SCALE,
                     fracture_warn_scale=cfg.EXT_SIGNAL_RUNTIME_FRACTURE_WARN_SCALE,
                     fracture_alert_scale=cfg.EXT_SIGNAL_RUNTIME_FRACTURE_ALERT_SCALE,
+                    exec_risk_tight_scale=cfg.EXT_SIGNAL_RUNTIME_EXEC_RISK_TIGHT_SCALE,
+                    exec_risk_hard_scale=cfg.EXT_SIGNAL_RUNTIME_EXEC_RISK_HARD_SCALE,
                 )
                 max_trades_cap_runtime, max_open_positions_runtime = _runtime_risk_caps(
                     max_trades_cap=max_trades_cap,

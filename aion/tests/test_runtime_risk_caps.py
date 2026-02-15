@@ -43,3 +43,14 @@ def test_runtime_risk_caps_degraded_defensive_also_tightens():
     )
     assert trades <= 10
     assert opens <= 4
+
+
+def test_runtime_risk_caps_exec_risk_hard_tightens_caps():
+    trades, opens = _runtime_risk_caps(
+        max_trades_cap=18,
+        max_open_positions_cap=7,
+        ext_runtime_scale=1.0,
+        ext_runtime_diag={"flags": ["exec_risk_hard"], "degraded": False, "quality_gate_ok": True, "regime": "risk_on"},
+    )
+    assert trades <= 10
+    assert opens <= 2

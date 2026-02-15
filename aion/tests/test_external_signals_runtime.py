@@ -82,3 +82,33 @@ def test_runtime_overlay_scale_applies_fracture_alert_penalty():
         fracture_alert_scale=0.70,
     )
     assert scale_alert < scale_warn < 1.0
+
+
+def test_runtime_overlay_scale_applies_exec_risk_hard_penalty():
+    scale_tight, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["exec_risk_tight"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.35,
+        max_scale=1.10,
+        flag_scale=0.96,
+        exec_risk_tight_scale=0.86,
+        exec_risk_hard_scale=0.70,
+    )
+    scale_hard, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["exec_risk_hard"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.35,
+        max_scale=1.10,
+        flag_scale=0.96,
+        exec_risk_tight_scale=0.86,
+        exec_risk_hard_scale=0.70,
+    )
+    assert scale_hard < scale_tight < 1.0
