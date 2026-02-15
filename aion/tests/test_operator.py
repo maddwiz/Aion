@@ -49,3 +49,5 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
     payload = json.loads(out)
     assert payload["runtime_controls"]["max_trades_cap_runtime"] == 9
     assert payload["external_runtime_context"]["runtime_multiplier"] == 0.82
+    assert payload["runtime_controls_age_sec"] is not None
+    assert payload["runtime_controls_stale"] is False

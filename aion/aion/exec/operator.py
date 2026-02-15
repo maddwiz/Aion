@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from .. import config as cfg
@@ -27,12 +28,25 @@ def _print(payload: dict):
     print(json.dumps(payload, indent=2))
 
 
+def _age_seconds(path: Path):
+    try:
+        if not path.exists():
+            return None
+        return max(0.0, float(time.time() - float(path.stat().st_mtime)))
+    except Exception:
+        return None
+
+
 def _status() -> int:
     tasks = ["trade", "dashboard", "ops-guard"]
     snap = status_snapshot(tasks)
     ops_status = _read_json(cfg.OPS_GUARD_STATUS_FILE, {})
     doctor = _read_json(cfg.LOG_DIR / "doctor_report.json", {})
     runtime_controls = _read_json(cfg.STATE_DIR / "runtime_controls.json", {})
+    runtime_controls_age_sec = _age_seconds(cfg.STATE_DIR / "runtime_controls.json")
+    runtime_controls_stale = bool(
+        runtime_controls_age_sec is not None and runtime_controls_age_sec > float(max(60, int(cfg.LOOP_SECONDS * 6)))
+    )
     ext_overlay = _read_json(cfg.EXT_SIGNAL_FILE, {})
     ext_ctx = ext_overlay.get("runtime_context", {}) if isinstance(ext_overlay, dict) else {}
     if not isinstance(ext_ctx, dict):
@@ -41,6 +55,8 @@ def _status() -> int:
         "tasks": snap,
         "ops_guard_status": ops_status,
         "runtime_controls": runtime_controls if isinstance(runtime_controls, dict) else {},
+        "runtime_controls_age_sec": runtime_controls_age_sec,
+        "runtime_controls_stale": runtime_controls_stale,
         "external_runtime_context": ext_ctx,
         "doctor_ok": bool(doctor.get("ok", False)) if isinstance(doctor, dict) else False,
         "ib": doctor.get("ib", {}) if isinstance(doctor, dict) else {},

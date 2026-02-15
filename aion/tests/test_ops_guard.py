@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import aion.exec.ops_guard as og
@@ -95,3 +96,83 @@ def test_start_task_returns_true_when_launcher_alive(tmp_path: Path, monkeypatch
     monkeypatch.setattr(og, "find_task_pids", lambda _task: [])
     monkeypatch.setattr(og.time, "sleep", lambda _x: None)
     assert og.start_task("trade", root=tmp_path, log_dir=tmp_path) is True
+
+
+def test_start_task_returns_true_when_single_instance_already_running(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(og, "find_task_pids", lambda _task: [123])
+    monkeypatch.setattr(og.subprocess, "Popen", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("should not launch")))
+    assert og.start_task("trade", root=tmp_path, log_dir=tmp_path) is True
+
+
+def test_trade_runtime_controls_stale_detection(tmp_path: Path, monkeypatch):
+    st = tmp_path / "state"
+    st.mkdir(parents=True, exist_ok=True)
+    p = st / "runtime_controls.json"
+    p.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(og.cfg, "STATE_DIR", st)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TRADE_STALE_SEC", 120)
+    now = 1000.0
+    os.utime(p, (now - 300, now - 300))
+    assert og._trade_runtime_controls_stale(now_ts=now) is True
+
+
+def test_guard_cycle_restarts_trade_when_runtime_controls_stale(tmp_path: Path, monkeypatch):
+    st = tmp_path / "state"
+    st.mkdir(parents=True, exist_ok=True)
+    p = st / "runtime_controls.json"
+    p.write_text("{}", encoding="utf-8")
+    now = 1000.0
+    os.utime(p, (now - 500, now - 500))
+
+    monkeypatch.setattr(og.cfg, "STATE_DIR", st)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TARGETS", ["trade"])
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_STATUS_FILE", tmp_path / "ops_guard_status.json")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_INCIDENT_LOG", tmp_path / "ops_incidents.log")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_RESTART_COOLDOWN_SEC", 1)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_MAX_RESTARTS_PER_HOUR", 6)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TRADE_STALE_SEC", 120)
+    monkeypatch.setattr(og.time, "time", lambda: now)
+
+    calls = {"n": 0}
+
+    def fake_status(_targets=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"trade": {"module": "aion.exec.paper_loop", "running": True, "pids": [111]}}
+        return {"trade": {"module": "aion.exec.paper_loop", "running": True, "pids": [222]}}
+
+    stopped = {"n": 0}
+    monkeypatch.setattr(og, "status_snapshot", fake_status)
+    monkeypatch.setattr(og, "start_task", lambda _task: True)
+    monkeypatch.setattr(og, "stop_task", lambda _task: stopped.__setitem__("n", stopped["n"] + 1) or 1)
+
+    payload = og.guard_cycle({"restart_history": {}})
+    assert stopped["n"] == 1
+    assert payload["restarts"]["trade"]["attempt"] == "started"
+
+
+def test_guard_cycle_restarts_trade_when_duplicate_instances(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TARGETS", ["trade"])
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_STATUS_FILE", tmp_path / "ops_guard_status.json")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_INCIDENT_LOG", tmp_path / "ops_incidents.log")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_RESTART_COOLDOWN_SEC", 1)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_MAX_RESTARTS_PER_HOUR", 6)
+    monkeypatch.setattr(og.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(og, "_trade_runtime_controls_stale", lambda now_ts=None: False)
+
+    calls = {"n": 0}
+
+    def fake_status(_targets=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"trade": {"module": "aion.exec.paper_loop", "running": True, "pids": [111, 112]}}
+        return {"trade": {"module": "aion.exec.paper_loop", "running": True, "pids": [222]}}
+
+    stopped = {"n": 0}
+    monkeypatch.setattr(og, "status_snapshot", fake_status)
+    monkeypatch.setattr(og, "start_task", lambda _task: True)
+    monkeypatch.setattr(og, "stop_task", lambda _task: stopped.__setitem__("n", stopped["n"] + 1) or 2)
+
+    payload = og.guard_cycle({"restart_history": {}})
+    assert stopped["n"] == 1
+    assert payload["restarts"]["trade"]["attempt"] == "started"

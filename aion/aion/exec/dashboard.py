@@ -1,6 +1,7 @@
 import csv
 import errno
 import json
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -38,6 +39,15 @@ def _tail_csv(path: Path, limit: int = 30):
         return rows[-max(1, limit):]
     except Exception:
         return []
+
+
+def _age_seconds(path: Path):
+    try:
+        if not path.exists():
+            return None
+        return max(0.0, float(time.time() - float(path.stat().st_mtime)))
+    except Exception:
+        return None
 
 
 def _to_int(raw, default: int):
@@ -82,6 +92,7 @@ def _status_payload():
     monitor = _read_json(cfg.LOG_DIR / "runtime_monitor.json", {})
     perf = _read_json(cfg.LOG_DIR / "performance_report.json", {})
     profile = _read_json(cfg.STATE_DIR / "strategy_profile.json", {})
+    runtime_controls_path = cfg.STATE_DIR / "runtime_controls.json"
     runtime_controls = _read_json(cfg.STATE_DIR / "runtime_controls.json", {})
     ops_guard = _read_json(cfg.OPS_GUARD_STATUS_FILE, {})
     watchlist = _tail_lines(cfg.STATE_DIR / "watchlist.txt", limit=200)
@@ -111,6 +122,8 @@ def _status_payload():
         running = bool(item.get("running")) if isinstance(item, dict) else False
         target_states.append(running)
     ops_guard_ok = bool(target_states) and all(target_states)
+    rc_age = _age_seconds(runtime_controls_path)
+    rc_stale = bool(rc_age is not None and rc_age > float(max(60, int(cfg.LOOP_SECONDS * 6))))
 
     return {
         "ib": doctor.get("ib", {}),
@@ -124,6 +137,8 @@ def _status_payload():
         "ops_guard_ok": ops_guard_ok,
         "ops_guard": ops_guard if isinstance(ops_guard, dict) else {},
         "runtime_controls": runtime_controls if isinstance(runtime_controls, dict) else {},
+        "runtime_controls_age_sec": rc_age,
+        "runtime_controls_stale": rc_stale,
         "monitor_ts": monitor.get("ts"),
         "alert_count": len(monitor.get("alerts", [])),
         "system_event_count": len(monitor.get("system_events", [])),
@@ -239,6 +254,8 @@ def _html_template():
         ops_guard_ok: s.ops_guard_ok,
         ops_guard: s.ops_guard,
         runtime_controls: s.runtime_controls,
+        runtime_controls_age_sec: s.runtime_controls_age_sec,
+        runtime_controls_stale: s.runtime_controls_stale,
         monitor_ts: s.monitor_ts,
         winrate: s.trade_metrics?.winrate,
         expectancy: s.trade_metrics?.expectancy,

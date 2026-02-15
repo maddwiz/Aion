@@ -75,6 +75,12 @@ def start_task(task: str, *, root: Path | None = None, log_dir: Path | None = No
     t = str(task or "").strip().lower()
     if t not in TASK_TO_MODULE:
         return False
+    existing = find_task_pids(t)
+    if len(existing) == 1:
+        return True
+    if len(existing) > 1:
+        _incident("warn", f"duplicate task instances detected ({existing}), recycling", task=t)
+        stop_task(t)
 
     root = root or _repo_root()
     log_dir = log_dir or cfg.LOG_DIR
@@ -156,6 +162,28 @@ def _can_restart(now_ts: float, history: list[float], cooldown_sec: float, max_r
     return True, "ok"
 
 
+def _trade_runtime_controls_age_sec(now_ts: float | None = None) -> float | None:
+    p = cfg.STATE_DIR / "runtime_controls.json"
+    if not p.exists():
+        return None
+    try:
+        st = p.stat()
+    except Exception:
+        return None
+    ts = time.time() if now_ts is None else float(now_ts)
+    age = ts - float(st.st_mtime)
+    if age < 0:
+        age = 0.0
+    return float(age)
+
+
+def _trade_runtime_controls_stale(now_ts: float | None = None) -> bool:
+    age = _trade_runtime_controls_age_sec(now_ts=now_ts)
+    if age is None:
+        return False
+    return bool(age > float(max(30, int(cfg.OPS_GUARD_TRADE_STALE_SEC))))
+
+
 def status_snapshot(targets: list[str] | None = None) -> dict:
     tgs = [str(t).strip().lower() for t in (targets or cfg.OPS_GUARD_TARGETS) if str(t).strip()]
     out = {}
@@ -190,28 +218,45 @@ def guard_cycle(state: dict) -> dict:
 
     snapshot = status_snapshot(targets)
     for task, meta in snapshot.items():
-        if meta.get("running"):
+        running = bool(meta.get("running"))
+        reasons: list[str] = []
+        pids = meta.get("pids", [])
+        if not isinstance(pids, list):
+            pids = []
+        if running and len(pids) > 1:
+            reasons.append("duplicate_instances")
+        if running and task == "trade" and _trade_runtime_controls_stale(now_ts=now_ts):
+            reasons.append("stale_runtime_controls")
+        if running and not reasons:
             continue
 
         hist = restart_history.setdefault(task, [])
-        allowed, reason = _can_restart(
+        allowed, cooldown_reason = _can_restart(
             now_ts=now_ts,
             history=hist,
             cooldown_sec=cfg.OPS_GUARD_RESTART_COOLDOWN_SEC,
             max_restarts_per_hour=cfg.OPS_GUARD_MAX_RESTARTS_PER_HOUR,
         )
         if not allowed:
-            skipped[task] = reason
+            skipped[task] = cooldown_reason
             continue
 
+        if running:
+            stop_task(task)
         ok = start_task(task)
         if ok:
             hist.append(now_ts)
             restarted[task] = "started"
-            _incident("warn", "task not running, auto-restarted", task=task)
+            msg = "task auto-restarted"
+            if reasons:
+                msg += f" ({','.join(reasons)})"
+            _incident("warn", msg, task=task)
         else:
             restarted[task] = "start_failed"
-            _incident("error", "task not running, restart failed", task=task)
+            msg = "task restart failed"
+            if reasons:
+                msg += f" ({','.join(reasons)})"
+            _incident("error", msg, task=task)
 
     post = status_snapshot(targets)
     restarts = {}
