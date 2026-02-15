@@ -186,6 +186,19 @@ def _load_series(path: Path):
     return a.ravel()
 
 
+def _load_named_csv_series(path: Path, column: str):
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return None
+    if column not in df.columns:
+        return None
+    s = pd.to_numeric(df[column], errors="coerce").fillna(0.0).values.astype(float)
+    return s.ravel() if len(s) else None
+
+
 def dynamic_downside_penalties(index_dates, hives):
     """
     Build DATE x HIVE downside penalties from hive_wf_oos_returns.csv.
@@ -288,16 +301,27 @@ def adaptive_arb_schedules(base_alpha, base_inertia, pivot_stab):
     p90d = float(np.percentile(disp, 90)) if len(disp) else 0.0
     disp = np.clip(disp / (p90d + 1e-9), 0.0, 1.0)
 
-    alpha_t = base_alpha * (1.0 - 0.35 * disagree - 0.25 * div + 0.15 * disp)
-    alpha_t = np.clip(alpha_t, 0.8, 4.5)
+    # Regime fracture pressure from disagreement/volatility/breadth stress engine.
+    frac = np.zeros(T, float)
+    fs = _load_named_csv_series(RUNS / "regime_fracture_signal.csv", "regime_fracture_score")
+    if fs is not None and len(fs):
+        L = min(T, len(fs))
+        frac[:L] = np.clip(np.asarray(fs[:L], float), 0.0, 1.0)
 
-    inertia_t = base_inertia + 0.12 * disagree + 0.10 * div - 0.08 * disp
+    alpha_t = base_alpha * (1.0 - 0.35 * disagree - 0.25 * div + 0.15 * disp - 0.30 * frac)
+    alpha_t = np.where(frac >= 0.85, alpha_t * 0.82, alpha_t)
+    alpha_t = np.where((frac >= 0.72) & (frac < 0.85), alpha_t * 0.90, alpha_t)
+    alpha_t = np.clip(alpha_t, 0.7, 4.5)
+
+    inertia_t = base_inertia + 0.12 * disagree + 0.10 * div - 0.08 * disp + 0.18 * frac
     inertia_t = np.clip(inertia_t, 0.40, 0.97)
 
     diag = {
         "mean_disagreement": float(np.mean(disagree)),
         "mean_council_divergence": float(np.mean(div)),
         "mean_stability_dispersion": float(np.mean(disp)),
+        "mean_regime_fracture": float(np.mean(frac)),
+        "max_regime_fracture": float(np.max(frac)),
         "alpha_mean": float(np.mean(alpha_t)),
         "alpha_min": float(np.min(alpha_t)),
         "alpha_max": float(np.max(alpha_t)),

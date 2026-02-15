@@ -90,6 +90,36 @@ def test_adaptive_arb_schedules_respond_to_disagreement():
     assert diag["alpha_min"] <= diag["alpha_max"]
 
 
+def test_adaptive_arb_schedules_respond_to_regime_fracture(tmp_path):
+    idx = pd.date_range("2025-01-01", periods=4, freq="D")
+    stab = pd.DataFrame(
+        {
+            "EQ": [1.0, 1.0, 1.0, 1.0],
+            "FX": [1.0, 1.0, 1.0, 1.0],
+        },
+        index=idx,
+    )
+    pd.DataFrame(
+        {
+            "DATE": idx.strftime("%Y-%m-%d"),
+            "regime_fracture_score": [0.0, 0.2, 0.75, 0.9],
+        }
+    ).to_csv(tmp_path / "regime_fracture_signal.csv", index=False)
+
+    old_runs = rch.RUNS
+    try:
+        rch.RUNS = tmp_path
+        alpha_t, inertia_t, diag = rch.adaptive_arb_schedules(2.2, 0.8, stab)
+    finally:
+        rch.RUNS = old_runs
+
+    assert len(alpha_t) == 4
+    assert len(inertia_t) == 4
+    assert alpha_t[0] > alpha_t[-1]
+    assert inertia_t[0] < inertia_t[-1]
+    assert diag["max_regime_fracture"] >= 0.9
+
+
 def test_dynamic_quality_multipliers_reward_stronger_hive(tmp_path):
     idx = pd.date_range("2025-01-01", periods=140, freq="D")
     strong = pd.Series(0.003 + 0.001 * np.sin(np.linspace(0, 8, len(idx))), index=idx)

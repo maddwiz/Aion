@@ -52,3 +52,33 @@ def test_runtime_overlay_scale_penalizes_flags_and_degraded():
     assert diag["quality_gate_ok"] is False
     assert diag["source_mode"] == "final_weights_fallback"
     assert "drift_alert" in diag["flags"]
+
+
+def test_runtime_overlay_scale_applies_fracture_alert_penalty():
+    scale_warn, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["fracture_warn"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.40,
+        max_scale=1.10,
+        flag_scale=0.95,
+        fracture_warn_scale=0.90,
+        fracture_alert_scale=0.70,
+    )
+    scale_alert, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["fracture_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.40,
+        max_scale=1.10,
+        flag_scale=0.95,
+        fracture_warn_scale=0.90,
+        fracture_alert_scale=0.70,
+    )
+    assert scale_alert < scale_warn < 1.0

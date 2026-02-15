@@ -531,6 +531,8 @@ def main() -> int:
                     degraded_scale=cfg.EXT_SIGNAL_RUNTIME_DEGRADED_SCALE,
                     quality_fail_scale=cfg.EXT_SIGNAL_RUNTIME_QFAIL_SCALE,
                     flag_scale=cfg.EXT_SIGNAL_RUNTIME_FLAG_SCALE,
+                    fracture_warn_scale=cfg.EXT_SIGNAL_RUNTIME_FRACTURE_WARN_SCALE,
+                    fracture_alert_scale=cfg.EXT_SIGNAL_RUNTIME_FRACTURE_ALERT_SCALE,
                 )
                 cap_scale = max(0.50, min(1.00, float(ext_runtime_scale)))
                 max_trades_cap_runtime = max(1, int(round(max_trades_cap * cap_scale)))

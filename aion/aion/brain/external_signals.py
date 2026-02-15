@@ -157,6 +157,8 @@ def runtime_overlay_scale(
     degraded_scale: float = 0.70,
     quality_fail_scale: float = 0.82,
     flag_scale: float = 0.90,
+    fracture_warn_scale: float = 0.88,
+    fracture_alert_scale: float = 0.75,
 ):
     """
     Convert Q runtime context into an AION overlay-strength scalar.
@@ -176,6 +178,11 @@ def runtime_overlay_scale(
         scale *= float(_clamp(quality_fail_scale, 0.20, 1.20))
     if flags:
         scale *= float(_clamp(flag_scale, 0.20, 1.20)) ** len(flags)
+        # Severity-aware fracture penalties from Q risk_flags.
+        if "fracture_alert" in flags:
+            scale *= float(_clamp(fracture_alert_scale, 0.20, 1.20))
+        elif "fracture_warn" in flags:
+            scale *= float(_clamp(fracture_warn_scale, 0.20, 1.20))
     scale = _clamp(scale, float(min_scale), float(max_scale))
     diag = {
         "active": bool((degraded or (not q_ok) or bool(flags) or abs(scale - 1.0) > 1e-6)),
