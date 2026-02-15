@@ -36,3 +36,10 @@ def test_config_reads_external_overlay_critical_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("AION_EXT_SIGNAL_CRITICAL", "1")
     cfg = importlib.reload(cfg_mod)
     assert cfg.EXT_SIGNAL_CRITICAL is True
+
+
+def test_config_default_home_points_to_repo_root(monkeypatch):
+    monkeypatch.delenv("AION_HOME", raising=False)
+    monkeypatch.delenv("AION_Q_HOME", raising=False)
+    cfg = importlib.reload(cfg_mod)
+    assert cfg.AION_HOME == Path(cfg.__file__).resolve().parents[1]

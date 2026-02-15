@@ -175,6 +175,14 @@ def _runtime_risk_caps(
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(3, int(max_open_positions_cap))))
         max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.85))))
 
+    # Hive ecosystem stress flags from Q hive/cross-hive diagnostics.
+    if "hive_stress_alert" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(2, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.60))))
+    elif "hive_stress_warn" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(4, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.80))))
+
     if degraded or (not quality_ok) or regime == "defensive":
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, int(round(int(max_open_positions_cap) * 0.75))))
 
@@ -213,6 +221,10 @@ def _runtime_position_risk_scale(
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_EXEC_HARD_SCALE)))
         elif "exec_risk_tight" in flags:
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_EXEC_TIGHT_SCALE)))
+        if "hive_stress_alert" in flags:
+            scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HIVE_ALERT_SCALE)))
+        elif "hive_stress_warn" in flags:
+            scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HIVE_WARN_SCALE)))
     if regime == "defensive":
         scale *= 0.90
     return float(max(0.20, min(1.00, scale)))

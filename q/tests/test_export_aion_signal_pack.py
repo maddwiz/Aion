@@ -126,3 +126,27 @@ def test_runtime_context_parses_dated_governor_csvs(tmp_path: Path):
     assert ctx["components"]["heartbeat_exposure_scaler"]["found"] is True
     assert ctx["components"]["dna_stress_governor"]["found"] is True
     assert ctx["components"]["symbolic_governor"]["found"] is True
+
+
+def test_runtime_context_includes_hive_ecosystem_stress(tmp_path: Path):
+    (tmp_path / "cross_hive_summary.json").write_text(
+        (
+            '{"adaptive_diagnostics":{'
+            '"mean_disagreement":0.82,'
+            '"mean_stability_dispersion":0.81,'
+            '"mean_regime_fracture":0.34}}'
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "hive_evolution.json").write_text(
+        (
+            '{"action_pressure_mean":0.22,'
+            '"latest_vitality":{"EQ":0.38,"FX":0.44,"RATES":0.41}}'
+        ),
+        encoding="utf-8",
+    )
+
+    ctx = ex._runtime_context(tmp_path)
+    assert ctx["components"]["hive_ecosystem_stability_modifier"]["found"] is True
+    assert ctx["components"]["hive_evolution_modifier"]["found"] is True
+    assert "hive_stress_alert" in ctx["risk_flags"]

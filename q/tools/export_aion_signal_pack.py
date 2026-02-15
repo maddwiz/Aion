@@ -342,6 +342,38 @@ def _runtime_context(runs_dir: Path):
     else:
         low_frac = np.nan
 
+    # Hive/cross-ecosystem stress diagnostics.
+    cross_hive = _load_json(runs_dir / "cross_hive_summary.json") or {}
+    ch_ad = cross_hive.get("adaptive_diagnostics", {}) if isinstance(cross_hive.get("adaptive_diagnostics"), dict) else {}
+    ch_dis = _safe_float(ch_ad.get("mean_disagreement", np.nan), default=np.nan)
+    ch_disp = _safe_float(ch_ad.get("mean_stability_dispersion", np.nan), default=np.nan)
+    ch_frac = _safe_float(ch_ad.get("mean_regime_fracture", np.nan), default=np.nan)
+    if math.isfinite(ch_dis) or math.isfinite(ch_disp) or math.isfinite(ch_frac):
+        dis_mod = _clamp(1.04 - 0.28 * (ch_dis if math.isfinite(ch_dis) else 0.60), 0.72, 1.04)
+        disp_mod = _clamp(1.04 - 0.24 * (ch_disp if math.isfinite(ch_disp) else 0.60), 0.72, 1.04)
+        frac_mod = _clamp(1.02 - 0.55 * (ch_frac if math.isfinite(ch_frac) else 0.10), 0.70, 1.02)
+        hive_mod = _clamp(dis_mod * disp_mod * frac_mod, 0.65, 1.08)
+        comps["hive_ecosystem_stability_modifier"] = {"value": float(hive_mod), "found": True}
+        active_vals.append(float(hive_mod))
+
+    hive_evo = _load_json(runs_dir / "hive_evolution.json") or {}
+    he_pressure = _safe_float(hive_evo.get("action_pressure_mean", np.nan), default=np.nan)
+    he_vital = hive_evo.get("latest_vitality", {}) if isinstance(hive_evo.get("latest_vitality"), dict) else {}
+    vit_vals = []
+    if isinstance(he_vital, dict):
+        for x in he_vital.values():
+            xv = _safe_float(x, np.nan)
+            if math.isfinite(xv):
+                vit_vals.append(float(xv))
+    vit_min = float(min(vit_vals)) if vit_vals else np.nan
+    vit_mean = float(np.mean(vit_vals)) if vit_vals else np.nan
+    if math.isfinite(he_pressure) or math.isfinite(vit_mean):
+        pressure = he_pressure if math.isfinite(he_pressure) else 0.0
+        vitality = vit_mean if math.isfinite(vit_mean) else 0.55
+        evo_mod = _clamp(0.84 + 0.30 * vitality - 0.40 * pressure, 0.65, 1.08)
+        comps["hive_evolution_modifier"] = {"value": float(evo_mod), "found": True}
+        active_vals.append(float(evo_mod))
+
     if active_vals:
         arr = np.clip(np.asarray(active_vals, float), 0.20, 2.00)
         mult = float(np.exp(np.mean(np.log(arr + 1e-12))))
@@ -390,6 +422,23 @@ def _runtime_context(runs_dir: Path):
             risk_flags.append("nested_leakage_alert")
         elif (n_util < 0.45) or (math.isfinite(low_frac) and low_frac > 0.45):
             risk_flags.append("nested_leakage_warn")
+
+    if math.isfinite(ch_dis) or math.isfinite(ch_disp) or math.isfinite(ch_frac):
+        dis = ch_dis if math.isfinite(ch_dis) else 0.0
+        disp = ch_disp if math.isfinite(ch_disp) else 0.0
+        frac = ch_frac if math.isfinite(ch_frac) else 0.0
+        if (dis > 0.78) or (disp > 0.80) or (frac > 0.32):
+            risk_flags.append("hive_stress_alert")
+        elif (dis > 0.62) or (disp > 0.66) or (frac > 0.22):
+            risk_flags.append("hive_stress_warn")
+
+    if math.isfinite(he_pressure) or math.isfinite(vit_min):
+        pressure = he_pressure if math.isfinite(he_pressure) else 0.0
+        vmin = vit_min if math.isfinite(vit_min) else 1.0
+        if (pressure > 0.30) or (vmin < 0.30):
+            risk_flags.append("hive_stress_alert")
+        elif (pressure > 0.16) or (vmin < 0.42):
+            risk_flags.append("hive_stress_warn")
 
     return {
         "runtime_multiplier": mult,
