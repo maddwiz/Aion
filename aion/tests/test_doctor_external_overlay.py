@@ -71,6 +71,7 @@ def test_overlay_remediation_provides_actionable_tips(tmp_path: Path):
                 "degraded_safe_mode": True,
                 "quality_gate_ok": False,
                 "runtime_context_present": False,
+                "risk_flags": ["fracture_alert"],
             },
         }
     ]
@@ -81,3 +82,4 @@ def test_overlay_remediation_provides_actionable_tips(tmp_path: Path):
     assert "degraded" in joined
     assert "quality gate" in joined
     assert "runtime_context" in joined
+    assert "fracture" in joined

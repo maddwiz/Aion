@@ -281,6 +281,14 @@ def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
         tips.append("Q quality gate is not OK. Review `runs_plus/health_alerts.json` and `runs_plus/system_health.json` in Q.")
     if not bool(details.get("runtime_context_present", True)):
         tips.append("Overlay runtime_context missing. Ensure Q exporter is updated and writing runtime_context in q_signal_overlay.json.")
+    risk_flags = details.get("risk_flags", [])
+    if not isinstance(risk_flags, list):
+        risk_flags = []
+    flags = [str(x).strip().lower() for x in risk_flags if str(x).strip()]
+    if "fracture_alert" in flags:
+        tips.append("Q regime fracture ALERT is active. Keep AION in defensive mode and reduce max_open_positions until fracture score normalizes.")
+    elif "fracture_warn" in flags:
+        tips.append("Q regime fracture WARN is active. Consider lower risk-per-trade and tighter concurrency until conditions stabilize.")
     return tips
 
 
