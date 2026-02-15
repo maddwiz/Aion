@@ -40,6 +40,39 @@ def test_novaspine_hive_multipliers_reads_and_clips(tmp_path):
     assert out["COMMOD"] == 1.0
 
 
+def test_ecosystem_hive_multipliers_default_when_missing(tmp_path):
+    old_runs = rch.RUNS
+    try:
+        rch.RUNS = tmp_path
+        out, diag = rch.ecosystem_hive_multipliers(["EQ", "FX"])
+    finally:
+        rch.RUNS = old_runs
+
+    assert out == {"EQ": 1.0, "FX": 1.0}
+    assert diag["loaded"] is False
+
+
+def test_ecosystem_hive_multipliers_reads_vitality_and_pressure(tmp_path):
+    payload = {
+        "latest_vitality": {"EQ": 1.2, "FX": 0.2, "RATES": 0.8},
+        "action_pressure_mean": 0.50,
+    }
+    (tmp_path / "hive_evolution.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    old_runs = rch.RUNS
+    try:
+        rch.RUNS = tmp_path
+        out, diag = rch.ecosystem_hive_multipliers(["EQ", "FX", "RATES", "COMMOD"])
+    finally:
+        rch.RUNS = old_runs
+
+    assert diag["loaded"] is True
+    assert out["EQ"] > out["RATES"] > out["FX"]
+    assert out["COMMOD"] > 0.0
+    assert min(out.values()) >= 0.80 - 1e-9
+    assert max(out.values()) <= 1.20 + 1e-9
+
+
 def test_adaptive_arb_schedules_respond_to_disagreement():
     idx = pd.date_range("2025-01-01", periods=3, freq="D")
     stab = pd.DataFrame(

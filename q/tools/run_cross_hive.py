@@ -123,6 +123,53 @@ def novaspine_hive_multipliers(hives):
     return out
 
 
+def ecosystem_hive_multipliers(hives):
+    """
+    Optional per-hive multipliers from prior ecosystem evolution.
+    Returns (dict hive->mult in [0.80, 1.20], diagnostics).
+    """
+    p = RUNS / "hive_evolution.json"
+    out = {str(h): 1.0 for h in hives}
+    diag = {
+        "loaded": False,
+        "action_pressure_mean": 0.0,
+        "pressure_scalar": 1.0,
+    }
+    if not p.exists():
+        return out, diag
+    try:
+        obj = json.loads(p.read_text())
+    except Exception:
+        return out, diag
+    if not isinstance(obj, dict):
+        return out, diag
+
+    diag["loaded"] = True
+    latest_vitality = obj.get("latest_vitality", {})
+    if not isinstance(latest_vitality, dict):
+        latest_vitality = {}
+
+    try:
+        action_pressure_mean = float(obj.get("action_pressure_mean", 0.0))
+    except Exception:
+        action_pressure_mean = 0.0
+    action_pressure_mean = float(np.clip(action_pressure_mean, 0.0, 1.0))
+    pressure_scalar = float(np.clip(1.03 - 0.18 * action_pressure_mean, 0.85, 1.03))
+    diag["action_pressure_mean"] = action_pressure_mean
+    diag["pressure_scalar"] = pressure_scalar
+
+    for h in list(out.keys()):
+        try:
+            vit = float(latest_vitality.get(h, 1.0))
+        except Exception:
+            vit = 1.0
+        vit = float(np.clip(vit, 0.10, 1.25))
+        # Map vitality [0.10,1.25] -> multiplier [0.82,1.18], then apply pressure scalar.
+        base = 0.82 + 0.36 * ((vit - 0.10) / 1.15)
+        out[h] = float(np.clip(base * pressure_scalar, 0.80, 1.20))
+    return out, diag
+
+
 def _load_series(path: Path):
     if not path.exists():
         return None
@@ -336,6 +383,13 @@ if __name__ == "__main__":
         for hive in list(scores.keys()):
             scores[hive] = scores[hive] * float(ns_mult.get(hive, 1.0))
 
+    # Optional ecosystem-age priors from prior run (closed-loop memory).
+    eco_enabled = str(os.getenv("CROSS_HIVE_USE_ECOSYSTEM_PRIOR", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    eco_mult, eco_diag = ecosystem_hive_multipliers(pivot_sig.columns.tolist()) if eco_enabled else ({str(h): 1.0 for h in pivot_sig.columns.tolist()}, {"loaded": False, "action_pressure_mean": 0.0, "pressure_scalar": 1.0})
+    if eco_mult:
+        for hive in list(scores.keys()):
+            scores[hive] = scores[hive] * float(eco_mult.get(hive, 1.0))
+
     # Optional dynamic quality multipliers from per-hive OOS streams.
     dyn_mult = dynamic_quality_multipliers(pivot_sig.index, pivot_sig.columns.tolist())
     dyn_means = {}
@@ -419,6 +473,9 @@ if __name__ == "__main__":
         "downside_penalty_mean": downside_means,
         "downside_penalty_file": str(RUNS / "hive_downside_penalty.csv") if len(downside_tbl) else None,
         "novaspine_hive_boosts": {k: float(v) for k, v in ns_mult.items()},
+        "ecosystem_prior_enabled": bool(eco_enabled),
+        "ecosystem_hive_boosts": {k: float(v) for k, v in eco_mult.items()},
+        "ecosystem_prior_diagnostics": eco_diag,
         "date_min": str(out["DATE"].min().date()) if len(out) else None,
         "date_max": str(out["DATE"].max().date()) if len(out) else None,
         "latest_weights": {k: float(out.iloc[-1][k]) for k in names} if len(out) else {},
