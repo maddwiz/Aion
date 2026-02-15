@@ -68,3 +68,33 @@ def test_apply_turnover_caps_rolling_budget():
     assert np.allclose(after, np.array([1.5, 0.0], dtype=float))
     assert np.allclose(out[1], np.array([0.75, -0.75], dtype=float))
     assert np.allclose(out[2], out[1])
+
+
+def test_load_config_reads_turnover_env_fallbacks(monkeypatch, tmp_path):
+    monkeypatch.setattr(rec, "CFG", tmp_path / "missing.json")
+    monkeypatch.setenv("TURNOVER_MAX_STEP", "0.33")
+    monkeypatch.setenv("TURNOVER_BUDGET_WINDOW", "7")
+    monkeypatch.setenv("TURNOVER_BUDGET_LIMIT", "1.20")
+    cfg = rec._load_config()
+
+    assert cfg["max_step_turnover"] == 0.33
+    assert cfg["rolling_turnover_window"] == 7
+    assert cfg["rolling_turnover_limit"] == 1.2
+
+
+def test_load_config_q_exec_env_overrides_file(monkeypatch, tmp_path):
+    p = tmp_path / "execution_constraints.json"
+    p.write_text(
+        '{"allow_shorts": true, "max_abs_weight": 0.20, "max_step_turnover": 0.50, "renormalize_to_gross": true}'
+    )
+    monkeypatch.setattr(rec, "CFG", p)
+    monkeypatch.setenv("Q_EXEC_ALLOW_SHORTS", "false")
+    monkeypatch.setenv("Q_EXEC_MAX_ABS_WEIGHT", "0.11")
+    monkeypatch.setenv("Q_EXEC_MAX_STEP_TURNOVER", "0.25")
+    monkeypatch.setenv("Q_EXEC_RENORMALIZE_TO_GROSS", "0")
+
+    cfg = rec._load_config()
+    assert cfg["allow_shorts"] is False
+    assert cfg["max_abs_weight"] == 0.11
+    assert cfg["max_step_turnover"] == 0.25
+    assert cfg["renormalize_to_gross"] is False

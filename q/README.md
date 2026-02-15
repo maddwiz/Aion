@@ -149,6 +149,21 @@ You can define live execution limits in `config/execution_constraints.json`
 ```bash
 python tools/run_execution_constraints.py --replace-final
 ```
+Key knobs:
+- `max_asset_step_change`: per-asset max weight delta per step.
+- `max_step_turnover`: max per-step portfolio turnover (`sum(abs(dw))`).
+- `rolling_turnover_window` + `rolling_turnover_limit`: trailing turnover budget.
+
+Env overrides are also supported for live sessions (no file edits):
+```bash
+export Q_EXEC_MAX_STEP_TURNOVER=0.35
+export Q_EXEC_ROLLING_TURNOVER_WINDOW=5
+export Q_EXEC_ROLLING_TURNOVER_LIMIT=1.0
+# backward-compatible aliases:
+# export TURNOVER_MAX_STEP=0.35
+# export TURNOVER_BUDGET_WINDOW=5
+# export TURNOVER_BUDGET_LIMIT=1.0
+```
 
 ### NovaSpine bridge (optional, recommended for cold/meta memory)
 Default is disabled (no runtime risk). Enable with env vars:

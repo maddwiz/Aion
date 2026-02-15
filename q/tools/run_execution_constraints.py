@@ -27,6 +27,50 @@ CFG = ROOT / "config" / "execution_constraints.json"
 RUNS.mkdir(exist_ok=True)
 
 
+def _env_first(*names: str):
+    for n in names:
+        v = os.getenv(n)
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+
+def _parse_bool(v):
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return None
+    s = str(v).strip().lower()
+    if s in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    return None
+
+
+def _parse_opt_float(v):
+    if v is None:
+        return None
+    try:
+        out = float(v)
+    except Exception:
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _parse_opt_int(v):
+    if v is None:
+        return None
+    try:
+        out = int(float(v))
+    except Exception:
+        return None
+    return out
+
+
 def _load_weights():
     p = RUNS / "portfolio_weights_final.csv"
     if not p.exists():
@@ -80,6 +124,35 @@ def _load_config():
                 cfg.update(raw)
         except Exception:
             pass
+
+    # Optional env overrides for unattended/live operations.
+    v = _parse_bool(_env_first("Q_EXEC_ALLOW_SHORTS"))
+    if v is not None:
+        cfg["allow_shorts"] = v
+
+    v = _parse_opt_float(_env_first("Q_EXEC_MAX_ABS_WEIGHT"))
+    if v is not None:
+        cfg["max_abs_weight"] = v
+
+    v = _parse_bool(_env_first("Q_EXEC_RENORMALIZE_TO_GROSS"))
+    if v is not None:
+        cfg["renormalize_to_gross"] = v
+
+    v = _parse_opt_float(_env_first("Q_EXEC_MAX_ASSET_STEP_CHANGE"))
+    if v is not None:
+        cfg["max_asset_step_change"] = v
+
+    v = _parse_opt_float(_env_first("Q_EXEC_MAX_STEP_TURNOVER", "TURNOVER_MAX_STEP"))
+    if v is not None:
+        cfg["max_step_turnover"] = v
+
+    v = _parse_opt_int(_env_first("Q_EXEC_ROLLING_TURNOVER_WINDOW", "TURNOVER_BUDGET_WINDOW"))
+    if v is not None:
+        cfg["rolling_turnover_window"] = v
+
+    v = _parse_opt_float(_env_first("Q_EXEC_ROLLING_TURNOVER_LIMIT", "TURNOVER_BUDGET_LIMIT"))
+    if v is not None:
+        cfg["rolling_turnover_limit"] = v
     return cfg
 
 

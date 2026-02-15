@@ -12,5 +12,9 @@
     "after_hours": 0.6,
     "closed": 0.0
   },
+  "max_asset_step_change": 0.08,
+  "max_step_turnover": 0.35,
+  "rolling_turnover_window": 5,
+  "rolling_turnover_limit": 1.0,
   "renormalize_to_gross": true
 }
