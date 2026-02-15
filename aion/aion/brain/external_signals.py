@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from pathlib import Path
 
 
@@ -95,7 +96,12 @@ def _as_signal_map_from_payload(payload, min_confidence: float, max_bias: float)
     return out
 
 
-def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bias: float = 0.90) -> dict:
+def load_external_signal_bundle(
+    path: Path,
+    min_confidence: float = 0.55,
+    max_bias: float = 0.90,
+    max_age_hours: float | None = None,
+) -> dict:
     """
     Load external signals plus optional runtime context metadata.
 
@@ -107,6 +113,8 @@ def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bi
         "regime": str,
         "degraded_safe_mode": bool,
         "quality_gate_ok": bool,
+        "overlay_age_hours": float|None,
+        "overlay_stale": bool,
       }
     """
     empty = {
@@ -117,6 +125,8 @@ def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bi
         "source_mode": "unknown",
         "degraded_safe_mode": False,
         "quality_gate_ok": True,
+        "overlay_age_hours": None,
+        "overlay_stale": False,
     }
     try:
         p = Path(path)
@@ -132,6 +142,11 @@ def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bi
 
     out = dict(empty)
     out["signals"] = _as_signal_map_from_payload(payload, min_confidence=min_confidence, max_bias=max_bias)
+    try:
+        age_h = max(0.0, (time.time() - float(p.stat().st_mtime)) / 3600.0)
+        out["overlay_age_hours"] = float(age_h)
+    except Exception:
+        out["overlay_age_hours"] = None
 
     if isinstance(payload, dict):
         ctx = payload.get("runtime_context", {})
@@ -147,6 +162,12 @@ def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bi
         qg = payload.get("quality_gate", {})
         if isinstance(qg, dict):
             out["quality_gate_ok"] = bool(qg.get("ok", True))
+
+    if max_age_hours is not None and float(max_age_hours) > 0 and isinstance(out.get("overlay_age_hours"), float):
+        if float(out["overlay_age_hours"]) > float(max_age_hours):
+            out["overlay_stale"] = True
+            out["signals"] = {}
+            out["risk_flags"] = _canonicalize_flags(list(out.get("risk_flags", [])) + ["overlay_stale"])
 
     return out
 
@@ -197,6 +218,7 @@ def runtime_overlay_scale(
     nested_leak_alert_scale: float = 0.76,
     hive_stress_warn_scale: float = 0.90,
     hive_stress_alert_scale: float = 0.74,
+    overlay_stale_scale: float = 0.82,
 ):
     """
     Convert Q runtime context into an AION overlay-strength scalar.
@@ -208,12 +230,15 @@ def runtime_overlay_scale(
     scale = _clamp(_safe_float(bundle.get("runtime_multiplier", 1.0), 1.0), 0.20, 1.20)
     degraded = bool(bundle.get("degraded_safe_mode", False))
     q_ok = bool(bundle.get("quality_gate_ok", True))
+    overlay_stale = bool(bundle.get("overlay_stale", False))
     flags = bundle.get("risk_flags", [])
     flags = _canonicalize_flags(flags)
     if degraded:
         scale *= float(_clamp(degraded_scale, 0.20, 1.20))
     if not q_ok:
         scale *= float(_clamp(quality_fail_scale, 0.20, 1.20))
+    if overlay_stale:
+        scale *= float(_clamp(overlay_stale_scale, 0.20, 1.20))
     if flags:
         scale *= float(_clamp(flag_scale, 0.20, 1.20)) ** len(flags)
         # Drift-quality warnings from Q governance.
@@ -246,6 +271,7 @@ def runtime_overlay_scale(
         "active": bool((degraded or (not q_ok) or bool(flags) or abs(scale - 1.0) > 1e-6)),
         "flags": flags,
         "degraded": degraded,
+        "overlay_stale": overlay_stale,
         "quality_gate_ok": q_ok,
         "runtime_multiplier": _safe_float(bundle.get("runtime_multiplier", 1.0), 1.0),
         "regime": str(bundle.get("regime", "unknown")),

@@ -50,6 +50,17 @@ def test_runtime_risk_caps_quality_step_spike_tightens_caps():
     assert opens <= 3
 
 
+def test_runtime_risk_caps_overlay_stale_tightens_caps():
+    trades, opens = _runtime_risk_caps(
+        max_trades_cap=20,
+        max_open_positions_cap=8,
+        ext_runtime_scale=1.00,
+        ext_runtime_diag={"flags": ["overlay_stale"], "degraded": False, "quality_gate_ok": True, "regime": "balanced"},
+    )
+    assert trades <= 14
+    assert opens <= 2
+
+
 def test_runtime_risk_caps_fracture_alert_tightens_both_caps():
     trades, opens = _runtime_risk_caps(
         max_trades_cap=20,
@@ -116,6 +127,14 @@ def test_runtime_position_risk_scale_quality_step_spike_tightens():
             "quality_gate_ok": True,
             "regime": "risk_on",
         },
+    )
+    assert 0.2 <= s < 1.0
+
+
+def test_runtime_position_risk_scale_overlay_stale_tightens():
+    s = _runtime_position_risk_scale(
+        ext_runtime_scale=1.0,
+        ext_runtime_diag={"flags": ["overlay_stale"], "degraded": False, "quality_gate_ok": True, "overlay_stale": True, "regime": "risk_on"},
     )
     assert 0.2 <= s < 1.0
 

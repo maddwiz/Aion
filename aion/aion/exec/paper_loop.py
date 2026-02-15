@@ -162,6 +162,9 @@ def _runtime_risk_caps(
     if "quality_governor_step_spike" in flags:
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(3, int(max_open_positions_cap))))
         max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.75))))
+    if "overlay_stale" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(2, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.70))))
 
     # Fracture and degraded states should tighten concurrency beyond pure scalar.
     if "fracture_alert" in flags:
@@ -217,11 +220,14 @@ def _runtime_position_risk_scale(
     regime = str(diag.get("regime", "")).strip().lower()
     degraded = bool(diag.get("degraded", False))
     quality_ok = bool(diag.get("quality_gate_ok", True))
+    overlay_stale = bool(diag.get("overlay_stale", False))
 
     if degraded:
         scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_DEGRADED_SCALE)))
     if not quality_ok:
         scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_QFAIL_SCALE)))
+    if overlay_stale:
+        scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_STALE_SCALE)))
     if flags:
         scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_FLAG_SCALE))) ** len(flags)
         if "drift_alert" in flags:
@@ -671,6 +677,7 @@ def main() -> int:
                     path=cfg.EXT_SIGNAL_FILE,
                     min_confidence=cfg.EXT_SIGNAL_MIN_CONFIDENCE,
                     max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
+                    max_age_hours=cfg.EXT_SIGNAL_MAX_AGE_HOURS,
                 )
                 external_signals = ext_bundle.get("signals", {}) if isinstance(ext_bundle, dict) else {}
                 global_external = external_signals.get("__GLOBAL__")
@@ -692,6 +699,7 @@ def main() -> int:
                     nested_leak_alert_scale=cfg.EXT_SIGNAL_RUNTIME_NESTED_LEAK_ALERT_SCALE,
                     hive_stress_warn_scale=cfg.EXT_SIGNAL_RUNTIME_HIVE_WARN_SCALE,
                     hive_stress_alert_scale=cfg.EXT_SIGNAL_RUNTIME_HIVE_ALERT_SCALE,
+                    overlay_stale_scale=cfg.EXT_SIGNAL_RUNTIME_STALE_SCALE,
                 )
                 max_trades_cap_runtime, max_open_positions_runtime = _runtime_risk_caps(
                     max_trades_cap=max_trades_cap,
@@ -717,6 +725,7 @@ def main() -> int:
                     tuple(sorted(str(x) for x in ext_runtime_diag.get("flags", []) if str(x))),
                     bool(ext_runtime_diag.get("degraded", False)),
                     bool(ext_runtime_diag.get("quality_gate_ok", True)),
+                    bool(ext_runtime_diag.get("overlay_stale", False)),
                     str(ext_runtime_diag.get("regime", "unknown")),
                     str(ext_runtime_diag.get("source_mode", "unknown")),
                     int(max_trades_cap_runtime),
@@ -730,16 +739,16 @@ def main() -> int:
                     log_run(
                         "External runtime overlay "
                         f"scale={sig[0]:.3f} pos_risk_scale={sig[1]:.3f} flags={flag_txt} "
-                        f"degraded={sig[3]} quality_ok={sig[4]} regime={sig[5]} source={sig[6]} "
-                        f"max_trades={sig[7]}/{max_trades_cap} max_open={sig[8]}/{max_open_positions_cap} "
-                        f"risk_per_trade={sig[9]:.4f} max_notional_pct={sig[10]:.4f} max_gross_lev={sig[11]:.3f}"
+                        f"degraded={sig[3]} quality_ok={sig[4]} overlay_stale={sig[5]} regime={sig[6]} source={sig[7]} "
+                        f"max_trades={sig[8]}/{max_trades_cap} max_open={sig[9]}/{max_open_positions_cap} "
+                        f"risk_per_trade={sig[10]:.4f} max_notional_pct={sig[11]:.4f} max_gross_lev={sig[12]:.3f}"
                     )
-                    if cfg.MONITORING_ENABLED and (sig[3] or (not sig[4]) or bool(sig[2])):
+                    if cfg.MONITORING_ENABLED and (sig[3] or (not sig[4]) or sig[5] or bool(sig[2])):
                         monitor.record_system_event(
                             "external_overlay_runtime",
-                            f"scale={sig[0]:.3f} pos_risk_scale={sig[1]:.3f} flags={flag_txt} source={sig[6]} "
-                            f"max_trades={sig[7]}/{max_trades_cap} max_open={sig[8]}/{max_open_positions_cap} "
-                            f"risk_per_trade={sig[9]:.4f}",
+                            f"scale={sig[0]:.3f} pos_risk_scale={sig[1]:.3f} flags={flag_txt} source={sig[7]} "
+                            f"overlay_stale={sig[5]} max_trades={sig[8]}/{max_trades_cap} "
+                            f"max_open={sig[9]}/{max_open_positions_cap} risk_per_trade={sig[10]:.4f}",
                         )
                     last_ext_runtime_sig = sig
 

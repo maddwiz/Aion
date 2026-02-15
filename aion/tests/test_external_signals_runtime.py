@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from aion.brain.external_signals import load_external_signal_bundle, runtime_overlay_scale
@@ -267,3 +268,52 @@ def test_runtime_overlay_scale_uses_stronger_flag_when_warn_and_alert_both_prese
         flag_scale=0.95,
     )
     assert scale_both == scale_alert
+
+
+def test_load_external_signal_bundle_marks_stale_overlay_and_drops_signals(tmp_path: Path):
+    p = tmp_path / "overlay.json"
+    p.write_text(
+        json.dumps(
+            {
+                "signals": {"AAPL": {"bias": 0.4, "confidence": 0.8}},
+                "runtime_context": {"runtime_multiplier": 1.0, "risk_flags": []},
+                "quality_gate": {"ok": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    old_ts = 946684800  # 2000-01-01
+    os.utime(p, (old_ts, old_ts))
+
+    b = load_external_signal_bundle(p, min_confidence=0.55, max_bias=0.9, max_age_hours=1.0)
+    assert b["overlay_stale"] is True
+    assert "overlay_stale" in b["risk_flags"]
+    assert b["signals"] == {}
+
+
+def test_runtime_overlay_scale_penalizes_overlay_stale():
+    clean, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": [],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+            "overlay_stale": False,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+    )
+    stale, diag = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["overlay_stale"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+            "overlay_stale": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        overlay_stale_scale=0.80,
+    )
+    assert stale < clean
+    assert diag["overlay_stale"] is True
