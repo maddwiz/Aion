@@ -17,6 +17,20 @@ def _safe_float(x, default: float = 0.0) -> float:
         return default
 
 
+def _uniq_flags(flags) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(flags, list):
+        return out
+    for raw in flags:
+        key = str(raw).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
 def _normalize_signal(payload: dict, min_confidence: float, max_bias: float):
     bias = _safe_float(payload.get("bias"), 0.0)
     conf = _safe_float(payload.get("confidence"), 0.0)
@@ -110,8 +124,7 @@ def load_external_signal_bundle(path: Path, min_confidence: float = 0.55, max_bi
             regime = str(ctx.get("regime", "unknown")).strip().lower()
             out["regime"] = regime or "unknown"
             flags = ctx.get("risk_flags", [])
-            if isinstance(flags, list):
-                out["risk_flags"] = [str(x).strip().lower() for x in flags if str(x).strip()]
+            out["risk_flags"] = _uniq_flags(flags)
 
         out["degraded_safe_mode"] = bool(payload.get("degraded_safe_mode", False))
         out["source_mode"] = str(payload.get("source_mode", "unknown")).strip() or "unknown"
@@ -180,7 +193,7 @@ def runtime_overlay_scale(
     degraded = bool(bundle.get("degraded_safe_mode", False))
     q_ok = bool(bundle.get("quality_gate_ok", True))
     flags = bundle.get("risk_flags", [])
-    flags = [str(x).strip().lower() for x in flags] if isinstance(flags, list) else []
+    flags = _uniq_flags(flags)
     if degraded:
         scale *= float(_clamp(degraded_scale, 0.20, 1.20))
     if not q_ok:

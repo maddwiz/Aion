@@ -34,6 +34,20 @@ def _safe_float(x, default: float = 0.0) -> float:
         return default
 
 
+def _uniq_str_flags(flags) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(flags, list):
+        return out
+    for raw in flags:
+        key = str(raw).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
 def _canonical_symbol(sym: str) -> str:
     s = str(sym or "").strip().upper()
     if not s:
@@ -445,7 +459,7 @@ def _runtime_context(runs_dir: Path):
         "regime": regime,
         "components": comps,
         "active_component_count": int(len(active_vals)),
-        "risk_flags": risk_flags,
+        "risk_flags": _uniq_str_flags(risk_flags),
     }
 
 

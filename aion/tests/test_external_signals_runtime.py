@@ -215,3 +215,29 @@ def test_runtime_overlay_scale_applies_hive_stress_penalty():
         hive_stress_alert_scale=0.74,
     )
     assert scale_alert < scale_warn < 1.0
+
+
+def test_runtime_overlay_scale_ignores_duplicate_flags():
+    base, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["hive_stress_alert", "drift_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.95,
+    )
+    dupes, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["hive_stress_alert", "hive_stress_alert", "drift_alert", "drift_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.95,
+    )
+    assert dupes == base
