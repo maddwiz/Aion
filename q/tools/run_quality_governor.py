@@ -115,6 +115,83 @@ def _append_card(title, html):
         p.write_text(txt, encoding="utf-8")
 
 
+def _execution_constraint_quality(exec_info: dict | None, health_issues: list[str] | None = None):
+    """
+    Convert execution-throttle telemetry into a [0,1] quality score.
+    Lower score means constraints are likely either over-throttling (no tradability)
+    or increasing turnover unexpectedly (instability).
+    """
+    if not isinstance(exec_info, dict):
+        return None, {}
+
+    def _f(k):
+        try:
+            v = float(exec_info.get(k, np.nan))
+            return v if np.isfinite(v) else None
+        except Exception:
+            return None
+
+    g0 = _f("gross_before_mean")
+    g1 = _f("gross_after_mean")
+    t0 = _f("turnover_before_mean")
+    t1 = _f("turnover_after_mean")
+    tmax = _f("turnover_after_max")
+    step_cap = _f("max_step_turnover")
+
+    gross_ret = None
+    if g0 is not None and g0 > 1e-9 and g1 is not None:
+        gross_ret = float(np.clip(g1 / g0, 0.0, 3.0))
+    turn_ret = None
+    if t0 is not None and t0 > 1e-9 and t1 is not None:
+        turn_ret = float(np.clip(t1 / t0, 0.0, 3.0))
+
+    q_gross = None
+    if gross_ret is not None:
+        q_gross = float(np.clip((gross_ret - 0.05) / (0.85 - 0.05 + 1e-9), 0.0, 1.0))
+    q_turn = None
+    if turn_ret is not None:
+        q_turn = float(np.clip((turn_ret - 0.03) / (0.70 - 0.03 + 1e-9), 0.0, 1.0))
+        if turn_ret > 1.10:
+            q_turn *= 0.60
+
+    parts = [x for x in [q_turn, q_gross] if x is not None]
+    if not parts:
+        return None, {
+            "gross_retention": gross_ret,
+            "turnover_retention": turn_ret,
+            "step_cap": step_cap,
+            "turnover_after_max": tmax,
+        }
+
+    if q_turn is not None and q_gross is not None:
+        q = float(np.clip(0.55 * q_turn + 0.45 * q_gross, 0.0, 1.0))
+    else:
+        q = float(parts[0])
+
+    if step_cap is not None and tmax is not None and tmax > step_cap + 1e-6:
+        q *= 0.80
+    if turn_ret is not None and turn_ret > 1.10:
+        overload = float(np.clip((turn_ret - 1.10) / (1.80 - 1.10 + 1e-9), 0.0, 1.0))
+        q *= float(np.clip(1.0 - 0.35 * overload, 0.55, 1.0))
+
+    h_issues = [str(x).lower() for x in (health_issues or [])]
+    if any("over-throttling turnover" in x for x in h_issues):
+        q *= 0.75
+    if any("collapsed gross exposure" in x for x in h_issues):
+        q *= 0.75
+
+    q = float(np.clip(q, 0.0, 1.0))
+    detail = {
+        "gross_retention": gross_ret,
+        "turnover_retention": turn_ret,
+        "step_cap": step_cap,
+        "turnover_after_max": tmax,
+        "q_gross": q_gross,
+        "q_turnover": q_turn,
+    }
+    return q, detail
+
+
 if __name__ == "__main__":
     nested = _load_json(RUNS / "nested_wf_summary.json") or {}
     health = _load_json(RUNS / "system_health.json") or {}
@@ -129,6 +206,7 @@ if __name__ == "__main__":
     reflex_info = _load_json(RUNS / "reflex_health_info.json") or {}
     sym_info = _load_json(RUNS / "symbolic_governor_info.json") or {}
     cross_info = _load_json(RUNS / "cross_hive_summary.json") or {}
+    exec_info = _load_json(RUNS / "execution_constraints_info.json") or {}
 
     hive_sh = None
     hive_hit = None
@@ -230,6 +308,7 @@ if __name__ == "__main__":
         }
     )
     health_q = float(np.clip(float(health.get("health_score", 50.0)) / 100.0, 0.0, 1.0))
+    exec_q, exec_detail = _execution_constraint_quality(exec_info, health.get("issues", []) if isinstance(health, dict) else [])
     nctx_q = None
     if isinstance(nctx, dict):
         try:
@@ -321,6 +400,7 @@ if __name__ == "__main__":
             "reflex_downside": (reflex_downside_q, 0.08),
             "dna_downside": (dna_downside_q, 0.06),
             "system_health": (health_q, 0.13),
+            "execution_constraints": (exec_q, 0.12),
             "ecosystem": (eco_q, 0.07),
             "ecosystem_persistence": (persistence_q, 0.06),
             "shock_env": (shock_q, 0.05),
@@ -440,6 +520,10 @@ if __name__ == "__main__":
         except Exception:
             pass
 
+    # Execution constraints quality modifier.
+    if exec_q is not None:
+        runtime_mod *= float(np.clip(0.82 + 0.35 * exec_q, 0.70, 1.10))
+
     qg = np.clip(qg * runtime_mod, 0.55, 1.15)
     if len(qg) > 1:
         for t in range(1, len(qg)):
@@ -470,6 +554,7 @@ if __name__ == "__main__":
             "ecosystem_persistence": {"score": float(persistence_q) if persistence_q is not None else None},
             "shock_env": {"score": float(shock_q) if shock_q is not None else None},
             "system_health": {"score": float(health_q)},
+            "execution_constraints": {"score": float(exec_q) if exec_q is not None else None, "detail": exec_detail},
             "novaspine_context": {"score": float(nctx_q) if nctx_q is not None else None},
         },
         "blend_detail": quality_detail,
@@ -495,6 +580,7 @@ if __name__ == "__main__":
             "symbolic_governor_info": (RUNS / "symbolic_governor_info.json").exists(),
             "symbolic_governor": (RUNS / "symbolic_governor.csv").exists(),
             "hive_persistence_governor": (RUNS / "hive_persistence_governor.csv").exists(),
+            "execution_constraints_info": (RUNS / "execution_constraints_info.json").exists(),
             "system_health": (RUNS / "system_health.json").exists(),
             "novaspine_context": (RUNS / "novaspine_context.json").exists(),
         },

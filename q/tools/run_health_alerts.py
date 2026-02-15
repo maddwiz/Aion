@@ -57,6 +57,9 @@ def build_alert_payload(
     max_portfolio_l1_drift = float(thresholds.get("max_portfolio_l1_drift", 1.20))
     min_dream_coherence = float(thresholds.get("min_dream_coherence", 0.45))
     max_heartbeat_stress = float(thresholds.get("max_heartbeat_stress", 0.85))
+    min_exec_gross_retention = float(thresholds.get("min_exec_gross_retention", 0.10))
+    min_exec_turnover_retention = float(thresholds.get("min_exec_turnover_retention", 0.05))
+    max_exec_turnover_retention = float(thresholds.get("max_exec_turnover_retention", 1.10))
 
     issues = []
     score = float(health.get("health_score", 0.0))
@@ -65,8 +68,19 @@ def build_alert_payload(
         issues.append(f"health_score<{min_health} ({score:.1f})")
     if n_issues > max_issues:
         issues.append(f"health_issues>{max_issues} ({n_issues})")
+    health_issue_text = [str(x).lower() for x in (health.get("issues", []) or [])]
+    if any("over-throttling turnover" in x for x in health_issue_text):
+        issues.append("execution_constraints_over_throttling")
+    if any("collapsed gross exposure" in x for x in health_issue_text):
+        issues.append("execution_constraints_collapsed_gross")
 
     hb_stress = None
+    exec_gross_before = None
+    exec_gross_after = None
+    exec_turn_before = None
+    exec_turn_after = None
+    exec_gross_ret = None
+    exec_turn_ret = None
     if isinstance(health, dict):
         shape = health.get("shape", {})
         if isinstance(shape, dict):
@@ -74,8 +88,46 @@ def build_alert_payload(
                 hb_stress = float(shape.get("heartbeat_stress_mean", np.nan))
             except Exception:
                 hb_stress = None
+            try:
+                exec_gross_before = float(shape.get("exec_gross_before_mean", np.nan))
+            except Exception:
+                exec_gross_before = None
+            try:
+                exec_gross_after = float(shape.get("exec_gross_after_mean", np.nan))
+            except Exception:
+                exec_gross_after = None
+            try:
+                exec_turn_before = float(shape.get("exec_turnover_before_mean", np.nan))
+            except Exception:
+                exec_turn_before = None
+            try:
+                exec_turn_after = float(shape.get("exec_turnover_after_mean", np.nan))
+            except Exception:
+                exec_turn_after = None
     if hb_stress is not None and np.isfinite(hb_stress) and hb_stress > max_heartbeat_stress:
         issues.append(f"heartbeat_stress_mean>{max_heartbeat_stress} ({hb_stress:.3f})")
+    if (
+        exec_gross_before is not None
+        and exec_gross_after is not None
+        and np.isfinite(exec_gross_before)
+        and np.isfinite(exec_gross_after)
+        and exec_gross_before > 1e-9
+    ):
+        exec_gross_ret = float(np.clip(exec_gross_after / exec_gross_before, 0.0, 5.0))
+        if exec_gross_before >= 0.10 and exec_gross_ret < min_exec_gross_retention:
+            issues.append(f"exec_gross_retention<{min_exec_gross_retention} ({exec_gross_ret:.3f})")
+    if (
+        exec_turn_before is not None
+        and exec_turn_after is not None
+        and np.isfinite(exec_turn_before)
+        and np.isfinite(exec_turn_after)
+        and exec_turn_before > 1e-9
+    ):
+        exec_turn_ret = float(np.clip(exec_turn_after / exec_turn_before, 0.0, 5.0))
+        if exec_turn_before >= 0.02 and exec_turn_ret < min_exec_turnover_retention:
+            issues.append(f"exec_turnover_retention<{min_exec_turnover_retention} ({exec_turn_ret:.3f})")
+        if exec_turn_before >= 0.02 and exec_turn_ret > max_exec_turnover_retention:
+            issues.append(f"exec_turnover_retention>{max_exec_turnover_retention} ({exec_turn_ret:.3f})")
 
     gg = guards.get("global_governor", {}) if isinstance(guards, dict) else {}
     gmean = gg.get("mean", None)
@@ -198,11 +250,20 @@ def build_alert_payload(
             "max_portfolio_l1_drift": max_portfolio_l1_drift,
             "min_dream_coherence": min_dream_coherence,
             "max_heartbeat_stress": max_heartbeat_stress,
+            "min_exec_gross_retention": min_exec_gross_retention,
+            "min_exec_turnover_retention": min_exec_turnover_retention,
+            "max_exec_turnover_retention": max_exec_turnover_retention,
         },
         "observed": {
             "health_score": score,
             "health_issues": n_issues,
             "heartbeat_stress_mean": hb_stress,
+            "exec_gross_before_mean": exec_gross_before,
+            "exec_gross_after_mean": exec_gross_after,
+            "exec_turnover_before_mean": exec_turn_before,
+            "exec_turnover_after_mean": exec_turn_after,
+            "exec_gross_retention": exec_gross_ret,
+            "exec_turnover_retention": exec_turn_ret,
             "global_governor_mean": gmean,
             "quality_governor_mean": q_mean,
             "quality_score": q_score,
@@ -237,6 +298,9 @@ if __name__ == "__main__":
     max_conc_top1_after = float(os.getenv("Q_MAX_CONCENTRATION_TOP1_AFTER", "0.30"))
     min_dream_coherence = float(os.getenv("Q_MIN_DREAM_COHERENCE", "0.45"))
     max_heartbeat_stress = float(os.getenv("Q_MAX_HEARTBEAT_STRESS", "0.85"))
+    min_exec_gross_retention = float(os.getenv("Q_MIN_EXEC_GROSS_RETENTION", "0.10"))
+    min_exec_turnover_retention = float(os.getenv("Q_MIN_EXEC_TURNOVER_RETENTION", "0.05"))
+    max_exec_turnover_retention = float(os.getenv("Q_MAX_EXEC_TURNOVER_RETENTION", "1.10"))
 
     health = _load_json(RUNS / "system_health.json") or {}
     guards = _load_json(RUNS / "guardrails_summary.json") or {}
@@ -272,6 +336,9 @@ if __name__ == "__main__":
             "max_portfolio_l1_drift": float(os.getenv("Q_MAX_PORTFOLIO_L1_DRIFT", "1.20")),
             "min_dream_coherence": min_dream_coherence,
             "max_heartbeat_stress": max_heartbeat_stress,
+            "min_exec_gross_retention": min_exec_gross_retention,
+            "min_exec_turnover_retention": min_exec_turnover_retention,
+            "max_exec_turnover_retention": max_exec_turnover_retention,
         },
     )
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))
