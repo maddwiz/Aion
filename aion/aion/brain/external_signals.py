@@ -131,6 +131,7 @@ def load_external_signal_bundle(
         "quality_gate_ok": bool,
         "overlay_age_hours": float|None,
         "overlay_age_source": str,
+        "overlay_generated_at_utc": str|None,
         "overlay_stale": bool,
       }
     """
@@ -144,6 +145,7 @@ def load_external_signal_bundle(
         "quality_gate_ok": True,
         "overlay_age_hours": None,
         "overlay_age_source": "unknown",
+        "overlay_generated_at_utc": None,
         "overlay_stale": False,
     }
     try:
@@ -170,6 +172,7 @@ def load_external_signal_bundle(
         gen_raw = payload.get("generated_at_utc", payload.get("generated_at"))
         gen_dt = _parse_utc_timestamp(gen_raw)
         if gen_dt is not None:
+            out["overlay_generated_at_utc"] = gen_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
             now_utc = datetime.now(timezone.utc)
             age_payload_h = max(0.0, (now_utc - gen_dt).total_seconds() / 3600.0)
             out["overlay_age_hours"] = float(age_payload_h)
@@ -309,6 +312,7 @@ def runtime_overlay_scale(
         "overlay_stale": overlay_stale,
         "overlay_age_hours": bundle.get("overlay_age_hours", None),
         "overlay_age_source": bundle.get("overlay_age_source", "unknown"),
+        "overlay_generated_at_utc": bundle.get("overlay_generated_at_utc", None),
         "quality_gate_ok": q_ok,
         "runtime_multiplier": _safe_float(bundle.get("runtime_multiplier", 1.0), 1.0),
         "regime": str(bundle.get("regime", "unknown")),
