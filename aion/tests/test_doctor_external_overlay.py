@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from aion.exec.doctor import check_external_overlay
+from aion.exec.doctor import _overlay_remediation, check_external_overlay
 
 
 def _write(path: Path, payload: dict):
@@ -57,3 +57,27 @@ def test_check_external_overlay_requires_runtime_context(tmp_path: Path):
     ok, msg, _details = check_external_overlay(p, max_age_hours=24.0, require_runtime_context=True)
     assert ok is False
     assert "runtime_context_missing" in msg
+
+
+def test_overlay_remediation_provides_actionable_tips(tmp_path: Path):
+    checks = [
+        {
+            "name": "external_overlay",
+            "ok": False,
+            "details": {
+                "exists": False,
+                "age_hours": 25.0,
+                "max_age_hours": 12.0,
+                "degraded_safe_mode": True,
+                "quality_gate_ok": False,
+                "runtime_context_present": False,
+            },
+        }
+    ]
+    tips = _overlay_remediation(checks, tmp_path / "q_signal_overlay.json")
+    joined = " | ".join(tips).lower()
+    assert "missing" in joined
+    assert "stale" in joined
+    assert "degraded" in joined
+    assert "quality gate" in joined
+    assert "runtime_context" in joined

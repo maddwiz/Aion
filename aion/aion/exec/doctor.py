@@ -254,6 +254,36 @@ def _ib_remediation(checks: list[dict], host: str, ports: list[int], hosts: list
     return tips
 
 
+def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
+    ext = next((c for c in checks if str(c.get("name", "")) == "external_overlay"), None)
+    if not isinstance(ext, dict) or bool(ext.get("ok", True)):
+        return []
+    tips = []
+    details = ext.get("details", {}) if isinstance(ext.get("details"), dict) else {}
+    if not details.get("exists", False):
+        tips.append(f"External overlay missing. Generate it with Q pipeline and ensure path exists: {overlay_path}")
+    age_h = details.get("age_hours", None)
+    max_age_h = details.get("max_age_hours", None)
+    try:
+        age_h = float(age_h) if age_h is not None else None
+        max_age_h = float(max_age_h) if max_age_h is not None else None
+    except Exception:
+        age_h = None
+        max_age_h = None
+    if age_h is not None and max_age_h is not None and age_h > max_age_h:
+        tips.append(
+            "External overlay is stale. Re-run Q export (`python tools/run_all_in_one_plus.py`) "
+            "or lower AION_EXT_SIGNAL_MAX_AGE_HOURS if intentionally slower."
+        )
+    if bool(details.get("degraded_safe_mode", False)):
+        tips.append("Q overlay is in degraded safe mode. Check Q health alerts and resolve upstream gating conditions.")
+    if not bool(details.get("quality_gate_ok", True)):
+        tips.append("Q quality gate is not OK. Review `runs_plus/health_alerts.json` and `runs_plus/system_health.json` in Q.")
+    if not bool(details.get("runtime_context_present", True)):
+        tips.append("Overlay runtime_context missing. Ensure Q exporter is updated and writing runtime_context in q_signal_overlay.json.")
+    return tips
+
+
 def check_ib_process_health(ports: list[int]):
     lsof_cmd = "lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null"
     ps_cmd = "ps aux"
@@ -388,7 +418,8 @@ def main() -> int:
             "logs": str(cfg.LOG_DIR),
             "universe": str(cfg.UNIVERSE_DIR),
         },
-        "remediation": _ib_remediation(checks, cfg.IB_HOST, ports, hosts),
+        "remediation": _ib_remediation(checks, cfg.IB_HOST, ports, hosts)
+        + _overlay_remediation(checks, cfg.EXT_SIGNAL_FILE),
     }
 
     out = cfg.LOG_DIR / "doctor_report.json"
