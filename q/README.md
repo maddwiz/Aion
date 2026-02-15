@@ -73,6 +73,7 @@ This now includes:
 - auto-report fallback build when no report HTML exists
 - optional NovaSpine bridge (cold/meta memory sync, async-safe)
 - optional NovaSpine hive memory feedback (per-hive boosts + final projection)
+If `../aion/state/` exists, the exporter now auto-mirrors overlay JSON there.
 - hive transparency card/artifact (per-hive Sharpe/hit/DD + weight + memory boost)
 
 ### Strict production cycle

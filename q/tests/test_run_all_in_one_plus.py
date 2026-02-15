@@ -42,3 +42,18 @@ def test_ensure_report_exists_noop_when_present(tmp_path: Path, monkeypatch):
     ok = raip.ensure_report_exists()
     assert ok is True
     assert called["n"] == 0
+
+
+def test_default_aion_overlay_mirror_returns_path_when_aion_state_exists(tmp_path: Path, monkeypatch):
+    root = tmp_path / "q"
+    (tmp_path / "aion" / "state").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(raip, "ROOT", root)
+    mirror = raip.default_aion_overlay_mirror()
+    assert mirror.endswith("aion/state/q_signal_overlay.json")
+
+
+def test_default_aion_overlay_mirror_empty_when_no_aion_state(tmp_path: Path, monkeypatch):
+    root = tmp_path / "q"
+    monkeypatch.setattr(raip, "ROOT", root)
+    mirror = raip.default_aion_overlay_mirror()
+    assert mirror == ""

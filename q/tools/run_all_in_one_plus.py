@@ -83,6 +83,14 @@ def write_pipeline_status(failures, strict_mode: bool):
     (RUNS / "pipeline_status.json").write_text(json.dumps(payload, indent=2))
     print(f"✅ Wrote {RUNS/'pipeline_status.json'}")
 
+
+def default_aion_overlay_mirror() -> str:
+    p = ROOT.parent / "aion" / "state" / "q_signal_overlay.json"
+    if p.parent.exists():
+        return str(p)
+    return ""
+
+
 def try_open_report():
     # prefer best_plus, then all, then plus, then base
     names = ["report_best_plus.html", "report_all.html", "report_plus.html", "report.html"]
@@ -260,6 +268,8 @@ if __name__ == "__main__":
     # Export Q overlay pack for AION consumption (safe degraded mode if needed)
     export_args = []
     mirror_json = str(os.getenv("Q_EXPORT_MIRROR_JSON", "")).strip()
+    if not mirror_json:
+        mirror_json = default_aion_overlay_mirror()
     if mirror_json:
         export_args.extend(["--mirror-json", mirror_json])
     ok, rc = run_script("tools/export_aion_signal_pack.py", export_args)
