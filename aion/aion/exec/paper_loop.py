@@ -307,6 +307,134 @@ def _overlay_entry_gate(ext_runtime_diag: dict | None, overlay_age_hours: float 
     return bool(reasons), reasons
 
 
+def _execution_quality_governor(
+    *,
+    max_trades_per_day: int,
+    max_open_positions: int,
+    risk_per_trade: float,
+    max_position_notional_pct: float,
+    max_gross_leverage: float,
+    monitor: RuntimeMonitor | None,
+    now_utc: dt.datetime | None = None,
+):
+    """
+    Use recent fills (slippage + execution rate) as a live execution/turnover governor.
+    """
+    out = {
+        "state": "off",
+        "reasons": [],
+        "recent_executions": 0,
+        "exec_rate_per_min": 0.0,
+        "avg_slippage_bps": None,
+        "p90_slippage_bps": None,
+        "block_new_entries": False,
+        "max_trades_per_day": int(max(1, int(max_trades_per_day))),
+        "max_open_positions": int(max(1, int(max_open_positions))),
+        "risk_per_trade": float(max(1e-5, float(risk_per_trade))),
+        "max_position_notional_pct": float(max(1e-5, float(max_position_notional_pct))),
+        "max_gross_leverage": float(max(0.05, float(max_gross_leverage))),
+    }
+    if not bool(getattr(cfg, "EXEC_GOVERNOR_ENABLED", True)):
+        return out
+
+    mstate = getattr(monitor, "state", {}) if monitor is not None else {}
+    events = mstate.get("execution_events", []) if isinstance(mstate, dict) else []
+    lookback_min = max(1, int(getattr(cfg, "EXEC_GOVERNOR_LOOKBACK_MIN", 25)))
+    now = now_utc or dt.datetime.now(dt.timezone.utc)
+    recent_slip = []
+    if isinstance(events, list):
+        for evt in events:
+            if not isinstance(evt, dict):
+                continue
+            ts_raw = evt.get("ts")
+            slip = _safe_float(evt.get("slippage_bps"), None)
+            if slip is None:
+                continue
+            try:
+                ts = dt.datetime.fromisoformat(str(ts_raw))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=dt.timezone.utc)
+                else:
+                    ts = ts.astimezone(dt.timezone.utc)
+            except Exception:
+                continue
+            if (now - ts).total_seconds() <= lookback_min * 60:
+                recent_slip.append(float(slip))
+
+    # Backward-compatible fallback if execution_events are unavailable.
+    if not recent_slip and isinstance(mstate, dict):
+        sp = mstate.get("slippage_points", [])
+        if isinstance(sp, list) and sp:
+            tail_n = min(len(sp), max(1, int(getattr(cfg, "EXEC_GOVERNOR_MIN_EXECUTIONS", 6))))
+            for raw in sp[-tail_n:]:
+                v = _safe_float(raw, None)
+                if v is not None:
+                    recent_slip.append(float(v))
+
+    n = int(len(recent_slip))
+    out["recent_executions"] = n
+    out["exec_rate_per_min"] = float(n / max(1, lookback_min))
+    if n:
+        out["avg_slippage_bps"] = float(sum(recent_slip) / n)
+        try:
+            arr = sorted(float(x) for x in recent_slip)
+            pidx = int(round(0.90 * (len(arr) - 1)))
+            out["p90_slippage_bps"] = float(arr[max(0, min(len(arr) - 1, pidx))])
+        except Exception:
+            out["p90_slippage_bps"] = float(out["avg_slippage_bps"])
+
+    if n < max(1, int(getattr(cfg, "EXEC_GOVERNOR_MIN_EXECUTIONS", 6))):
+        out["state"] = "insufficient_data"
+        return out
+
+    warn_slip = float(getattr(cfg, "EXEC_GOVERNOR_SLIP_WARN_BPS", 20.0))
+    alert_slip = float(getattr(cfg, "EXEC_GOVERNOR_SLIP_ALERT_BPS", 28.0))
+    warn_rate = float(getattr(cfg, "EXEC_GOVERNOR_RATE_WARN_PER_MIN", 0.60))
+    alert_rate = float(getattr(cfg, "EXEC_GOVERNOR_RATE_ALERT_PER_MIN", 1.20))
+
+    avg_slip = _safe_float(out.get("avg_slippage_bps"), 0.0)
+    p90_slip = _safe_float(out.get("p90_slippage_bps"), avg_slip)
+    rate = _safe_float(out.get("exec_rate_per_min"), 0.0)
+
+    state = "ok"
+    reasons = []
+    if avg_slip >= alert_slip or p90_slip >= (alert_slip * 1.10) or rate >= alert_rate:
+        state = "alert"
+    elif avg_slip >= warn_slip or p90_slip >= (warn_slip * 1.15) or rate >= warn_rate:
+        state = "warn"
+
+    if avg_slip >= warn_slip:
+        reasons.append("slippage_elevated")
+    if p90_slip >= (warn_slip * 1.15):
+        reasons.append("slippage_tail_elevated")
+    if rate >= warn_rate:
+        reasons.append("execution_rate_elevated")
+
+    out["state"] = state
+    out["reasons"] = reasons
+    if state == "warn":
+        tr_scale = _safe_float(getattr(cfg, "EXEC_GOVERNOR_WARN_TRADES_SCALE", 0.80), 0.80)
+        op_scale = _safe_float(getattr(cfg, "EXEC_GOVERNOR_WARN_OPEN_SCALE", 0.80), 0.80)
+        rk_scale = _safe_float(getattr(cfg, "EXEC_GOVERNOR_WARN_RISK_SCALE", 0.86), 0.86)
+    elif state == "alert":
+        tr_scale = _safe_float(getattr(cfg, "EXEC_GOVERNOR_ALERT_TRADES_SCALE", 0.60), 0.60)
+        op_scale = _safe_float(getattr(cfg, "EXEC_GOVERNOR_ALERT_OPEN_SCALE", 0.60), 0.60)
+        rk_scale = _safe_float(getattr(cfg, "EXEC_GOVERNOR_ALERT_RISK_SCALE", 0.72), 0.72)
+    else:
+        tr_scale = 1.0
+        op_scale = 1.0
+        rk_scale = 1.0
+
+    out["max_trades_per_day"] = max(1, min(int(max_trades_per_day), int(round(int(max_trades_per_day) * max(0.20, min(1.20, tr_scale))))))
+    out["max_open_positions"] = max(1, min(int(max_open_positions), int(round(int(max_open_positions) * max(0.20, min(1.20, op_scale))))))
+    rk = max(0.20, min(1.20, rk_scale))
+    out["risk_per_trade"] = max(1e-5, float(risk_per_trade) * rk)
+    out["max_position_notional_pct"] = max(1e-5, float(max_position_notional_pct) * max(0.50, rk))
+    out["max_gross_leverage"] = max(0.05, float(max_gross_leverage) * max(0.55, rk))
+    out["block_new_entries"] = bool(state == "alert" and bool(getattr(cfg, "EXEC_GOVERNOR_BLOCK_ON_ALERT", False)))
+    return out
+
+
 def _daily_loss_limits_hit(caps: dict, day_start_equity: float, equity: float):
     start = max(1.0, _safe_float(day_start_equity, 0.0))
     eq = _safe_float(equity, start)
@@ -639,6 +767,7 @@ def main() -> int:
     last_policy_sig = None
     last_policy_loss_hit = False
     last_overlay_gate_sig = None
+    last_exec_governor_sig = None
 
     if cfg.META_LABEL_ENABLED:
         samples = meta_model.fit_from_trades(cfg.LOG_DIR / "shadow_trades.csv")
@@ -732,6 +861,13 @@ def main() -> int:
             ext_runtime_diag = {"active": False, "flags": [], "degraded": False, "quality_gate_ok": True}
             overlay_block_new_entries = False
             overlay_block_reasons = []
+            exec_governor_block_new_entries = False
+            exec_governor_state = "off"
+            exec_governor_reasons = []
+            exec_governor_recent_executions = 0
+            exec_governor_exec_rate_per_min = 0.0
+            exec_governor_avg_slippage_bps = None
+            exec_governor_p90_slippage_bps = None
             if cfg.EXT_SIGNAL_ENABLED:
                 ext_bundle = load_external_signal_bundle(
                     path=cfg.EXT_SIGNAL_FILE,
@@ -899,11 +1035,68 @@ def main() -> int:
                     )
                     last_policy_sig = policy_sig
 
+            exec_gov = _execution_quality_governor(
+                max_trades_per_day=max_trades_cap_runtime,
+                max_open_positions=max_open_positions_runtime,
+                risk_per_trade=risk_per_trade_runtime,
+                max_position_notional_pct=max_position_notional_pct_runtime,
+                max_gross_leverage=max_gross_leverage_runtime,
+                monitor=monitor,
+            )
+            max_trades_cap_runtime = int(exec_gov["max_trades_per_day"])
+            max_open_positions_runtime = int(exec_gov["max_open_positions"])
+            risk_per_trade_runtime = float(exec_gov["risk_per_trade"])
+            max_position_notional_pct_runtime = float(exec_gov["max_position_notional_pct"])
+            max_gross_leverage_runtime = float(exec_gov["max_gross_leverage"])
+            exec_governor_block_new_entries = bool(exec_gov.get("block_new_entries", False))
+            exec_governor_state = str(exec_gov.get("state", "off"))
+            exec_governor_reasons = [str(x) for x in exec_gov.get("reasons", []) if str(x)]
+            exec_governor_recent_executions = int(exec_gov.get("recent_executions", 0))
+            exec_governor_exec_rate_per_min = _safe_float(exec_gov.get("exec_rate_per_min"), 0.0)
+            exec_governor_avg_slippage_bps = _safe_float(exec_gov.get("avg_slippage_bps"), None)
+            exec_governor_p90_slippage_bps = _safe_float(exec_gov.get("p90_slippage_bps"), None)
+            exec_sig = (
+                exec_governor_state,
+                tuple(sorted(exec_governor_reasons)),
+                bool(exec_governor_block_new_entries),
+                int(max_trades_cap_runtime),
+                int(max_open_positions_runtime),
+                round(float(risk_per_trade_runtime), 6),
+                round(float(max_position_notional_pct_runtime), 6),
+                round(float(max_gross_leverage_runtime), 6),
+                int(exec_governor_recent_executions),
+                round(float(exec_governor_exec_rate_per_min), 4),
+                None if exec_governor_avg_slippage_bps is None else round(float(exec_governor_avg_slippage_bps), 4),
+                None if exec_governor_p90_slippage_bps is None else round(float(exec_governor_p90_slippage_bps), 4),
+            )
+            if exec_sig != last_exec_governor_sig:
+                reason_txt = ",".join(exec_sig[1]) if exec_sig[1] else "none"
+                log_run(
+                    "Execution quality governor "
+                    f"state={exec_sig[0]} reasons={reason_txt} block_new={exec_sig[2]} "
+                    f"recent_exec={exec_sig[8]} rate_per_min={exec_sig[9]:.3f} "
+                    f"avg_slip_bps={(f'{exec_sig[10]:.2f}' if isinstance(exec_sig[10], float) else 'na')} "
+                    f"p90_slip_bps={(f'{exec_sig[11]:.2f}' if isinstance(exec_sig[11], float) else 'na')} "
+                    f"max_trades={exec_sig[3]} max_open={exec_sig[4]} risk_per_trade={exec_sig[5]:.4f} "
+                    f"max_notional_pct={exec_sig[6]:.4f} max_gross_lev={exec_sig[7]:.3f}"
+                )
+                if cfg.MONITORING_ENABLED and exec_governor_state in {"warn", "alert"}:
+                    monitor.record_system_event(
+                        "execution_quality_governor",
+                        f"state={exec_governor_state} reasons={reason_txt} block_new={exec_governor_block_new_entries} "
+                        f"avg_slip_bps={(f'{exec_governor_avg_slippage_bps:.2f}' if isinstance(exec_governor_avg_slippage_bps, float) else 'na')} "
+                        f"p90_slip_bps={(f'{exec_governor_p90_slippage_bps:.2f}' if isinstance(exec_governor_p90_slippage_bps, float) else 'na')}",
+                    )
+                last_exec_governor_sig = exec_sig
+
             policy_loss_hit, policy_daily_loss_abs, policy_daily_loss_pct = _daily_loss_limits_hit(
                 policy_caps, day_start_equity, equity
             )
             policy_block_new_entries = bool(
-                policy_caps.get("block_new_entries", False) or policy_loss_hit or overlay_block_new_entries
+                policy_caps.get("block_new_entries", False)
+                or policy_loss_hit
+                or overlay_block_new_entries
+                or exec_governor_block_new_entries
             )
             if policy_loss_hit and (not last_policy_loss_hit):
                 log_run(
@@ -941,6 +1134,17 @@ def main() -> int:
                     "external_overlay_generated_at_utc": ext_overlay_generated_at_utc,
                     "overlay_block_new_entries": bool(overlay_block_new_entries),
                     "overlay_block_reasons": list(overlay_block_reasons),
+                    "exec_governor_state": str(exec_governor_state),
+                    "exec_governor_reasons": list(exec_governor_reasons),
+                    "exec_governor_recent_executions": int(exec_governor_recent_executions),
+                    "exec_governor_exec_rate_per_min": float(exec_governor_exec_rate_per_min),
+                    "exec_governor_avg_slippage_bps": (
+                        None if exec_governor_avg_slippage_bps is None else float(exec_governor_avg_slippage_bps)
+                    ),
+                    "exec_governor_p90_slippage_bps": (
+                        None if exec_governor_p90_slippage_bps is None else float(exec_governor_p90_slippage_bps)
+                    ),
+                    "exec_governor_block_new_entries": bool(exec_governor_block_new_entries),
                     "killswitch_block_new_entries": bool(killswitch_block_new_entries),
                     "policy_block_new_entries": bool(policy_block_new_entries),
                     "policy_loss_hit": bool(policy_loss_hit),

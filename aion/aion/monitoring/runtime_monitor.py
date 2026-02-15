@@ -14,6 +14,7 @@ class RuntimeMonitor:
             "equity_points": [],
             "confidence_points": [],
             "slippage_points": [],
+            "execution_events": [],
             "system_events": [],
             "alerts": [],
         }
@@ -34,7 +35,7 @@ class RuntimeMonitor:
 
     def _trim(self):
         w = self.cfg.MONITOR_SIGNAL_DRIFT_WINDOW
-        for key in ["equity_points", "confidence_points", "slippage_points"]:
+        for key in ["equity_points", "confidence_points", "slippage_points", "execution_events"]:
             arr = self.state.get(key, [])
             if len(arr) > w:
                 self.state[key] = arr[-w:]
@@ -52,6 +53,12 @@ class RuntimeMonitor:
 
     def record_execution(self, slippage_bps: float):
         self.state.setdefault("slippage_points", []).append(float(slippage_bps))
+        self.state.setdefault("execution_events", []).append(
+            {
+                "ts": dt.datetime.now().isoformat(),
+                "slippage_bps": float(slippage_bps),
+            }
+        )
         self._trim()
         self._save()
 

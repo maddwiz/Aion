@@ -1,5 +1,7 @@
 import aion.exec.paper_loop as pl
 from aion.exec.paper_loop import _runtime_position_risk_scale, _runtime_risk_caps
+from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 
 def test_runtime_risk_caps_apply_scale_neutral_case():
@@ -283,3 +285,88 @@ def test_overlay_entry_gate_blocks_quality_fail_when_enabled(monkeypatch):
     )
     assert blocked is True
     assert "quality_gate_fail" in reasons
+
+
+def test_execution_quality_governor_warn_scales_caps(monkeypatch):
+    now = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+    events = [
+        {"ts": (now - timedelta(minutes=5)).isoformat(), "slippage_bps": 22.0},
+        {"ts": (now - timedelta(minutes=7)).isoformat(), "slippage_bps": 21.0},
+        {"ts": (now - timedelta(minutes=9)).isoformat(), "slippage_bps": 23.0},
+        {"ts": (now - timedelta(minutes=11)).isoformat(), "slippage_bps": 20.0},
+        {"ts": (now - timedelta(minutes=13)).isoformat(), "slippage_bps": 24.0},
+        {"ts": (now - timedelta(minutes=15)).isoformat(), "slippage_bps": 22.5},
+    ]
+    mon = SimpleNamespace(state={"execution_events": events, "slippage_points": [e["slippage_bps"] for e in events]})
+
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ENABLED", True)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_LOOKBACK_MIN", 25)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_MIN_EXECUTIONS", 6)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_SLIP_WARN_BPS", 20.0)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_SLIP_ALERT_BPS", 30.0)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_RATE_WARN_PER_MIN", 0.9)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_RATE_ALERT_PER_MIN", 1.8)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_BLOCK_ON_ALERT", False)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_WARN_TRADES_SCALE", 0.8)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_WARN_OPEN_SCALE", 0.8)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_WARN_RISK_SCALE", 0.86)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ALERT_TRADES_SCALE", 0.6)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ALERT_OPEN_SCALE", 0.6)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ALERT_RISK_SCALE", 0.72)
+
+    out = pl._execution_quality_governor(
+        max_trades_per_day=15,
+        max_open_positions=6,
+        risk_per_trade=0.02,
+        max_position_notional_pct=0.20,
+        max_gross_leverage=1.6,
+        monitor=mon,
+        now_utc=now,
+    )
+    assert out["state"] == "warn"
+    assert out["block_new_entries"] is False
+    assert out["max_trades_per_day"] < 15
+    assert out["max_open_positions"] < 6
+    assert out["risk_per_trade"] < 0.02
+
+
+def test_execution_quality_governor_alert_can_block_entries(monkeypatch):
+    now = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
+    events = [
+        {"ts": (now - timedelta(minutes=2)).isoformat(), "slippage_bps": 38.0},
+        {"ts": (now - timedelta(minutes=3)).isoformat(), "slippage_bps": 42.0},
+        {"ts": (now - timedelta(minutes=4)).isoformat(), "slippage_bps": 36.0},
+        {"ts": (now - timedelta(minutes=5)).isoformat(), "slippage_bps": 40.0},
+        {"ts": (now - timedelta(minutes=6)).isoformat(), "slippage_bps": 37.0},
+        {"ts": (now - timedelta(minutes=7)).isoformat(), "slippage_bps": 39.0},
+    ]
+    mon = SimpleNamespace(state={"execution_events": events, "slippage_points": [e["slippage_bps"] for e in events]})
+
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ENABLED", True)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_LOOKBACK_MIN", 25)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_MIN_EXECUTIONS", 6)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_SLIP_WARN_BPS", 20.0)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_SLIP_ALERT_BPS", 30.0)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_RATE_WARN_PER_MIN", 0.9)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_RATE_ALERT_PER_MIN", 1.8)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_BLOCK_ON_ALERT", True)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_WARN_TRADES_SCALE", 0.8)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_WARN_OPEN_SCALE", 0.8)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_WARN_RISK_SCALE", 0.86)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ALERT_TRADES_SCALE", 0.6)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ALERT_OPEN_SCALE", 0.6)
+    monkeypatch.setattr(pl.cfg, "EXEC_GOVERNOR_ALERT_RISK_SCALE", 0.72)
+
+    out = pl._execution_quality_governor(
+        max_trades_per_day=15,
+        max_open_positions=6,
+        risk_per_trade=0.02,
+        max_position_notional_pct=0.20,
+        max_gross_leverage=1.6,
+        monitor=mon,
+        now_utc=now,
+    )
+    assert out["state"] == "alert"
+    assert out["block_new_entries"] is True
+    assert out["max_trades_per_day"] <= 9
+    assert out["max_open_positions"] <= 4
