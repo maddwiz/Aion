@@ -96,6 +96,7 @@ AION_MODE=brain AION_TASK=doctor ./run_aion.sh
 AION_MODE=brain AION_TASK=dashboard ./run_aion.sh
 ```
 Then open `http://127.0.0.1:8787` (or your configured `AION_DASHBOARD_HOST`/`AION_DASHBOARD_PORT`).
+Dashboard now includes a `Q Overlay` health tile driven by Doctor checks.
 
 - IB conflict recovery:
 ```bash

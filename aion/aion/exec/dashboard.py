@@ -47,6 +47,18 @@ def _to_int(raw, default: int):
         return default
 
 
+def _doctor_check(doctor: dict, name: str):
+    checks = doctor.get("checks", []) if isinstance(doctor, dict) else []
+    if not isinstance(checks, list):
+        return None
+    for c in checks:
+        if not isinstance(c, dict):
+            continue
+        if str(c.get("name", "")) == str(name):
+            return c
+    return None
+
+
 def _is_aion_dashboard_running(host: str, port: int) -> bool:
     probe_hosts = [host]
     if host in {"0.0.0.0", "::"}:
@@ -74,11 +86,16 @@ def _status_payload():
 
     trade_metrics = perf.get("trade_metrics", {})
     equity_metrics = perf.get("equity_metrics", {})
+    ext = _doctor_check(doctor, "external_overlay") or {}
+    ext_details = ext.get("details", {}) if isinstance(ext.get("details"), dict) else {}
 
     return {
         "ib": doctor.get("ib", {}),
         "doctor_ok": bool(doctor.get("ok", False)),
         "doctor_remediation": doctor.get("remediation", []),
+        "external_overlay_ok": bool(ext.get("ok", True)),
+        "external_overlay_msg": ext.get("msg"),
+        "external_overlay": ext_details,
         "monitor_ts": monitor.get("ts"),
         "alert_count": len(monitor.get("alerts", [])),
         "system_event_count": len(monitor.get("system_events", [])),
@@ -131,6 +148,7 @@ def _html_template():
       <div class="card kpi"><div class="k">Trading Enabled</div><div class="v" id="trading_enabled">-</div></div>
       <div class="card kpi"><div class="k">Watchlist</div><div class="v" id="watchlist_count">-</div></div>
       <div class="card kpi"><div class="k">Closed Trades</div><div class="v" id="closed_trades">-</div></div>
+      <div class="card kpi"><div class="k">Q Overlay</div><div class="v" id="overlay_ok">-</div></div>
 
       <div class="card wide">
         <div class="k">System Snapshot</div>
@@ -180,8 +198,12 @@ def _html_template():
       txt('trading_enabled', s.trading_enabled ? 'ON' : 'OFF'); cls('trading_enabled', !!s.trading_enabled);
       txt('watchlist_count', s.watchlist_count ?? 0);
       txt('closed_trades', s.trade_metrics?.closed_trades ?? 0);
+      txt('overlay_ok', s.external_overlay_ok ? 'OK' : 'WARN'); cls('overlay_ok', !!s.external_overlay_ok);
       txt('snapshot', JSON.stringify({
         ib: s.ib,
+        external_overlay_ok: s.external_overlay_ok,
+        external_overlay: s.external_overlay,
+        external_overlay_msg: s.external_overlay_msg,
         monitor_ts: s.monitor_ts,
         winrate: s.trade_metrics?.winrate,
         expectancy: s.trade_metrics?.expectancy,
