@@ -266,6 +266,12 @@ def build_events():
     conc_stats = conc.get("stats", {}) if isinstance(conc, dict) else {}
     quality_score = float(quality.get("quality_score", 0.5)) if isinstance(quality, dict) else 0.5
     quality_gov_mean = float(quality.get("quality_governor_mean", 1.0)) if isinstance(quality, dict) else 1.0
+    nctx_turn_pressure = _safe_float((nctx or {}).get("turnover_pressure", np.nan), np.nan)
+    nhive_turn_pressure = _safe_float((nhive or {}).get("turnover_pressure", np.nan), np.nan)
+    nctx_turn_damp = _safe_float((nctx or {}).get("turnover_dampener", np.nan), np.nan)
+    nhive_turn_damp = _safe_float((nhive or {}).get("turnover_dampener", np.nan), np.nan)
+    turn_press_vals = np.asarray([x for x in [nctx_turn_pressure, nhive_turn_pressure] if np.isfinite(x)], float)
+    turn_damp_vals = np.asarray([x for x in [nctx_turn_damp, nhive_turn_damp] if np.isfinite(x)], float)
 
     events = [
         {
@@ -383,6 +389,14 @@ def build_events():
                     "mean_stress": _safe_float((sym or {}).get("mean_stress", 0.0)),
                     "max_stress": _safe_float((sym or {}).get("max_stress", 0.0)),
                     "mean_governor": float(np.mean(sym_gov)) if sym_gov is not None and len(sym_gov) else None,
+                },
+                "novaspine_memory_turnover": {
+                    "context_turnover_pressure": float(nctx_turn_pressure) if np.isfinite(nctx_turn_pressure) else None,
+                    "hive_turnover_pressure": float(nhive_turn_pressure) if np.isfinite(nhive_turn_pressure) else None,
+                    "max_turnover_pressure": float(np.max(turn_press_vals)) if len(turn_press_vals) else None,
+                    "context_turnover_dampener": float(nctx_turn_damp) if np.isfinite(nctx_turn_damp) else None,
+                    "hive_turnover_dampener": float(nhive_turn_damp) if np.isfinite(nhive_turn_damp) else None,
+                    "max_turnover_dampener": float(np.max(turn_damp_vals)) if len(turn_damp_vals) else None,
                 },
                 "hive_persistence": {
                     "mean_governor": float(np.mean(hive_pg)) if hive_pg is not None and len(hive_pg) else None,

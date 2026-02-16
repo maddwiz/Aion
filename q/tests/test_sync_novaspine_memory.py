@@ -179,6 +179,13 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     sym = rc.get("payload", {}).get("symbolic", {})
     assert sym.get("status") == "ok"
     assert float(sym.get("mean_stress")) > 0.0
+    nmt = rc.get("payload", {}).get("novaspine_memory_turnover", {})
+    assert float(nmt.get("context_turnover_pressure")) > 0.0
+    assert float(nmt.get("hive_turnover_pressure")) > 0.0
+    assert float(nmt.get("max_turnover_pressure")) > 0.0
+    assert float(nmt.get("context_turnover_dampener")) > 0.0
+    assert float(nmt.get("hive_turnover_dampener")) > 0.0
+    assert float(nmt.get("max_turnover_dampener")) > 0.0
     hp = rc.get("payload", {}).get("hive_persistence", {})
     assert float(hp.get("mean_governor")) > 0.0
     hc = rc.get("payload", {}).get("hive_crowding", {})
