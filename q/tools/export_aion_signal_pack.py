@@ -298,6 +298,9 @@ def _memory_feedback(runs_dir: Path):
 
     ctx_status = str(nctx.get("status", "unknown")).strip().lower()
     hive_status = str(nhive.get("status", "unknown")).strip().lower()
+    status_tokens = {s for s in [ctx_status, hive_status] if s}
+    passive_tokens = {"local_only", "disabled", "skipped", "unknown", "na", "none", "neutral"}
+    local_only_mode = bool(status_tokens) and all(s in passive_tokens for s in status_tokens)
     enabled = bool(nctx.get("enabled", False) or nhive.get("enabled", False))
     ctx_res = _safe_float(nctx.get("context_resonance", np.nan), default=np.nan)
     ctx_boost = _safe_float(nctx.get("context_boost", np.nan), default=np.nan)
@@ -311,12 +314,16 @@ def _memory_feedback(runs_dir: Path):
     base = 1.0
     have_memory = False
     if math.isfinite(ctx_boost):
-        base *= _clamp(ctx_boost, 0.85, 1.15)
-        have_memory = True
+        cb = _clamp(ctx_boost, 0.85, 1.15)
+        if (not local_only_mode) or abs(cb - 1.0) > 1e-6:
+            base *= cb
+            have_memory = True
     if math.isfinite(hive_boost):
-        base *= _clamp(hive_boost, 0.85, 1.15)
-        have_memory = True
-    if math.isfinite(ctx_res):
+        hb = _clamp(hive_boost, 0.85, 1.15)
+        if (not local_only_mode) or abs(hb - 1.0) > 1e-6:
+            base *= hb
+            have_memory = True
+    if (not local_only_mode) and math.isfinite(ctx_res):
         base *= _clamp(0.92 + 0.20 * ctx_res, 0.88, 1.08)
         have_memory = True
         if ctx_res < 0.08:
@@ -328,7 +335,7 @@ def _memory_feedback(runs_dir: Path):
     damp_vals = [v for v in [ctx_damp, hive_damp] if math.isfinite(v)]
     turnover_pressure = float(np.max(pressure_vals)) if pressure_vals else np.nan
     turnover_dampener = float(np.mean(damp_vals)) if damp_vals else np.nan
-    if math.isfinite(turnover_pressure):
+    if math.isfinite(turnover_pressure) and turnover_pressure > 0.0:
         pressure_mod = _clamp(1.02 - 0.22 * max(0.0, turnover_pressure), 0.80, 1.02)
         base *= pressure_mod
         have_memory = True
@@ -336,15 +343,16 @@ def _memory_feedback(runs_dir: Path):
             reasons.append("memory_turnover_pressure_high")
         elif turnover_pressure >= 0.45:
             reasons.append("memory_turnover_pressure_warn")
-    if math.isfinite(turnover_dampener):
+    if math.isfinite(turnover_dampener) and turnover_dampener > 0.0:
         damp_mod = _clamp(1.01 - 1.40 * max(0.0, turnover_dampener), 0.82, 1.01)
         base *= damp_mod
         have_memory = True
 
-    status_tokens = {ctx_status, hive_status}
     if any(s in {"unreachable", "error", "failed"} or s.startswith("http_") for s in status_tokens):
         base *= 0.96
         reasons.append("memory_unreachable")
+    elif local_only_mode:
+        reasons.append("memory_local_only")
     elif any(s in {"skipped", "disabled", "unknown"} for s in status_tokens):
         reasons.append("memory_partial_or_disabled")
 

@@ -264,6 +264,32 @@ def test_runtime_context_flags_memory_turnover_alert(tmp_path: Path):
     assert "memory_turnover_warn" not in ctx.get("risk_flags", [])
 
 
+def test_runtime_context_treats_local_only_memory_as_neutral(tmp_path: Path):
+    (tmp_path / "novaspine_context.json").write_text(
+        (
+            '{"enabled": true, "status": "local_only", '
+            '"context_resonance": 0.0, "context_boost": 1.0, '
+            '"turnover_pressure": 0.0, "turnover_dampener": 0.0}'
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "novaspine_hive_feedback.json").write_text(
+        (
+            '{"enabled": true, "status": "local_only", "global_boost": 1.0, '
+            '"turnover_pressure": 0.0, "turnover_dampener": 0.0}'
+        ),
+        encoding="utf-8",
+    )
+
+    ctx = ex._runtime_context(tmp_path)
+    mf = ctx.get("memory_feedback", {})
+    assert mf.get("active") is True
+    assert mf.get("status") == "neutral"
+    assert float(mf.get("risk_scale", 0.0)) == pytest.approx(1.0)
+    assert "memory_feedback_warn" not in ctx.get("risk_flags", [])
+    assert "memory_feedback_alert" not in ctx.get("risk_flags", [])
+
+
 def test_runtime_context_flags_memory_feedback_when_replay_backlog_stalls(tmp_path: Path):
     (tmp_path / "novaspine_replay_status.json").write_text(
         (
