@@ -366,8 +366,17 @@ def _aion_outcome_feedback():
     Reads AION shadow_trades.csv and maps realized quality into a risk scalar.
     """
     out = load_outcome_feedback(root=ROOT)
-    if isinstance(out, dict):
-        out.setdefault("source", "shadow_trades")
+    if not isinstance(out, dict):
+        return out
+    source_pref = str(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto")).strip().lower() or "auto"
+    if source_pref not in {"auto", "overlay", "shadow"}:
+        source_pref = "auto"
+    source = str(out.get("source", out.get("source_selected", "shadow_trades"))).strip().lower() or "shadow_trades"
+    if source == "shadow":
+        source = "shadow_trades"
+    out.setdefault("source", source)
+    out.setdefault("source_selected", source)
+    out.setdefault("source_preference", source_pref)
     return out
 
 

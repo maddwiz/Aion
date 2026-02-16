@@ -15,6 +15,7 @@ def _isolate_aion_feedback_env(monkeypatch, tmp_path: Path):
     # Keep runtime-context tests deterministic regardless of local AION logs.
     monkeypatch.setenv("Q_AION_SHADOW_TRADES", str(tmp_path / "_missing_shadow_trades.csv"))
     monkeypatch.delenv("Q_AION_HOME", raising=False)
+    monkeypatch.delenv("Q_AION_FEEDBACK_SOURCE", raising=False)
     monkeypatch.delenv("Q_AION_FEEDBACK_LOOKBACK", raising=False)
     monkeypatch.delenv("Q_AION_FEEDBACK_MIN_TRADES", raising=False)
     monkeypatch.delenv("Q_AION_FEEDBACK_MAX_AGE_HOURS", raising=False)
@@ -252,6 +253,8 @@ def test_runtime_context_includes_aion_outcome_feedback(tmp_path: Path, monkeypa
     assert afb.get("stale") is False
     assert afb.get("age_hours") is not None
     assert afb.get("source") == "shadow_trades"
+    assert afb.get("source_selected") == "shadow_trades"
+    assert afb.get("source_preference") == "auto"
 
 
 def test_runtime_context_flags_stale_aion_outcome_feedback(tmp_path: Path, monkeypatch):
@@ -281,5 +284,36 @@ def test_runtime_context_flags_stale_aion_outcome_feedback(tmp_path: Path, monke
     assert afb.get("active") is True
     assert afb.get("stale") is True
     assert afb.get("source") == "shadow_trades"
+    assert afb.get("source_selected") == "shadow_trades"
+    assert afb.get("source_preference") == "auto"
     assert "aion_outcome_stale" in ctx["risk_flags"]
     assert "aion_outcome_alert" not in ctx["risk_flags"]
+
+
+def test_runtime_context_carries_aion_feedback_source_preference(tmp_path: Path, monkeypatch):
+    shadow = tmp_path / "shadow_trades.csv"
+    shadow.write_text(
+        "\n".join(
+            [
+                "timestamp,symbol,side,pnl",
+                "2026-02-16 10:00:00,AAPL,EXIT_SELL,3.0",
+                "2026-02-16 10:05:00,MSFT,EXIT_BUY,2.0",
+                "2026-02-16 10:10:00,NVDA,EXIT_SELL,-1.0",
+                "2026-02-16 10:15:00,TSLA,EXIT_BUY,1.0",
+                "2026-02-16 10:20:00,AMZN,EXIT_SELL,2.5",
+                "2026-02-16 10:25:00,META,EXIT_BUY,-0.5",
+                "2026-02-16 10:30:00,GOOG,EXIT_SELL,1.2",
+                "2026-02-16 10:35:00,AMD,EXIT_BUY,0.7",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("Q_AION_SHADOW_TRADES", str(shadow))
+    monkeypatch.setenv("Q_AION_FEEDBACK_SOURCE", "shadow")
+    monkeypatch.setenv("Q_AION_FEEDBACK_MIN_TRADES", "8")
+
+    ctx = ex._runtime_context(tmp_path)
+    afb = ctx.get("aion_feedback", {})
+    assert afb.get("source") == "shadow_trades"
+    assert afb.get("source_selected") == "shadow_trades"
+    assert afb.get("source_preference") == "shadow"
