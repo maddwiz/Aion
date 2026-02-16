@@ -292,9 +292,17 @@ def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
     if not isinstance(ext, dict) or bool(ext.get("ok", True)):
         return []
     tips = []
+    seen: set[str] = set()
+
+    def add_tip(msg: str):
+        key = str(msg).strip().lower()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        tips.append(msg)
     details = ext.get("details", {}) if isinstance(ext.get("details"), dict) else {}
     if not details.get("exists", False):
-        tips.append(f"External overlay missing. Generate it with Q pipeline and ensure path exists: {overlay_path}")
+        add_tip(f"External overlay missing. Generate it with Q pipeline and ensure path exists: {overlay_path}")
     age_h = details.get("age_hours", None)
     max_age_h = details.get("max_age_hours", None)
     try:
@@ -304,24 +312,64 @@ def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
         age_h = None
         max_age_h = None
     if age_h is not None and max_age_h is not None and age_h > max_age_h:
-        tips.append(
+        add_tip(
             "External overlay is stale. Re-run Q export (`python tools/run_all_in_one_plus.py`) "
             "or lower AION_EXT_SIGNAL_MAX_AGE_HOURS if intentionally slower."
         )
     if bool(details.get("degraded_safe_mode", False)):
-        tips.append("Q overlay is in degraded safe mode. Check Q health alerts and resolve upstream gating conditions.")
+        add_tip("Q overlay is in degraded safe mode. Check Q health alerts and resolve upstream gating conditions.")
     if not bool(details.get("quality_gate_ok", True)):
-        tips.append("Q quality gate is not OK. Review `runs_plus/health_alerts.json` and `runs_plus/system_health.json` in Q.")
+        add_tip("Q quality gate is not OK. Review `runs_plus/health_alerts.json` and `runs_plus/system_health.json` in Q.")
     if not bool(details.get("runtime_context_present", True)):
-        tips.append("Overlay runtime_context missing. Ensure Q exporter is updated and writing runtime_context in q_signal_overlay.json.")
+        add_tip("Overlay runtime_context missing. Ensure Q exporter is updated and writing runtime_context in q_signal_overlay.json.")
     risk_flags = details.get("risk_flags", [])
     if not isinstance(risk_flags, list):
         risk_flags = []
     flags = [str(x).strip().lower() for x in risk_flags if str(x).strip()]
     if "fracture_alert" in flags:
-        tips.append("Q regime fracture ALERT is active. Keep AION in defensive mode and reduce max_open_positions until fracture score normalizes.")
+        add_tip("Q regime fracture ALERT is active. Keep AION in defensive mode and reduce max_open_positions until fracture score normalizes.")
     elif "fracture_warn" in flags:
-        tips.append("Q regime fracture WARN is active. Consider lower risk-per-trade and tighter concurrency until conditions stabilize.")
+        add_tip("Q regime fracture WARN is active. Consider lower risk-per-trade and tighter concurrency until conditions stabilize.")
+    if "drift_alert" in flags:
+        add_tip("Q drift ALERT is active. Re-run drift diagnostics and reduce AION risk/leverage until drift falls back below alert.")
+    elif "drift_warn" in flags:
+        add_tip("Q drift WARN is active. Tighten position sizing and monitor drift trend before scaling risk.")
+    if "exec_risk_hard" in flags:
+        add_tip("Execution-risk HARD mode is active. Lower trade frequency and confirm slippage/spread conditions before new entries.")
+    elif "exec_risk_tight" in flags:
+        add_tip("Execution-risk TIGHT mode is active. Temporarily cap turnover and verify route/liquidity quality.")
+    if "nested_leakage_alert" in flags:
+        add_tip("Nested-WF leakage ALERT is active. Rebuild nested walk-forward artifacts before trusting aggressive overlays.")
+    elif "nested_leakage_warn" in flags:
+        add_tip("Nested-WF leakage WARN is active. Verify fold utilization and purge/embargo settings in Q.")
+    if "hive_stress_alert" in flags:
+        add_tip("Hive stress ALERT is active. Re-run cross-hive arbitration/regime switch and hold defensive sizing.")
+    elif "hive_stress_warn" in flags:
+        add_tip("Hive stress WARN is active. Reduce concentration and check cross-hive disagreement metrics.")
+    if "hive_crowding_alert" in flags:
+        add_tip("Hive crowding ALERT is active. Inspect `runs_plus/hive_crowding_penalty.csv` and reduce correlated hive exposure.")
+    elif "hive_crowding_warn" in flags:
+        add_tip("Hive crowding WARN is active. Tighten concentration caps and monitor crowding trend.")
+    if "hive_entropy_alert" in flags:
+        add_tip("Hive entropy ALERT is active. Re-run `q/tools/run_cross_hive.py` with stronger diversification pressure.")
+    elif "hive_entropy_warn" in flags:
+        add_tip("Hive entropy WARN is active. Review entropy schedule and regime allocations before restoring risk.")
+    if "heartbeat_alert" in flags:
+        add_tip("Heartbeat ALERT is active. Treat volatility metabolism as stressed and keep AION in defensive mode.")
+    elif "heartbeat_warn" in flags:
+        add_tip("Heartbeat WARN is active. Trim risk and monitor heartbeat stress trajectory.")
+    if "council_divergence_alert" in flags:
+        add_tip("Council divergence ALERT is active. Down-weight conflicting councils and require stronger confirmation.")
+    elif "council_divergence_warn" in flags:
+        add_tip("Council divergence WARN is active. Tighten entry thresholds until council consensus improves.")
+    if "memory_feedback_alert" in flags:
+        add_tip("NovaSpine memory feedback ALERT is active. Validate memory backend health and recompute context/hive feedback.")
+    elif "memory_feedback_warn" in flags:
+        add_tip("NovaSpine memory feedback WARN is active. Check recall quality and monitor feedback risk scale.")
+    if "aion_outcome_alert" in flags:
+        add_tip("AION outcome feedback ALERT is active. Inspect recent closed-trade quality and recalibrate Q->AION outcome feedback.")
+    elif "aion_outcome_warn" in flags:
+        add_tip("AION outcome feedback WARN is active. Monitor hit-rate/profit-factor drift and keep reduced risk until recovery.")
     return tips
 
 

@@ -110,6 +110,35 @@ def test_overlay_remediation_provides_actionable_tips(tmp_path: Path):
     assert "fracture" in joined
 
 
+def test_overlay_remediation_includes_hive_and_outcome_guidance(tmp_path: Path):
+    checks = [
+        {
+            "name": "external_overlay",
+            "ok": False,
+            "details": {
+                "exists": True,
+                "age_hours": 2.0,
+                "max_age_hours": 12.0,
+                "degraded_safe_mode": False,
+                "quality_gate_ok": True,
+                "runtime_context_present": True,
+                "risk_flags": [
+                    "hive_crowding_alert",
+                    "hive_entropy_warn",
+                    "aion_outcome_alert",
+                    "memory_feedback_warn",
+                ],
+            },
+        }
+    ]
+    tips = _overlay_remediation(checks, tmp_path / "q_signal_overlay.json")
+    joined = " | ".join(tips).lower()
+    assert "crowding" in joined
+    assert "entropy" in joined
+    assert "outcome feedback" in joined
+    assert "memory feedback" in joined
+
+
 def test_check_external_overlay_prefers_payload_timestamp_over_mtime(tmp_path: Path):
     p = tmp_path / "overlay.json"
     fresh = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
