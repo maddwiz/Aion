@@ -226,3 +226,27 @@ def test_runtime_decision_summary_memory_outbox_backlog_adds_targeted_action():
     assert out["throttle_state"] in {"warn", "alert"}
     assert "memory_outbox_warn" in out["throttle_reasons"]
     assert any(a.get("id") == "memory_outbox_replay" for a in out["recommended_actions"])
+
+
+def test_runtime_decision_ignores_memory_outbox_backlog_in_local_only_mode():
+    out = runtime_decision_summary(
+        runtime_controls={
+            "overlay_block_new_entries": False,
+            "policy_block_new_entries": False,
+            "external_position_risk_scale": 1.0,
+            "external_runtime_scale": 1.0,
+            "exec_governor_state": "ok",
+            "memory_feedback_status": "neutral",
+            "memory_feedback_reasons": ["memory_local_only"],
+            "memory_replay_enabled": True,
+            "memory_replay_last_ok": True,
+            "memory_replay_remaining_files": 25,
+            "memory_replay_queued_files": 25,
+            "memory_outbox_warn_files": 5,
+            "memory_outbox_alert_files": 20,
+        },
+        external_overlay_runtime={"stale": False},
+        external_overlay_risk_flags=[],
+    )
+    assert "memory_outbox_warn" not in out["throttle_reasons"]
+    assert "memory_outbox_alert" not in out["throttle_reasons"]

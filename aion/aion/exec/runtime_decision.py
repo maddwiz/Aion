@@ -359,13 +359,18 @@ def runtime_decision_summary(
     mem_replay_failed = _to_float(rc.get("memory_replay_last_failed"), 0.0) or 0.0
     mem_replay_remaining = _to_float(rc.get("memory_replay_remaining_files"), None)
     mem_replay_queued = _to_float(rc.get("memory_replay_queued_files"), None)
+    mem_feedback_reasons = rc.get("memory_feedback_reasons", [])
+    if not isinstance(mem_feedback_reasons, list):
+        mem_feedback_reasons = []
+    mem_feedback_reasons_norm = [str(x).strip().lower() for x in mem_feedback_reasons if str(x).strip()]
+    memory_local_only = "memory_local_only" in mem_feedback_reasons_norm
     outbox_warn_n = max(1, int((_to_float(rc.get("memory_outbox_warn_files"), 5.0) or 5.0)))
     outbox_alert_n = max(outbox_warn_n + 1, int((_to_float(rc.get("memory_outbox_alert_files"), 20.0) or 20.0)))
     outbox_backlog = max(
         int(mem_replay_remaining) if mem_replay_remaining is not None else 0,
         int(mem_replay_queued) if mem_replay_queued is not None else 0,
     )
-    if mem_replay_enabled:
+    if mem_replay_enabled and not memory_local_only:
         if mem_replay_failed > 0:
             score += 2
             throttle_reasons.append("memory_outbox_alert")
