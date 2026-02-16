@@ -394,6 +394,61 @@ def adaptive_arb_schedules(base_alpha, base_inertia, pivot_stab):
     }
     return alpha_t, inertia_t, diag
 
+
+def adaptive_entropy_schedules(base_target, base_strength, crowd_tbl, pivot_stab):
+    """
+    Build time-varying entropy controls.
+    High crowding/fracture -> higher entropy target + stronger diversification pull.
+    """
+    T = int(pivot_stab.shape[0])
+    if T <= 0:
+        return np.asarray([], float), np.asarray([], float), {}
+
+    crowd = np.zeros(T, float)
+    if isinstance(crowd_tbl, pd.DataFrame) and len(crowd_tbl):
+        c = crowd_tbl.mean(axis=1).values.astype(float)
+        c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
+        L = min(T, len(c))
+        crowd[:L] = np.clip(c[:L], 0.0, 1.0)
+
+    # Stability dispersion: when this is high, specialization signal is stronger.
+    disp = pivot_stab.std(axis=1).values.astype(float)
+    disp = np.nan_to_num(disp, nan=0.0, posinf=0.0, neginf=0.0)
+    p90d = float(np.percentile(disp, 90)) if len(disp) else 0.0
+    disp = np.clip(disp / (p90d + 1e-9), 0.0, 1.0)
+
+    frac = np.zeros(T, float)
+    fs = _load_named_csv_series(RUNS / "regime_fracture_signal.csv", "regime_fracture_score")
+    if fs is not None and len(fs):
+        L = min(T, len(fs))
+        frac[:L] = np.clip(np.asarray(fs[:L], float), 0.0, 1.0)
+
+    et = float(np.clip(base_target, 0.0, 1.0))
+    es = float(np.clip(base_strength, 0.0, 1.0))
+    target_t = et + 0.18 * crowd + 0.10 * frac - 0.08 * disp
+    strength_t = es + 0.55 * crowd + 0.20 * frac - 0.18 * disp
+
+    # Emergency diversification in crowded fractured regimes.
+    hot = (crowd >= 0.58) & (frac >= 0.32)
+    target_t = np.where(hot, target_t + 0.06, target_t)
+    strength_t = np.where(hot, strength_t + 0.08, strength_t)
+
+    target_t = np.clip(target_t, 0.45, 0.92)
+    strength_t = np.clip(strength_t, 0.05, 1.00)
+    diag = {
+        "crowding_mean": float(np.mean(crowd)),
+        "crowding_max": float(np.max(crowd)),
+        "fracture_mean": float(np.mean(frac)),
+        "dispersion_mean": float(np.mean(disp)),
+        "entropy_target_mean": float(np.mean(target_t)),
+        "entropy_target_min": float(np.min(target_t)),
+        "entropy_target_max": float(np.max(target_t)),
+        "entropy_strength_mean": float(np.mean(strength_t)),
+        "entropy_strength_min": float(np.min(strength_t)),
+        "entropy_strength_max": float(np.max(strength_t)),
+    }
+    return target_t, strength_t, diag
+
 if __name__ == "__main__":
     p = RUNS / "hive_signals.csv"
     if not p.exists():
@@ -523,9 +578,24 @@ if __name__ == "__main__":
 
     if adaptive:
         alpha_sched, inertia_sched, adaptive_diag = adaptive_arb_schedules(alpha, inertia, pivot_stab)
+        ent_target_sched, ent_strength_sched, ent_diag = adaptive_entropy_schedules(
+            entropy_target, entropy_strength, crowd_tbl, pivot_stab
+        )
     else:
         alpha_sched, inertia_sched = alpha, inertia
+        ent_target_sched, ent_strength_sched = entropy_target, entropy_strength
         adaptive_diag = {"enabled": False}
+        ent_diag = {"enabled": False}
+
+    if adaptive and isinstance(ent_target_sched, np.ndarray) and len(ent_target_sched) and len(pivot_sig.index) == len(ent_target_sched):
+        pd.DataFrame(
+            {
+                "DATE": pd.DatetimeIndex(pivot_sig.index),
+                "entropy_target": np.asarray(ent_target_sched, float),
+                "entropy_strength": np.asarray(ent_strength_sched, float),
+                "crowding_mean": np.asarray(crowd_tbl.mean(axis=1).values if len(crowd_tbl) else np.zeros(len(pivot_sig.index)), float),
+            }
+        ).to_csv(RUNS / "hive_entropy_schedule.csv", index=False)
 
     names, W = arb_weights(
         scores,
@@ -537,8 +607,8 @@ if __name__ == "__main__":
         inertia=inertia_sched,
         max_weight=max_w,
         min_weight=min_w,
-        entropy_target=entropy_target,
-        entropy_strength=entropy_strength,
+        entropy_target=ent_target_sched,
+        entropy_strength=ent_strength_sched,
     )
     out = pd.DataFrame(W, index=pivot_sig.index, columns=names)
     if adaptive and len(out) == len(alpha_sched):
@@ -560,10 +630,12 @@ if __name__ == "__main__":
         "inertia_base": inertia,
         "adaptive_enabled": bool(adaptive),
         "adaptive_diagnostics": adaptive_diag,
+        "entropy_adaptive_diagnostics": ent_diag,
         "max_weight": max_w,
         "min_weight": min_w,
         "entropy_target": entropy_target,
         "entropy_strength": entropy_strength,
+        "entropy_schedule_file": str(RUNS / "hive_entropy_schedule.csv") if adaptive else None,
         "mean_entropy_norm": ent,
         "mean_turnover": turn,
         "quality_priors": {k: float(v) for k, v in priors.items()},

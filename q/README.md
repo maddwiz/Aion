@@ -124,6 +124,7 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/hive_crowding_penalty.csv`
+- `runs_plus/hive_entropy_schedule.csv`
 - `runs_plus/final_governor_trace.csv`
 - `runs_plus/execution_constraints_info.json`
 - `runs_plus/novaspine_sync_status.json`

@@ -80,6 +80,27 @@ def test_arb_weights_entropy_control_reduces_concentration():
     assert hhi_div < hhi_base
 
 
+def test_arb_weights_accepts_time_varying_entropy_controls():
+    T = 120
+    x = np.linspace(0.0, 9.0, T)
+    scores = {
+        "A": 1.4 * np.sin(x),
+        "B": 1.2 * np.cos(1.1 * x),
+        "C": -1.1 * np.sin(0.9 * x + 0.2),
+    }
+    et_lo = np.full(T, 0.50, dtype=float)
+    es_lo = np.full(T, 0.10, dtype=float)
+    et_hi = np.linspace(0.55, 0.85, T)
+    es_hi = np.linspace(0.20, 0.95, T)
+
+    _, w_lo = arb_weights(scores, alpha=3.8, inertia=0.0, entropy_target=et_lo, entropy_strength=es_lo)
+    _, w_hi = arb_weights(scores, alpha=3.8, inertia=0.0, entropy_target=et_hi, entropy_strength=es_hi)
+
+    hhi_lo = float(np.mean(np.sum(w_lo * w_lo, axis=1)))
+    hhi_hi = float(np.mean(np.sum(w_hi * w_hi, axis=1)))
+    assert hhi_hi < hhi_lo
+
+
 def test_arb_weights_downside_penalty_reduces_weight():
     T = 160
     scores = {

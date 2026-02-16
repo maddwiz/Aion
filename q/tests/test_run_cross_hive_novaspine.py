@@ -198,3 +198,22 @@ def test_dynamic_crowding_penalties_penalize_more_correlated_hive(tmp_path):
     assert float(pen["B"].mean()) > float(pen["C"].mean())
     assert float(pen.min().min()) >= 0.0 - 1e-9
     assert float(pen.max().max()) <= 1.0 + 1e-9
+
+
+def test_adaptive_entropy_schedules_raise_targets_with_crowding(tmp_path):
+    idx = pd.date_range("2025-01-01", periods=5, freq="D")
+    stab = pd.DataFrame({"EQ": [0.9] * 5, "FX": [0.9] * 5}, index=idx)
+    crowd = pd.DataFrame({"EQ": [0.0, 0.2, 0.4, 0.7, 0.9], "FX": [0.0, 0.2, 0.4, 0.7, 0.9]}, index=idx)
+
+    old_runs = rch.RUNS
+    try:
+        rch.RUNS = tmp_path
+        target_t, strength_t, diag = rch.adaptive_entropy_schedules(0.60, 0.25, crowd, stab)
+    finally:
+        rch.RUNS = old_runs
+
+    assert len(target_t) == 5
+    assert len(strength_t) == 5
+    assert target_t[-1] > target_t[0]
+    assert strength_t[-1] > strength_t[0]
+    assert diag["crowding_mean"] > 0.0
