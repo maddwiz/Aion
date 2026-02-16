@@ -30,6 +30,7 @@ PYTHON = str(Path(sys.executable))
 
 TRACE_GOVS = [
     "turnover_governor",
+    "meta_execution_gate",
     "council_gate",
     "meta_mix_leverage",
     "meta_mix_reliability",

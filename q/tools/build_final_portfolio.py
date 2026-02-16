@@ -23,6 +23,7 @@ from qmods.guardrails_bundle import apply_turnover_budget_governor
 
 TRACE_STEPS = [
     "turnover_governor",
+    "meta_execution_gate",
     "council_gate",
     "meta_mix_leverage",
     "meta_mix_reliability",
@@ -314,6 +315,13 @@ if __name__ == "__main__":
         0.0,
         2.0,
     )
+    meta_execution_gate_strength = _env_or_profile_float(
+        "Q_META_EXECUTION_GATE_STRENGTH",
+        "meta_execution_gate_strength",
+        1.0,
+        0.0,
+        2.0,
+    )
     meta_reliability_strength = _env_or_profile_float(
         "Q_META_RELIABILITY_STRENGTH",
         "meta_reliability_strength",
@@ -374,7 +382,17 @@ if __name__ == "__main__":
                 steps.append(f"turnover_source={auto_tag}")
                 _trace_put("turnover_governor", auto_scale)
 
-    # 6) Council disagreement gate (scalar per t) → scale exposure
+    # 6) Meta execution gate (trade selectivity multiplier).
+    meg = load_series("runs_plus/meta_execution_gate.csv")
+    if _gov_enabled("meta_execution_gate") and meg is not None:
+        L = min(len(meg), W.shape[0])
+        mg_raw = np.clip(meg[:L], 0.0, 1.5)
+        mg = _apply_governor_strength(mg_raw, meta_execution_gate_strength, lo=0.0, hi=2.0).reshape(-1, 1)
+        W[:L] = W[:L] * mg
+        steps.append("meta_execution_gate")
+        _trace_put("meta_execution_gate", mg.ravel())
+
+    # 7) Council disagreement gate (scalar per t) → scale exposure
     gate = load_series("runs_plus/disagreement_gate.csv")
     if _gov_enabled("council_gate") and gate is not None:
         L = min(len(gate), W.shape[0])
@@ -619,6 +637,7 @@ if __name__ == "__main__":
                 "governor_params_applied": {
                     "runtime_total_floor": _runtime_total_floor_default(),
                     "shock_alpha": shock_alpha,
+                    "meta_execution_gate_strength": meta_execution_gate_strength,
                     "council_gate_strength": council_gate_strength,
                     "meta_mix_leverage_strength": meta_mix_leverage_strength,
                     "meta_reliability_strength": meta_reliability_strength,

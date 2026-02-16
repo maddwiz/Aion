@@ -90,13 +90,13 @@ def _objective(cur: dict, base: dict) -> tuple[float, dict]:
     hit_delta = float(cur["hit_rate"]) - float(base["hit_rate"])
     turn_ratio = float(cur["turnover_mean"]) / max(1e-9, float(base["turnover_mean"]))
 
-    # Soft penalties, then hard veto for clearly riskier candidates.
-    penalty = 0.04 * max(0.0, dd_ratio - 1.0)
-    penalty += 0.01 * max(0.0, -hit_delta)
-    penalty += 0.01 * max(0.0, turn_ratio - 1.8)
+    # Sharpe-first objective with gentle risk penalties and hard vetoes.
+    penalty = 0.012 * max(0.0, dd_ratio - 1.0)
+    penalty += 0.006 * max(0.0, turn_ratio - 2.0)
+    penalty += 0.010 * max(0.0, -hit_delta)
     score = float(cur["sharpe"]) - penalty
 
-    veto = dd_ratio > 1.6 or hit_delta < -0.02
+    veto = dd_ratio > 2.0 or cur_dd > 0.22 or hit_delta < -0.03
     if veto:
         score -= 1.0
     detail = {
@@ -113,6 +113,7 @@ def _profile_from_row(row: dict) -> dict:
     return {
         "runtime_total_floor": float(row["runtime_total_floor"]),
         "shock_alpha": float(row["shock_alpha"]),
+        "meta_execution_gate_strength": float(row.get("meta_execution_gate_strength", 1.0)),
         "council_gate_strength": float(row.get("council_gate_strength", 1.0)),
         "meta_mix_leverage_strength": float(row.get("meta_mix_leverage_strength", 1.0)),
         "meta_reliability_strength": float(row.get("meta_reliability_strength", 1.0)),
@@ -137,6 +138,7 @@ def _csv_write(rows: list[dict], outp: Path) -> None:
         "stage",
         "runtime_total_floor",
         "shock_alpha",
+        "meta_execution_gate_strength",
         "council_gate_strength",
         "meta_mix_leverage_strength",
         "meta_reliability_strength",
@@ -169,6 +171,7 @@ def _env_from_params(params: dict) -> dict[str, str]:
     return {
         "Q_RUNTIME_TOTAL_FLOOR": str(params["runtime_total_floor"]),
         "Q_SHOCK_ALPHA": str(params["shock_alpha"]),
+        "Q_META_EXECUTION_GATE_STRENGTH": str(params.get("meta_execution_gate_strength", 1.0)),
         "Q_COUNCIL_GATE_STRENGTH": str(params.get("council_gate_strength", 1.0)),
         "Q_META_MIX_LEVERAGE_STRENGTH": str(params.get("meta_mix_leverage_strength", 1.0)),
         "Q_META_RELIABILITY_STRENGTH": str(params.get("meta_reliability_strength", 1.0)),
@@ -203,6 +206,7 @@ def main() -> int:
         {"use_concentration_governor": 1, "concentration_top1_cap": 0.18, "concentration_top3_cap": 0.42, "concentration_max_hhi": 0.14},
         {"use_concentration_governor": 0, "concentration_top1_cap": 0.18, "concentration_top3_cap": 0.42, "concentration_max_hhi": 0.14},
     ]
+    meta_execution_gate_strengths = [0.0, 0.5, 1.0]
     council_gate_strengths = [0.85, 1.00]
     meta_mix_leverage_strengths = [0.90, 1.00]
     meta_reliability_strengths = [0.90, 1.00]
@@ -223,6 +227,7 @@ def main() -> int:
                 "stage": "core",
                 "runtime_total_floor": float(floor),
                 "shock_alpha": float(shock),
+                "meta_execution_gate_strength": 1.0,
                 "council_gate_strength": 1.0,
                 "meta_mix_leverage_strength": 1.0,
                 "meta_reliability_strength": 1.0,
@@ -244,7 +249,8 @@ def main() -> int:
 
         # Stage 2: local governor-strength search around the best core config.
         core_params = dict(best_row)
-        for cg, ml, mr, gg, qg in itertools.product(
+        for meg, cg, ml, mr, gg, qg in itertools.product(
+            meta_execution_gate_strengths,
             council_gate_strengths,
             meta_mix_leverage_strengths,
             meta_reliability_strengths,
@@ -255,6 +261,7 @@ def main() -> int:
                 "stage": "strengths",
                 "runtime_total_floor": float(core_params["runtime_total_floor"]),
                 "shock_alpha": float(core_params["shock_alpha"]),
+                "meta_execution_gate_strength": float(meg),
                 "council_gate_strength": float(cg),
                 "meta_mix_leverage_strength": float(ml),
                 "meta_reliability_strength": float(mr),
@@ -275,6 +282,7 @@ def main() -> int:
             cur = dict(best_row)
             specs = [
                 ("shock_alpha", 0.05, 0.0, 1.0),
+                ("meta_execution_gate_strength", 0.05, 0.0, 1.4),
                 ("council_gate_strength", 0.05, 0.6, 1.4),
                 ("meta_mix_leverage_strength", 0.05, 0.7, 1.3),
                 ("meta_reliability_strength", 0.05, 0.7, 1.3),
@@ -299,6 +307,7 @@ def main() -> int:
                             "stage": "refine",
                             "runtime_total_floor": float(cur["runtime_total_floor"]),
                             "shock_alpha": float(cur["shock_alpha"]),
+                            "meta_execution_gate_strength": float(cur["meta_execution_gate_strength"]),
                             "council_gate_strength": float(cur["council_gate_strength"]),
                             "meta_mix_leverage_strength": float(cur["meta_mix_leverage_strength"]),
                             "meta_reliability_strength": float(cur["meta_reliability_strength"]),
@@ -331,6 +340,7 @@ def main() -> int:
                 "runtime_total_floor": floors,
                 "shock_alpha": shocks,
                 "concentration_presets": conc_presets,
+                "meta_execution_gate_strength": meta_execution_gate_strengths,
                 "council_gate_strength": council_gate_strengths,
                 "meta_mix_leverage_strength": meta_mix_leverage_strengths,
                 "meta_reliability_strength": meta_reliability_strengths,

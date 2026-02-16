@@ -24,6 +24,7 @@ def test_profile_from_row_casts_types():
     row = {
         "runtime_total_floor": 0.1,
         "shock_alpha": 0.35,
+        "meta_execution_gate_strength": 0.95,
         "council_gate_strength": 0.9,
         "meta_mix_leverage_strength": 1.15,
         "meta_reliability_strength": 1.1,
@@ -37,6 +38,7 @@ def test_profile_from_row_casts_types():
     out = rps._profile_from_row(row)
     assert out["runtime_total_floor"] == 0.1
     assert out["shock_alpha"] == 0.35
+    assert out["meta_execution_gate_strength"] == 0.95
     assert out["council_gate_strength"] == 0.9
     assert out["meta_mix_leverage_strength"] == 1.15
     assert out["meta_reliability_strength"] == 1.1

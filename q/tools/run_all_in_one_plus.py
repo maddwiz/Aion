@@ -251,6 +251,9 @@ if __name__ == "__main__":
     # Quality governor from nested/hive/council/system diagnostics
     ok, rc = run_script("tools/run_quality_governor.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_quality_governor.py", "code": rc})
+    # Meta-label execution gate for selective exposure scaling.
+    ok, rc = run_script("tools/run_meta_execution_gate.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_meta_execution_gate.py", "code": rc})
     # Assemble final portfolio weights from available layers
     ok, rc = run_script("tools/build_final_portfolio.py")
     if not ok and rc is not None: failures.append({"step": "tools/build_final_portfolio.py", "code": rc})
