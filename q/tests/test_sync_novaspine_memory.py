@@ -120,6 +120,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     assert af.get("active") is True
     assert af.get("status") == "warn"
     assert af.get("source") == "overlay"
+    assert af.get("source_selected") == "overlay"
+    assert af.get("source_preference") == "auto"
     assert int(af.get("closed_trades")) == 16
     assert float(af.get("risk_scale")) > 0.0
     assert float(af.get("age_hours")) >= 0.0
@@ -170,6 +172,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     af2 = mfb.get("payload", {}).get("aion_feedback", {})
     assert af2.get("status") == "warn"
     assert af2.get("source") == "overlay"
+    assert af2.get("source_selected") == "overlay"
+    assert af2.get("source_preference") == "auto"
     assert int(af2.get("closed_trades")) == 16
     assert float(af2.get("age_hours")) >= 0.0
     assert af2.get("last_closed_ts") == "2026-02-16T15:35:00Z"
@@ -207,6 +211,8 @@ def test_build_events_falls_back_to_shadow_trades_aion_feedback(tmp_path, monkey
     rc = [e for e in events if e.get("event_type") == "governance.risk_controls"][0]
     af = rc.get("payload", {}).get("aion_feedback", {})
     assert af.get("source") == "shadow_trades"
+    assert af.get("source_selected") == "shadow_trades"
+    assert af.get("source_preference") == "auto"
     assert af.get("active") is True
     assert int(af.get("closed_trades")) == 4
     assert float(af.get("risk_scale")) < 1.0
@@ -251,6 +257,8 @@ def test_build_events_prefers_fresh_shadow_when_overlay_feedback_is_stale(tmp_pa
     rc = [e for e in events if e.get("event_type") == "governance.risk_controls"][0]
     af = rc.get("payload", {}).get("aion_feedback", {})
     assert af.get("source") == "shadow_trades"
+    assert af.get("source_selected") == "shadow_trades"
+    assert af.get("source_preference") == "auto"
     assert int(af.get("closed_trades")) == 4
 
 
@@ -293,4 +301,6 @@ def test_build_events_honors_shadow_source_preference(tmp_path, monkeypatch):
     rc = [e for e in events if e.get("event_type") == "governance.risk_controls"][0]
     af = rc.get("payload", {}).get("aion_feedback", {})
     assert af.get("source") == "shadow_trades"
+    assert af.get("source_selected") == "shadow_trades"
+    assert af.get("source_preference") == "shadow"
     assert af.get("status") == "alert"

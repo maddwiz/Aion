@@ -110,11 +110,37 @@ def _safe_float(x, default: float = 0.0) -> float:
         return float(default)
 
 
+def _normalize_source_tag(raw: str | None, default: str = "unknown") -> str:
+    tag = str(raw or "").strip().lower() or str(default)
+    if tag == "shadow":
+        return "shadow_trades"
+    return tag
+
+
+def _normalize_source_preference(raw: str | None) -> str:
+    tag = str(raw or "").strip().lower() or "auto"
+    if tag in {"auto", "overlay", "shadow"}:
+        return tag
+    return "auto"
+
+
 def _summarize_aion_feedback(payload: dict | None) -> dict:
     aion_feedback = payload if isinstance(payload, dict) else {}
+    src = _normalize_source_tag(
+        str(aion_feedback.get("source", aion_feedback.get("source_selected", "unknown"))),
+        default="unknown",
+    )
+    src_selected = _normalize_source_tag(
+        str(aion_feedback.get("source_selected", src)),
+        default=src,
+    )
+    src_pref = _normalize_source_preference(aion_feedback.get("source_preference", "auto"))
     out = {
         "active": bool(aion_feedback.get("active", False)),
         "status": str(aion_feedback.get("status", "unknown")).strip().lower() or "unknown",
+        "source": src,
+        "source_selected": src_selected,
+        "source_preference": src_pref,
         "risk_scale": _safe_float(aion_feedback.get("risk_scale", 1.0), 1.0),
         "closed_trades": int(max(0, _safe_float(aion_feedback.get("closed_trades", 0), 0))),
         "hit_rate": _safe_float(aion_feedback.get("hit_rate", np.nan), np.nan),
@@ -211,7 +237,10 @@ def build_events():
         prefer_overlay_when_fresh=True,
     )
     aion_feedback_summary = _summarize_aion_feedback(selected_feedback)
-    aion_feedback_summary["source"] = selected_source
+    aion_feedback_summary["source_selected"] = _normalize_source_tag(selected_source, default="unknown")
+    aion_feedback_summary["source_preference"] = _normalize_source_preference(aion_source_pref)
+    if str(aion_feedback_summary.get("source", "")).strip() in {"", "unknown"}:
+        aion_feedback_summary["source"] = str(aion_feedback_summary["source_selected"])
     cross_ad = cross.get("adaptive_diagnostics", {}) if isinstance(cross, dict) and isinstance(cross.get("adaptive_diagnostics"), dict) else {}
     cross_dis = _safe_float(cross_ad.get("mean_disagreement", 0.0))
     cross_disp = _safe_float(cross_ad.get("mean_stability_dispersion", 0.0))
