@@ -156,6 +156,40 @@ def test_overlay_remediation_includes_hive_and_outcome_guidance(tmp_path: Path):
     assert "memory feedback" in joined
 
 
+def test_overlay_remediation_includes_memory_outbox_backlog_guidance(tmp_path: Path):
+    checks = [
+        {
+            "name": "external_overlay",
+            "ok": False,
+            "details": {
+                "exists": True,
+                "age_hours": 2.0,
+                "max_age_hours": 12.0,
+                "degraded_safe_mode": False,
+                "quality_gate_ok": True,
+                "runtime_context_present": True,
+                "risk_flags": [],
+            },
+        }
+    ]
+    rc = tmp_path / "runtime_controls.json"
+    _write(
+        rc,
+        {
+            "memory_replay_enabled": True,
+            "memory_replay_last_ok": True,
+            "memory_replay_remaining_files": 11,
+            "memory_replay_queued_files": 11,
+            "memory_outbox_warn_files": 5,
+            "memory_outbox_alert_files": 20,
+        },
+    )
+    tips = _overlay_remediation(checks, tmp_path / "q_signal_overlay.json", rc)
+    joined = " | ".join(tips).lower()
+    assert "outbox backlog" in joined
+    assert "warn" in joined
+
+
 def test_check_external_overlay_prefers_payload_timestamp_over_mtime(tmp_path: Path):
     p = tmp_path / "overlay.json"
     fresh = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

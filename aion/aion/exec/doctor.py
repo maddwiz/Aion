@@ -298,7 +298,7 @@ def _ib_remediation(checks: list[dict], host: str, ports: list[int], hosts: list
     return tips
 
 
-def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
+def _overlay_remediation(checks: list[dict], overlay_path: Path, runtime_controls_path: Path | None = None) -> list[str]:
     ext = next((c for c in checks if str(c.get("name", "")) == "external_overlay"), None)
     if not isinstance(ext, dict) or bool(ext.get("ok", True)):
         return []
@@ -391,6 +391,47 @@ def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
         add_tip("AION outcome feedback WARN is active. Monitor hit-rate/profit-factor drift and keep reduced risk until recovery.")
     if "aion_outcome_stale" in flags:
         add_tip("AION outcome feedback is stale. Refresh Q overlay and verify recent closed trades are being ingested before trusting outcome throttles.")
+
+    rc_path = runtime_controls_path if isinstance(runtime_controls_path, Path) else None
+    if isinstance(rc_path, Path) and rc_path.exists():
+        rc = {}
+        try:
+            loaded = json.loads(rc_path.read_text(encoding="utf-8"))
+            rc = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            rc = {}
+        if isinstance(rc, dict) and bool(rc.get("memory_replay_enabled", False)):
+            warn_n = max(1, int(rc.get("memory_outbox_warn_files", 5)))
+            alert_n = max(warn_n + 1, int(rc.get("memory_outbox_alert_files", 20)))
+            remaining = rc.get("memory_replay_remaining_files", None)
+            queued = rc.get("memory_replay_queued_files", None)
+            try:
+                rem_n = int(remaining) if remaining is not None else 0
+            except Exception:
+                rem_n = 0
+            try:
+                q_n = int(queued) if queued is not None else rem_n
+            except Exception:
+                q_n = rem_n
+            backlog = max(rem_n, q_n)
+            last_ok = rc.get("memory_replay_last_ok", None)
+            err = str(rc.get("memory_replay_last_error", "")).strip().lower()
+            failed = int(rc.get("memory_replay_last_failed", 0) or 0)
+
+            if failed > 0 or (last_ok is False and ("unreachable" in err or "health_status" in err)):
+                add_tip(
+                    "NovaSpine outbox replay is failing. Verify AION_MEMORY_NOVASPINE_URL/token and inspect "
+                    "/Users/desmondpottle/Documents/New project/aion/logs/novaspine_outbox_aion backlog."
+                )
+            elif backlog >= alert_n:
+                add_tip(
+                    f"NovaSpine outbox backlog ALERT ({backlog} files). Review replay health and clear "
+                    "/Users/desmondpottle/Documents/New project/aion/logs/novaspine_outbox_aion."
+                )
+            elif backlog >= warn_n:
+                add_tip(
+                    f"NovaSpine outbox backlog WARN ({backlog} files). Monitor memory replay and verify remaining_files drops."
+                )
     return tips
 
 
@@ -530,7 +571,7 @@ def main() -> int:
             "universe": str(cfg.UNIVERSE_DIR),
         },
         "remediation": _ib_remediation(checks, cfg.IB_HOST, ports, hosts)
-        + _overlay_remediation(checks, cfg.EXT_SIGNAL_FILE),
+        + _overlay_remediation(checks, cfg.EXT_SIGNAL_FILE, cfg.STATE_DIR / "runtime_controls.json"),
     }
 
     out = cfg.LOG_DIR / "doctor_report.json"
