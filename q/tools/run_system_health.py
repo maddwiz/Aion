@@ -527,6 +527,18 @@ if __name__ == "__main__":
     if issues:
         health_score = max(0.0, health_score - 10.0 * len(issues))
 
+    aion_summary = {
+        "source_preference": aion_source_pref,
+        "source": shape.get("aion_feedback_source", "unknown"),
+        "active": bool(shape.get("aion_feedback_active", False)),
+        "status": str(shape.get("aion_feedback_status", "unknown")),
+        "stale": bool(shape.get("aion_feedback_stale", False)),
+        "age_hours": shape.get("aion_feedback_age_hours", None),
+        "max_age_hours": shape.get("aion_feedback_max_age_hours", None),
+        "closed_trades": shape.get("aion_feedback_closed_trades", None),
+        "risk_scale": shape.get("aion_feedback_risk_scale", None),
+    }
+
     out = {
         "timestamp_utc": _now().isoformat(),
         "health_score": float(health_score),
@@ -534,6 +546,7 @@ if __name__ == "__main__":
         "required_total": int(required_total),
         "optional_ok": int(optional_ok),
         "optional_total": int(optional_total),
+        "aion_feedback": aion_summary,
         "checks": checks,
         "shape": shape,
         "issues": issues,
@@ -543,6 +556,9 @@ if __name__ == "__main__":
     html = (
         f"<p>Health score: <b>{health_score:.1f}</b> "
         f"(required {required_ok}/{required_total}, optional {optional_ok}/{optional_total})</p>"
+        f"<p>AION feedback: source={aion_summary['source']} "
+        f"(pref={aion_summary['source_preference']}), status={aion_summary['status']}, "
+        f"stale={aion_summary['stale']}, age_h={aion_summary['age_hours']}</p>"
         f"<p>Issues: {', '.join(issues) if issues else 'none'}</p>"
     )
     _append_card("System Health ✔", html)

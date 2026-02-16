@@ -522,6 +522,8 @@ if __name__ == "__main__":
         "backend": backend,
         "namespace": namespace,
         "novaspine_url": novaspine_url,
+        "aion_feedback_source_preference": aion_source_pref,
+        "aion_feedback_source_selected": selected_source,
         "events_count": int(len(events)),
         "namespaces": ns_counts,
         "event_types": type_counts,
@@ -546,6 +548,8 @@ if __name__ == "__main__":
             "backend": backend,
             "namespace": namespace,
             "novaspine_url": novaspine_url,
+            "aion_feedback_source_preference": aion_source_pref,
+            "aion_feedback_source_selected": selected_source,
             "published": int(res.published),
             "queued": int(res.queued),
             "failed": int(res.failed),
@@ -562,6 +566,8 @@ if __name__ == "__main__":
             "backend": backend,
             "namespace": namespace,
             "novaspine_url": novaspine_url,
+            "aion_feedback_source_preference": aion_source_pref,
+            "aion_feedback_source_selected": selected_source,
             "published": 0,
             "queued": int(len(events)),
             "failed": 0,
@@ -578,6 +584,8 @@ if __name__ == "__main__":
         "NovaSpine Bridge ✔",
         (
             f"<p>enabled={sync['enabled']}, backend={sync['backend']}, namespace={sync['namespace']}</p>"
+            f"<p>AION feedback source={sync['aion_feedback_source_selected']} "
+            f"(pref={sync['aion_feedback_source_preference']})</p>"
             f"<p>events={sync['events_count']}, published={sync['published']}, queued={sync['queued']}, failed={sync['failed']}</p>"
         ),
     )

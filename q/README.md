@@ -308,4 +308,9 @@ export Q_DRIFT_ALERT_L1=1.20
 export Q_DRIFT_ALERT_RATIO=3.0
 export Q_DRIFT_WARN_RATIO=1.8
 export Q_MAX_FRACTURE_SCORE=0.78
+# AION feedback source selector across quality/health/NovaSpine:
+# auto   -> prefer fresh source based on module policy
+# overlay-> force q_signal_overlay runtime_context feedback when available
+# shadow -> force direct AION shadow_trades feedback when available
+export Q_AION_FEEDBACK_SOURCE=auto
 ```

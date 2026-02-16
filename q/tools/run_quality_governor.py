@@ -822,6 +822,8 @@ if __name__ == "__main__":
         "quality_governor_max_abs_step": step_abs_max,
         "quality_governor_mean_abs_step": step_abs_mean,
         "quality_governor_max_step_cfg": max_step,
+        "aion_feedback_source_preference": str(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto")).strip().lower() or "auto",
+        "aion_feedback_selected_source": dict(aion_feedback_source),
         "length": int(T),
         "components": {
             "nested_wf": {"score": float(nested_q), "detail": nested_detail},
