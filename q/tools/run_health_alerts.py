@@ -103,6 +103,7 @@ def build_alert_payload(
     aion_feedback_closed_trades = None
     aion_feedback_hit_rate = None
     aion_feedback_profit_factor = None
+    shape = {}
     if isinstance(health, dict):
         shape = health.get("shape", {})
         if isinstance(shape, dict):
@@ -208,6 +209,30 @@ def build_alert_payload(
                     aion_feedback_profit_factor = float(af.get("profit_factor", np.nan))
                 except Exception:
                     aion_feedback_profit_factor = None
+
+    if (not aion_feedback_active) and isinstance(shape, dict):
+        try:
+            aion_feedback_active = bool(shape.get("aion_feedback_active", False))
+        except Exception:
+            aion_feedback_active = False
+        if aion_feedback_active:
+            aion_feedback_status = str(shape.get("aion_feedback_status", "unknown")).strip().lower() or "unknown"
+            try:
+                aion_feedback_risk_scale = float(shape.get("aion_feedback_risk_scale", np.nan))
+            except Exception:
+                aion_feedback_risk_scale = None
+            try:
+                aion_feedback_closed_trades = int(shape.get("aion_feedback_closed_trades", 0))
+            except Exception:
+                aion_feedback_closed_trades = None
+            try:
+                aion_feedback_hit_rate = float(shape.get("aion_feedback_hit_rate", np.nan))
+            except Exception:
+                aion_feedback_hit_rate = None
+            try:
+                aion_feedback_profit_factor = float(shape.get("aion_feedback_profit_factor", np.nan))
+            except Exception:
+                aion_feedback_profit_factor = None
 
     if aion_feedback_active:
         if aion_feedback_status in {"alert", "hard"}:
