@@ -382,8 +382,10 @@ def _aion_feedback_from_shadow_trades():
 
 
 def _load_aion_feedback():
+    source_pref = str(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto")).strip().lower() or "auto"
     overlay_path = RUNS / "q_signal_overlay.json"
     overlay = _load_json(overlay_path)
+    overlay_fb = None
     if isinstance(overlay, dict):
         rt = overlay.get("runtime_context", {})
         if isinstance(rt, dict):
@@ -395,8 +397,25 @@ def _load_aion_feedback():
                     for k in ["risk_scale", "closed_trades", "hit_rate", "profit_factor", "expectancy", "drawdown_norm"]
                 )
                 if active or has_metrics:
-                    return af, {"source": "overlay", "path": str(overlay_path)}
+                    overlay_fb = af
     fb = _aion_feedback_from_shadow_trades()
+    shadow_active = bool(isinstance(fb, dict) and fb.get("active", False))
+    if source_pref == "overlay":
+        if overlay_fb is not None:
+            return overlay_fb, {"source": "overlay", "path": str(overlay_path)}
+        return fb, {"source": "shadow_trades", "path": str(fb.get("path", ""))}
+    if source_pref == "shadow":
+        if shadow_active:
+            return fb, {"source": "shadow_trades", "path": str(fb.get("path", ""))}
+        if overlay_fb is not None:
+            return overlay_fb, {"source": "overlay", "path": str(overlay_path)}
+        return fb, {"source": "shadow_trades", "path": str(fb.get("path", ""))}
+
+    # auto mode: prefer direct shadow-trades ground truth when available.
+    if shadow_active:
+        return fb, {"source": "shadow_trades", "path": str(fb.get("path", ""))}
+    if overlay_fb is not None:
+        return overlay_fb, {"source": "overlay", "path": str(overlay_path)}
     return fb, {"source": "shadow_trades", "path": str(fb.get("path", ""))}
 
 

@@ -167,3 +167,42 @@ def test_load_aion_feedback_falls_back_to_shadow_trades(monkeypatch, tmp_path):
     assert int(fb["closed_trades"]) == 3
     assert "risk_scale" in fb
     assert "age_hours" in fb
+
+
+def test_load_aion_feedback_auto_prefers_shadow_over_overlay(monkeypatch, tmp_path):
+    monkeypatch.setattr(rqg, "RUNS", tmp_path)
+    shadow = tmp_path / "shadow_trades.csv"
+    pd.DataFrame(
+        {
+            "timestamp": ["2026-02-16 10:00:00", "2026-02-16 10:05:00"],
+            "side": ["EXIT_BUY", "EXIT_SELL"],
+            "pnl": [5.0, -1.0],
+        }
+    ).to_csv(shadow, index=False)
+    monkeypatch.setenv("Q_AION_SHADOW_TRADES", str(shadow))
+
+    overlay = tmp_path / "q_signal_overlay.json"
+    overlay.write_text(
+        '{"runtime_context":{"aion_feedback":{"active":true,"status":"warn","risk_scale":0.9,"closed_trades":20}}}'
+    )
+
+    fb, src = rqg._load_aion_feedback()
+    assert src["source"] == "shadow_trades"
+    assert int(fb["closed_trades"]) == 2
+
+
+def test_load_aion_feedback_source_override_overlay(monkeypatch, tmp_path):
+    monkeypatch.setattr(rqg, "RUNS", tmp_path)
+    shadow = tmp_path / "shadow_trades.csv"
+    pd.DataFrame({"timestamp": ["2026-02-16 10:00:00"], "side": ["EXIT_BUY"], "pnl": [2.0]}).to_csv(shadow, index=False)
+    monkeypatch.setenv("Q_AION_SHADOW_TRADES", str(shadow))
+    monkeypatch.setenv("Q_AION_FEEDBACK_SOURCE", "overlay")
+
+    overlay = tmp_path / "q_signal_overlay.json"
+    overlay.write_text(
+        '{"runtime_context":{"aion_feedback":{"active":true,"status":"ok","risk_scale":1.03,"closed_trades":12}}}'
+    )
+
+    fb, src = rqg._load_aion_feedback()
+    assert src["source"] == "overlay"
+    assert int(fb["closed_trades"]) == 12
