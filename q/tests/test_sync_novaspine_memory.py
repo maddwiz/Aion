@@ -91,8 +91,30 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     _write_json(tmp_path / "shock_mask_info.json", {"shock_days": 10, "shock_rate": 0.05, "params": {"z": 2.5}})
     _write_json(tmp_path / "regime_fracture_info.json", {"state": "fracture_warn", "latest_score": 0.76, "latest_governor": 0.84, "risk_flags": ["fracture_warn"]})
     _write_json(tmp_path / "pipeline_status.json", {"failed_count": 0})
-    _write_json(tmp_path / "novaspine_context.json", {"status": "ok", "context_resonance": 0.6, "context_boost": 1.03})
-    _write_json(tmp_path / "novaspine_hive_feedback.json", {"status": "ok", "global_boost": 1.02, "per_hive": {"EQ": {"boost": 1.04}}})
+    _write_json(
+        tmp_path / "novaspine_context.json",
+        {
+            "status": "ok",
+            "context_resonance": 0.6,
+            "context_boost_raw": 1.06,
+            "context_boost": 1.03,
+            "turnover_pressure": 0.41,
+            "turnover_dampener": 0.03,
+            "cross_hive_turnover": {"mean_turnover": 0.20, "max_turnover": 0.39, "rolling_turnover_max": 0.44},
+        },
+    )
+    _write_json(
+        tmp_path / "novaspine_hive_feedback.json",
+        {
+            "status": "ok",
+            "global_boost_raw": 1.04,
+            "global_boost": 1.02,
+            "turnover_pressure": 0.41,
+            "turnover_dampener": 0.02,
+            "cross_hive_turnover": {"mean_turnover": 0.20, "max_turnover": 0.39, "rolling_turnover_max": 0.44},
+            "per_hive": {"EQ": {"boost": 1.04}},
+        },
+    )
     _write_json(tmp_path / "hive_transparency.json", {"summary": {"hive_count": 2}})
     _write_json(tmp_path / "portfolio_drift_watch.json", {"drift": {"status": "ok", "latest_l1": 0.4, "mean_l1": 0.2, "p95_l1": 0.35}})
     np.savetxt(tmp_path / "final_governor_trace.csv", np.array([[1.0, 0.9], [1.0, 0.85]], float), delimiter=",")
@@ -180,6 +202,16 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     assert float(dch.get("stability", {}).get("max_turnover")) >= float(dch.get("stability", {}).get("mean_turnover"))
     assert float(dch.get("stability", {}).get("rolling_turnover_max")) >= float(dch.get("stability", {}).get("max_turnover"))
     mfb = [e for e in events if e.get("event_type") == "memory.feedback_state"][0]
+    nctx = mfb.get("payload", {}).get("novaspine_context", {})
+    assert float(nctx.get("context_boost_raw")) >= float(nctx.get("context_boost"))
+    assert float(nctx.get("turnover_pressure")) > 0.0
+    assert float(nctx.get("turnover_dampener")) > 0.0
+    assert float(nctx.get("cross_hive_turnover", {}).get("max_turnover")) > 0.0
+    nhf = mfb.get("payload", {}).get("novaspine_hive_feedback", {})
+    assert float(nhf.get("global_boost_raw")) >= float(nhf.get("global_boost"))
+    assert float(nhf.get("turnover_pressure")) > 0.0
+    assert float(nhf.get("turnover_dampener")) > 0.0
+    assert float(nhf.get("cross_hive_turnover", {}).get("rolling_turnover_max")) > 0.0
     af2 = mfb.get("payload", {}).get("aion_feedback", {})
     assert af2.get("status") == "warn"
     assert af2.get("source") == "overlay"
