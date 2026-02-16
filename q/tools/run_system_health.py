@@ -45,6 +45,38 @@ def _load_series(path: Path):
     return a.ravel()
 
 
+def _load_named_series(path: Path, column: str):
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return None
+    if column not in df.columns:
+        return None
+    vals = pd.to_numeric(df[column], errors="coerce").fillna(0.0).values.astype(float)
+    return vals.ravel() if len(vals) else None
+
+
+def _load_row_mean_series(path: Path):
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        return None
+    if df.empty:
+        return None
+    cols = [c for c in df.columns if str(c).lower() not in {"date", "timestamp", "time"}]
+    if not cols:
+        return None
+    vals = [pd.to_numeric(df[c], errors="coerce").fillna(0.0).values.astype(float) for c in cols]
+    if not vals:
+        return None
+    mat = np.column_stack(vals)
+    return np.nan_to_num(np.mean(mat, axis=1), nan=0.0, posinf=0.0, neginf=0.0)
+
+
 def _load_matrix(path: Path):
     if not path.exists():
         return None
@@ -184,6 +216,8 @@ if __name__ == "__main__":
         RUNS / "hive_diversification_governor.csv",
         RUNS / "hive_persistence_governor.csv",
         RUNS / "hive_dynamic_quality.csv",
+        RUNS / "hive_crowding_penalty.csv",
+        RUNS / "hive_entropy_schedule.csv",
         RUNS / "reflex_signal_gated.csv",
         RUNS / "synapses_summary.json",
         RUNS / "meta_stack_summary.json",
@@ -264,6 +298,9 @@ if __name__ == "__main__":
     reflex_gov = _load_series(RUNS / "reflex_health_governor.csv")
     sym_gov = _load_series(RUNS / "symbolic_governor.csv")
     rf_gov = _load_series(RUNS / "regime_fracture_governor.csv")
+    hive_crowding = _load_row_mean_series(RUNS / "hive_crowding_penalty.csv")
+    hive_entropy_target = _load_named_series(RUNS / "hive_entropy_schedule.csv", "entropy_target")
+    hive_entropy_strength = _load_named_series(RUNS / "hive_entropy_schedule.csv", "entropy_strength")
     nsp_ctx_boost = _load_series(RUNS / "novaspine_context_boost.csv")
     nsp_hive_boost = _load_series(RUNS / "novaspine_hive_boost.csv")
     gov_trace_total = _load_series(RUNS / "final_governor_trace.csv")
@@ -341,6 +378,19 @@ if __name__ == "__main__":
     if rf_gov is not None:
         shape["regime_fracture_governor_rows"] = int(len(rf_gov))
         shape["regime_fracture_governor_mean"] = float(np.mean(rf_gov))
+    if hive_crowding is not None:
+        shape["hive_crowding_rows"] = int(len(hive_crowding))
+        shape["hive_crowding_mean"] = float(np.mean(hive_crowding))
+        shape["hive_crowding_max"] = float(np.max(hive_crowding))
+    if hive_entropy_target is not None:
+        shape["hive_entropy_target_rows"] = int(len(hive_entropy_target))
+        shape["hive_entropy_target_mean"] = float(np.mean(hive_entropy_target))
+        shape["hive_entropy_target_max"] = float(np.max(hive_entropy_target))
+    if hive_entropy_strength is not None:
+        shape["hive_entropy_strength_rows"] = int(len(hive_entropy_strength))
+        shape["hive_entropy_strength_mean"] = float(np.mean(hive_entropy_strength))
+        shape["hive_entropy_strength_max"] = float(np.max(hive_entropy_strength))
+    if sym_gov is not None:
         shape["symbolic_governor_min"] = float(np.min(sym_gov))
         shape["symbolic_governor_max"] = float(np.max(sym_gov))
     if nsp_ctx_boost is not None:
