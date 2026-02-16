@@ -426,6 +426,9 @@ def _aion_feedback_controls(aion_feedback: dict | None):
     out = {
         "active": False,
         "status": "unknown",
+        "source": "unknown",
+        "source_selected": "unknown",
+        "source_preference": "auto",
         "reasons": [],
         "risk_scale": 1.0,
         "closed_trades": 0,
@@ -465,9 +468,15 @@ def _aion_feedback_controls(aion_feedback: dict | None):
         stale = bool(age_hours > max_age_hours)
     last_closed_ts = str(aion_feedback.get("last_closed_ts", "")).strip() or None
     path = str(aion_feedback.get("path", "")).strip()
+    source = str(aion_feedback.get("source", aion_feedback.get("source_selected", ""))).strip().lower() or "unknown"
+    source_selected = str(aion_feedback.get("source_selected", source)).strip().lower() or source
+    source_preference = str(aion_feedback.get("source_preference", "auto")).strip().lower() or "auto"
 
     out["active"] = True
     out["status"] = status
+    out["source"] = source
+    out["source_selected"] = source_selected
+    out["source_preference"] = source_preference
     out["reasons"] = list(reasons)
     out["risk_scale"] = float(risk_scale)
     out["closed_trades"] = int(closed_trades)
@@ -1071,6 +1080,9 @@ def main() -> int:
             memory_feedback_block_new_entries = False
             aion_feedback_active = False
             aion_feedback_status = "unknown"
+            aion_feedback_source = "unknown"
+            aion_feedback_source_selected = "unknown"
+            aion_feedback_source_preference = "auto"
             aion_feedback_reasons = []
             aion_feedback_risk_scale = 1.0
             aion_feedback_closed_trades = 0
@@ -1182,6 +1194,11 @@ def main() -> int:
                 aion_ctl = _aion_feedback_controls(aion_fb if isinstance(aion_fb, dict) else {})
                 aion_feedback_active = bool(aion_ctl.get("active", False))
                 aion_feedback_status = str(aion_ctl.get("status", "unknown"))
+                aion_feedback_source = str(aion_ctl.get("source", "unknown"))
+                aion_feedback_source_selected = str(
+                    aion_ctl.get("source_selected", aion_feedback_source)
+                )
+                aion_feedback_source_preference = str(aion_ctl.get("source_preference", "auto"))
                 aion_feedback_reasons = [str(x) for x in aion_ctl.get("reasons", []) if str(x)]
                 aion_feedback_risk_scale = _safe_float(aion_ctl.get("risk_scale"), 1.0)
                 aion_feedback_closed_trades = max(0, _safe_int(aion_ctl.get("closed_trades"), 0))
@@ -1261,6 +1278,9 @@ def main() -> int:
                 aion_sig = (
                     bool(aion_feedback_active),
                     str(aion_feedback_status).strip().lower(),
+                    str(aion_feedback_source).strip().lower(),
+                    str(aion_feedback_source_selected).strip().lower(),
+                    str(aion_feedback_source_preference).strip().lower(),
                     tuple(sorted(str(x).strip().lower() for x in aion_feedback_reasons if str(x).strip())),
                     round(float(aion_feedback_risk_scale), 4),
                     int(aion_feedback_closed_trades),
@@ -1276,20 +1296,23 @@ def main() -> int:
                     str(aion_feedback_path),
                 )
                 if aion_sig != last_aion_feedback_sig and aion_sig[0]:
-                    reason_txt = ",".join(aion_sig[2]) if aion_sig[2] else "none"
+                    reason_txt = ",".join(aion_sig[5]) if aion_sig[5] else "none"
                     log_run(
                         "AION outcome feedback "
-                        f"status={aion_sig[1]} reasons={reason_txt} block_new={aion_sig[13]} risk_scale={aion_sig[3]:.3f} "
-                        f"closed_trades={aion_sig[4]} hit_rate={(f'{aion_sig[5]:.3f}' if isinstance(aion_sig[5], float) else 'na')} "
-                        f"profit_factor={(f'{aion_sig[6]:.3f}' if isinstance(aion_sig[6], float) else 'na')} "
-                        f"drawdown_norm={(f'{aion_sig[8]:.3f}' if isinstance(aion_sig[8], float) else 'na')} "
-                        f"age_h={(f'{aion_sig[9]:.2f}' if isinstance(aion_sig[9], float) else 'na')} "
-                        f"stale={aion_sig[11]} last_closed_ts={aion_sig[12]}"
+                        f"status={aion_sig[1]} src={aion_sig[2]} selected={aion_sig[3]} pref={aion_sig[4]} "
+                        f"reasons={reason_txt} block_new={aion_sig[16]} risk_scale={aion_sig[6]:.3f} "
+                        f"closed_trades={aion_sig[7]} hit_rate={(f'{aion_sig[8]:.3f}' if isinstance(aion_sig[8], float) else 'na')} "
+                        f"profit_factor={(f'{aion_sig[9]:.3f}' if isinstance(aion_sig[9], float) else 'na')} "
+                        f"drawdown_norm={(f'{aion_sig[11]:.3f}' if isinstance(aion_sig[11], float) else 'na')} "
+                        f"age_h={(f'{aion_sig[12]:.2f}' if isinstance(aion_sig[12], float) else 'na')} "
+                        f"stale={aion_sig[14]} last_closed_ts={aion_sig[15]}"
                     )
-                    if cfg.MONITORING_ENABLED and (aion_sig[1] in {"warn", "alert"} or aion_sig[11]):
+                    if cfg.MONITORING_ENABLED and (aion_sig[1] in {"warn", "alert"} or aion_sig[14]):
                         monitor.record_system_event(
                             "aion_outcome_feedback",
-                            f"status={aion_sig[1]} reasons={reason_txt} block_new={aion_sig[13]} risk_scale={aion_sig[3]:.3f} closed_trades={aion_sig[4]} stale={aion_sig[11]} last_closed_ts={aion_sig[12]}",
+                            f"status={aion_sig[1]} src={aion_sig[2]} selected={aion_sig[3]} pref={aion_sig[4]} reasons={reason_txt} "
+                            f"block_new={aion_sig[16]} risk_scale={aion_sig[6]:.3f} closed_trades={aion_sig[7]} "
+                            f"stale={aion_sig[14]} last_closed_ts={aion_sig[15]}",
                         )
                 last_aion_feedback_sig = aion_sig
                 gate_sig = (bool(overlay_block_new_entries), tuple(sorted(str(x) for x in overlay_block_reasons)))
@@ -1464,6 +1487,9 @@ def main() -> int:
                     "memory_feedback_block_new_entries": bool(memory_feedback_block_new_entries),
                     "aion_feedback_active": bool(aion_feedback_active),
                     "aion_feedback_status": str(aion_feedback_status),
+                    "aion_feedback_source": str(aion_feedback_source),
+                    "aion_feedback_source_selected": str(aion_feedback_source_selected),
+                    "aion_feedback_source_preference": str(aion_feedback_source_preference),
                     "aion_feedback_reasons": list(aion_feedback_reasons),
                     "aion_feedback_risk_scale": float(aion_feedback_risk_scale),
                     "aion_feedback_closed_trades": int(aion_feedback_closed_trades),

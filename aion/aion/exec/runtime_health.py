@@ -189,13 +189,28 @@ def aion_feedback_runtime_info(
             "aion_feedback_closed_trades",
             "aion_feedback_age_hours",
             "aion_feedback_stale",
+            "aion_feedback_source",
+            "aion_feedback_source_selected",
         ]
     )
     if rc_has:
         source = "runtime_controls"
+        feedback_source = (
+            str(rc.get("aion_feedback_source", rc.get("aion_feedback_source_selected", ""))).strip().lower()
+            or "unknown"
+        )
+        feedback_source_selected = (
+            str(rc.get("aion_feedback_source_selected", feedback_source)).strip().lower() or feedback_source
+        )
+        feedback_source_preference = (
+            str(rc.get("aion_feedback_source_preference", "auto")).strip().lower() or "auto"
+        )
         data = {
             "active": bool(rc.get("aion_feedback_active", False)),
             "status": str(rc.get("aion_feedback_status", "unknown")).strip().lower() or "unknown",
+            "feedback_source": feedback_source,
+            "feedback_source_selected": feedback_source_selected,
+            "feedback_source_preference": feedback_source_preference,
             "risk_scale": _safe_float(rc.get("aion_feedback_risk_scale"), None),
             "closed_trades": max(0, _safe_int(rc.get("aion_feedback_closed_trades", 0), 0)),
             "hit_rate": _safe_float(rc.get("aion_feedback_hit_rate"), None),
@@ -212,9 +227,19 @@ def aion_feedback_runtime_info(
         }
     elif ext_af:
         source = "overlay_runtime_context"
+        feedback_source = (
+            str(ext_af.get("source", ext_af.get("source_selected", ""))).strip().lower() or "unknown"
+        )
+        feedback_source_selected = (
+            str(ext_af.get("source_selected", feedback_source)).strip().lower() or feedback_source
+        )
+        feedback_source_preference = str(ext_af.get("source_preference", "auto")).strip().lower() or "auto"
         data = {
             "active": bool(ext_af.get("active", False)),
             "status": str(ext_af.get("status", "unknown")).strip().lower() or "unknown",
+            "feedback_source": feedback_source,
+            "feedback_source_selected": feedback_source_selected,
+            "feedback_source_preference": feedback_source_preference,
             "risk_scale": _safe_float(ext_af.get("risk_scale"), None),
             "closed_trades": max(0, _safe_int(ext_af.get("closed_trades", 0), 0)),
             "hit_rate": _safe_float(ext_af.get("hit_rate"), None),
@@ -234,6 +259,9 @@ def aion_feedback_runtime_info(
         data = {
             "active": False,
             "status": "unknown",
+            "feedback_source": "unknown",
+            "feedback_source_selected": "unknown",
+            "feedback_source_preference": "auto",
             "risk_scale": None,
             "closed_trades": 0,
             "hit_rate": None,

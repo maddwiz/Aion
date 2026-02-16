@@ -516,6 +516,8 @@ def test_aion_feedback_controls_block_on_alert_with_enough_closed_trades(monkeyp
         {
             "active": True,
             "status": "alert",
+            "source": "shadow_trades",
+            "source_preference": "auto",
             "risk_scale": 0.78,
             "closed_trades": 12,
             "hit_rate": 0.39,
@@ -530,6 +532,9 @@ def test_aion_feedback_controls_block_on_alert_with_enough_closed_trades(monkeyp
     assert out["active"] is True
     assert out["block_new_entries"] is True
     assert out["status"] == "alert"
+    assert out["source"] == "shadow_trades"
+    assert out["source_selected"] == "shadow_trades"
+    assert out["source_preference"] == "auto"
     assert out["closed_trades"] == 12
     assert out["last_closed_ts"] == "2026-02-16T15:35:00Z"
 
@@ -561,6 +566,9 @@ def test_aion_feedback_controls_stale_feedback_neutralizes_when_ignore_enabled(m
         {
             "active": True,
             "status": "alert",
+            "source": "overlay",
+            "source_selected": "shadow_trades",
+            "source_preference": "shadow",
             "risk_scale": 0.70,
             "closed_trades": 20,
             "age_hours": 72.0,
@@ -572,3 +580,6 @@ def test_aion_feedback_controls_stale_feedback_neutralizes_when_ignore_enabled(m
     assert out["status"] == "stale"
     assert out["block_new_entries"] is False
     assert float(out["risk_scale"]) == 1.0
+    assert out["source"] == "overlay"
+    assert out["source_selected"] == "shadow_trades"
+    assert out["source_preference"] == "shadow"

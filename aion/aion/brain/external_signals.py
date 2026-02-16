@@ -167,6 +167,9 @@ def load_external_signal_bundle(
         "aion_feedback": {
             "active": False,
             "status": "unknown",
+            "source": "unknown",
+            "source_selected": "unknown",
+            "source_preference": "auto",
             "risk_scale": 1.0,
             "closed_trades": 0,
             "hit_rate": None,
@@ -242,9 +245,19 @@ def load_external_signal_bundle(
                 af_stale = bool(af.get("stale", False))
                 if (not af_stale) and af_age is not None and af_max_age is not None and af_max_age > 0:
                     af_stale = bool(af_age > af_max_age)
+                af_source = str(af.get("source", af.get("source_selected", ""))).strip().lower() or "unknown"
+                af_source_selected = (
+                    str(af.get("source_selected", af_source)).strip().lower() or af_source
+                )
+                af_source_pref = str(
+                    af.get("source_preference", ctx.get("aion_feedback_source_preference", "auto"))
+                ).strip().lower() or "auto"
                 out["aion_feedback"] = {
                     "active": bool(af.get("active", False)),
                     "status": str(af.get("status", "unknown")).strip().lower() or "unknown",
+                    "source": af_source,
+                    "source_selected": af_source_selected,
+                    "source_preference": af_source_pref,
                     "risk_scale": _clamp(_safe_float(af.get("risk_scale", 1.0), 1.0), 0.20, 1.20),
                     "closed_trades": max(0, int(_safe_float(af.get("closed_trades", 0), 0))),
                     "hit_rate": _safe_float(af.get("hit_rate", None), None),

@@ -79,6 +79,9 @@ def test_load_external_signal_bundle_parses_aion_feedback(tmp_path: Path):
                     "aion_feedback": {
                         "active": True,
                         "status": "alert",
+                        "source": "shadow_trades",
+                        "source_selected": "shadow_trades",
+                        "source_preference": "auto",
                         "risk_scale": 0.74,
                         "closed_trades": 22,
                         "hit_rate": 0.39,
@@ -103,6 +106,9 @@ def test_load_external_signal_bundle_parses_aion_feedback(tmp_path: Path):
     af = b.get("aion_feedback", {})
     assert af.get("active") is True
     assert af.get("status") == "alert"
+    assert af.get("source") == "shadow_trades"
+    assert af.get("source_selected") == "shadow_trades"
+    assert af.get("source_preference") == "auto"
     assert float(af.get("risk_scale")) < 1.0
     assert int(af.get("closed_trades")) == 22
     assert af.get("stale") is True

@@ -40,6 +40,9 @@ def test_aion_feedback_runtime_info_prefers_runtime_controls_and_flags_stale():
         {
             "aion_feedback_active": True,
             "aion_feedback_status": "warn",
+            "aion_feedback_source": "shadow_trades",
+            "aion_feedback_source_selected": "shadow_trades",
+            "aion_feedback_source_preference": "auto",
             "aion_feedback_risk_scale": 0.88,
             "aion_feedback_closed_trades": 14,
             "aion_feedback_age_hours": 96.0,
@@ -53,6 +56,9 @@ def test_aion_feedback_runtime_info_prefers_runtime_controls_and_flags_stale():
     assert out["present"] is True
     assert out["stale"] is True
     assert out["state"] == "stale"
+    assert out["feedback_source"] == "shadow_trades"
+    assert out["feedback_source_selected"] == "shadow_trades"
+    assert out["feedback_source_preference"] == "auto"
     assert out["last_closed_ts"] == "2026-02-16T15:35:00Z"
 
 
@@ -64,6 +70,9 @@ def test_aion_feedback_runtime_info_falls_back_to_overlay_context():
                 "aion_feedback": {
                     "active": True,
                     "status": "alert",
+                    "source": "overlay",
+                    "source_selected": "overlay",
+                    "source_preference": "overlay",
                     "risk_scale": 0.76,
                     "closed_trades": 20,
                     "last_closed_ts": "2026-02-16T15:35:00Z",
@@ -75,6 +84,9 @@ def test_aion_feedback_runtime_info_falls_back_to_overlay_context():
     assert out["source"] == "overlay_runtime_context"
     assert out["state"] == "alert"
     assert out["present"] is True
+    assert out["feedback_source"] == "overlay"
+    assert out["feedback_source_selected"] == "overlay"
+    assert out["feedback_source_preference"] == "overlay"
     assert out["last_closed_ts"] == "2026-02-16T15:35:00Z"
 
 

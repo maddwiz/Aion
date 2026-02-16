@@ -41,6 +41,8 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
             '{"max_trades_cap_runtime": 9, "overlay_block_new_entries": true, '
             '"overlay_block_reasons": ["critical_flag:fracture_alert"], '
             '"aion_feedback_active": true, "aion_feedback_status": "warn", '
+            '"aion_feedback_source": "shadow_trades", "aion_feedback_source_selected": "shadow_trades", '
+            '"aion_feedback_source_preference": "auto", '
             '"aion_feedback_risk_scale": 0.88, "aion_feedback_closed_trades": 12, '
             '"aion_feedback_age_hours": 80.0, "aion_feedback_max_age_hours": 72.0, '
             '"aion_feedback_stale": false}'
@@ -76,6 +78,9 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
     assert payload["aion_feedback_runtime"]["source"] == "runtime_controls"
     assert payload["aion_feedback_runtime"]["state"] == "stale"
     assert payload["aion_feedback_runtime"]["stale"] is True
+    assert payload["aion_feedback_runtime"]["feedback_source"] == "shadow_trades"
+    assert payload["aion_feedback_runtime"]["feedback_source_selected"] == "shadow_trades"
+    assert payload["aion_feedback_runtime"]["feedback_source_preference"] == "auto"
     assert payload["runtime_decision"]["entry_blocked"] is True
     assert any("external_overlay" in x for x in payload["runtime_decision"]["entry_block_reasons"])
     assert isinstance(payload["runtime_remediation"], list)
