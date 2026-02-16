@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from qmods.council import _member_stats, run_council
+from qmods.council import MeanRevRep, MomentumRep, _member_stats, run_council
 
 
 def _frames(seed: int = 7, t: int = 160, n: int = 12):
@@ -55,3 +55,25 @@ def test_run_council_emits_polarity_metadata(tmp_path: Path):
 
     payload = json.loads(out_json.read_text())
     assert "member_polarity" in payload
+
+
+def test_momentum_rep_single_lookback_backward_compatible():
+    rng = np.random.default_rng(23)
+    idx = pd.date_range("2024-01-03", periods=80, freq="B")
+    prices = pd.DataFrame({"A": 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, len(idx))))}, index=idx)
+    rep = MomentumRep(lookback=10)
+    mat = rep.signal_matrix(prices)
+    expected = (prices.pct_change(10) / 0.15).clip(-1.0, 1.0)
+    pd.testing.assert_frame_equal(mat, expected)
+
+
+def test_meanrev_rep_multi_horizon_outputs_finite_bounded_signal():
+    rng = np.random.default_rng(29)
+    idx = pd.date_range("2024-01-03", periods=120, freq="B")
+    prices = pd.DataFrame({"A": 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.012, len(idx))))}, index=idx)
+    rep = MeanRevRep(lookbacks=(3, 5, 8), weights=(0.5, 0.3, 0.2))
+    mat = rep.signal_matrix(prices).dropna(how="all")
+    assert len(mat) > 0
+    assert np.isfinite(mat.to_numpy(dtype=float)).all()
+    assert float(mat.max().max()) <= 1.0 + 1e-12
+    assert float(mat.min().min()) >= -1.0 - 1e-12

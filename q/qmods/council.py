@@ -27,23 +27,63 @@ class CouncilMember:
 class MomentumRep(CouncilMember):
     name = "MomentumRep"
 
-    def __init__(self, lookback=63):
-        self.lb = int(lookback)
+    def __init__(self, lookback=63, lookbacks: list[int] | tuple[int, ...] | None = None, weights: list[float] | tuple[float, ...] | None = None):
+        if lookbacks is None:
+            self.lookbacks = [max(1, int(lookback))]
+        else:
+            self.lookbacks = [max(1, int(lb)) for lb in lookbacks if int(lb) > 0]
+        if not self.lookbacks:
+            self.lookbacks = [max(1, int(lookback))]
+        if weights is None or len(weights) != len(self.lookbacks):
+            self.weights = np.ones(len(self.lookbacks), dtype=float) / float(len(self.lookbacks))
+        else:
+            w = np.asarray([float(x) for x in weights], dtype=float)
+            w = np.clip(w, 0.0, None)
+            s = float(w.sum())
+            self.weights = (w / s) if s > 0 else np.ones(len(self.lookbacks), dtype=float) / float(len(self.lookbacks))
 
     def signal_matrix(self, prices: pd.DataFrame) -> pd.DataFrame:
-        s = prices.pct_change(self.lb)
-        return (s / 0.15).clip(-1.0, 1.0)
+        mats = []
+        for lb in self.lookbacks:
+            s = prices.pct_change(lb)
+            mats.append((s / 0.15).clip(-1.0, 1.0))
+        if len(mats) == 1:
+            return mats[0]
+        out = mats[0] * float(self.weights[0])
+        for i in range(1, len(mats)):
+            out = out.add(mats[i] * float(self.weights[i]), fill_value=0.0)
+        return out.clip(-1.0, 1.0)
 
 
 class MeanRevRep(CouncilMember):
     name = "MeanRevRep"
 
-    def __init__(self, lookback=5):
-        self.lb = int(lookback)
+    def __init__(self, lookback=5, lookbacks: list[int] | tuple[int, ...] | None = None, weights: list[float] | tuple[float, ...] | None = None):
+        if lookbacks is None:
+            self.lookbacks = [max(1, int(lookback))]
+        else:
+            self.lookbacks = [max(1, int(lb)) for lb in lookbacks if int(lb) > 0]
+        if not self.lookbacks:
+            self.lookbacks = [max(1, int(lookback))]
+        if weights is None or len(weights) != len(self.lookbacks):
+            self.weights = np.ones(len(self.lookbacks), dtype=float) / float(len(self.lookbacks))
+        else:
+            w = np.asarray([float(x) for x in weights], dtype=float)
+            w = np.clip(w, 0.0, None)
+            s = float(w.sum())
+            self.weights = (w / s) if s > 0 else np.ones(len(self.lookbacks), dtype=float) / float(len(self.lookbacks))
 
     def signal_matrix(self, prices: pd.DataFrame) -> pd.DataFrame:
-        s = -prices.pct_change(self.lb)
-        return (s / 0.05).clip(-1.0, 1.0)
+        mats = []
+        for lb in self.lookbacks:
+            s = -prices.pct_change(lb)
+            mats.append((s / 0.05).clip(-1.0, 1.0))
+        if len(mats) == 1:
+            return mats[0]
+        out = mats[0] * float(self.weights[0])
+        for i in range(1, len(mats)):
+            out = out.add(mats[i] * float(self.weights[i]), fill_value=0.0)
+        return out.clip(-1.0, 1.0)
 
 
 class CarryRep(CouncilMember):
@@ -142,7 +182,12 @@ def run_council(prices: pd.DataFrame, out_json="runs_plus/council.json"):
     prices = prices.sort_index().ffill().dropna(how="all")
     fwd = prices.pct_change().shift(-1).replace([np.inf, -np.inf], np.nan)
 
-    members = [MomentumRep(), MeanRevRep(), CarryRep(), VolBreakoutRep()]
+    members = [
+        MomentumRep(lookbacks=(21, 63, 126), weights=(0.45, 0.35, 0.20)),
+        MeanRevRep(lookbacks=(3, 5, 8, 13), weights=(0.35, 0.30, 0.20, 0.15)),
+        CarryRep(),
+        VolBreakoutRep(),
+    ]
     ctx = {"prices": prices}
     votes = []
     mats = {}
