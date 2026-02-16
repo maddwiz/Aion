@@ -51,6 +51,7 @@ def build_alert_payload(
     fracture: dict | None = None,
     overlay: dict | None = None,
     aion_feedback_fallback: dict | None = None,
+    aion_feedback_source_pref: str = "auto",
 ):
     min_health = float(thresholds.get("min_health_score", 70.0))
     min_global = float(thresholds.get("min_global_governor_mean", 0.45))
@@ -206,7 +207,7 @@ def build_alert_payload(
     af, af_source = choose_feedback_source(
         overlay_af,
         aion_feedback_fallback,
-        source_pref="auto",
+        source_pref=aion_feedback_source_pref,
         prefer_overlay_when_fresh=True,
     )
     if feedback_has_metrics(af):
@@ -551,6 +552,7 @@ if __name__ == "__main__":
     max_hive_crowding_mean = float(os.getenv("Q_MAX_HIVE_CROWDING_MEAN", "0.65"))
     max_hive_entropy_strength_mean = float(os.getenv("Q_MAX_HIVE_ENTROPY_STRENGTH_MEAN", "0.90"))
     max_hive_entropy_target_mean = float(os.getenv("Q_MAX_HIVE_ENTROPY_TARGET_MEAN", "0.84"))
+    aion_feedback_source_pref = str(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto")).strip().lower() or "auto"
     max_aion_feedback_age_hours = float(
         os.getenv("Q_MAX_AION_FEEDBACK_AGE_HOURS", os.getenv("Q_AION_FEEDBACK_MAX_AGE_HOURS", "72"))
     )
@@ -580,6 +582,7 @@ if __name__ == "__main__":
         fracture=fracture,
         overlay=overlay,
         aion_feedback_fallback=fallback_aion_feedback,
+        aion_feedback_source_pref=aion_feedback_source_pref,
         thresholds={
             "min_health_score": min_health,
             "min_global_governor_mean": min_global,
