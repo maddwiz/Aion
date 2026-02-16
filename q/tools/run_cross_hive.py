@@ -572,6 +572,7 @@ if __name__ == "__main__":
     inertia = float(np.clip(float(os.getenv("CROSS_HIVE_INERTIA", "0.80")), 0.0, 0.98))
     max_w = float(np.clip(float(os.getenv("CROSS_HIVE_MAX_W", "0.65")), 0.10, 1.0))
     min_w = float(np.clip(float(os.getenv("CROSS_HIVE_MIN_W", "0.02")), 0.0, 0.30))
+    max_step_turnover = float(np.clip(float(os.getenv("CROSS_HIVE_MAX_STEP_TURNOVER", "0.0")), 0.0, 2.0))
     entropy_target = float(np.clip(float(os.getenv("CROSS_HIVE_ENTROPY_TARGET", "0.60")), 0.0, 1.0))
     entropy_strength = float(np.clip(float(os.getenv("CROSS_HIVE_ENTROPY_STRENGTH", "0.25")), 0.0, 1.0))
     adaptive = str(os.getenv("CROSS_HIVE_ADAPTIVE", "1")).strip().lower() in {"1", "true", "yes", "on"}
@@ -609,6 +610,7 @@ if __name__ == "__main__":
         min_weight=min_w,
         entropy_target=ent_target_sched,
         entropy_strength=ent_strength_sched,
+        max_step_turnover=max_step_turnover if max_step_turnover > 0.0 else None,
     )
     out = pd.DataFrame(W, index=pivot_sig.index, columns=names)
     if adaptive and len(out) == len(alpha_sched):
@@ -618,9 +620,12 @@ if __name__ == "__main__":
     out.to_csv(RUNS / "cross_hive_weights.csv", index=False)
 
     if len(out) > 1 and len(names) > 0:
-        turn = float(np.mean(np.sum(np.abs(np.diff(W, axis=0)), axis=1)))
+        turns = np.sum(np.abs(np.diff(W, axis=0)), axis=1)
+        turn = float(np.mean(turns))
+        turn_max = float(np.max(turns))
     else:
         turn = 0.0
+        turn_max = 0.0
     ent = float(np.mean([_entropy_norm(r) for r in W])) if len(W) else None
 
     summary = {
@@ -635,9 +640,11 @@ if __name__ == "__main__":
         "min_weight": min_w,
         "entropy_target": entropy_target,
         "entropy_strength": entropy_strength,
+        "max_step_turnover": max_step_turnover,
         "entropy_schedule_file": str(RUNS / "hive_entropy_schedule.csv") if adaptive else None,
         "mean_entropy_norm": ent,
         "mean_turnover": turn,
+        "max_turnover": turn_max,
         "quality_priors": {k: float(v) for k, v in priors.items()},
         "dynamic_quality_multiplier_mean": dyn_means,
         "dynamic_quality_file": str(RUNS / "hive_dynamic_quality.csv") if dyn_table is not None else None,
@@ -658,7 +665,8 @@ if __name__ == "__main__":
     html = (
         f"<p>Cross-hive weights over {len(names)} hives saved to cross_hive_weights.csv</p>"
         f"<p>Latest: {summary['latest_weights']}</p>"
-        f"<p>alpha_base={alpha:.2f}, inertia_base={inertia:.2f}, turnover={turn:.4f}, adaptive={bool(adaptive)}</p>"
+        f"<p>alpha_base={alpha:.2f}, inertia_base={inertia:.2f}, "
+        f"turnover(mean/max)={turn:.4f}/{turn_max:.4f}, step_cap={max_step_turnover:.3f}, adaptive={bool(adaptive)}</p>"
     )
     append_card("Cross-Hive Arbitration ✔", html)
     print(f"✅ Wrote {RUNS/'cross_hive_weights.csv'}")

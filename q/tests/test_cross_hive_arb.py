@@ -135,3 +135,21 @@ def test_arb_weights_crowding_penalty_reduces_weight():
     a0 = float(np.mean(w0[:, 0]))
     a1 = float(np.mean(w1[:, 0]))
     assert a1 < a0
+
+
+def test_arb_weights_step_turnover_cap_limits_adjacent_moves():
+    T = 180
+    rng = np.random.default_rng(17)
+    scores = {
+        "A": rng.normal(0.0, 1.4, T),
+        "B": rng.normal(0.0, 1.4, T),
+        "C": rng.normal(0.0, 1.4, T),
+    }
+    _, w_uncapped = arb_weights(scores, alpha=3.0, inertia=0.0)
+    _, w_capped = arb_weights(scores, alpha=3.0, inertia=0.0, max_step_turnover=0.30)
+
+    uncapped_turn = np.sum(np.abs(np.diff(w_uncapped, axis=0)), axis=1)
+    capped_turn = np.sum(np.abs(np.diff(w_capped, axis=0)), axis=1)
+
+    assert float(np.max(capped_turn)) <= 0.30 + 1e-6
+    assert float(np.mean(capped_turn)) <= float(np.mean(uncapped_turn))
