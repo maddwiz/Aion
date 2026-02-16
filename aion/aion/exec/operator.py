@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .. import config as cfg
 from .ops_guard import find_task_pids, start_task, status_snapshot, stop_task, task_module
+from .runtime_decision import runtime_decision_summary
 from .runtime_health import runtime_controls_stale_info
 
 
@@ -111,6 +112,11 @@ def _status() -> int:
         "tasks": snap,
         "ops_guard_status": ops_status,
         "runtime_controls": runtime_controls if isinstance(runtime_controls, dict) else {},
+        "runtime_decision": runtime_decision_summary(
+            runtime_controls if isinstance(runtime_controls, dict) else {},
+            ext_rt,
+            ext_rt.get("risk_flags", []) if isinstance(ext_rt, dict) else [],
+        ),
         "runtime_controls_age_sec": runtime_controls_age_sec,
         "runtime_controls_stale_threshold_sec": runtime_controls_stale_threshold_sec,
         "runtime_controls_stale": runtime_controls_stale,

@@ -65,6 +65,8 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
     assert payload["runtime_controls"]["max_trades_cap_runtime"] == 9
     assert payload["runtime_controls"]["overlay_block_new_entries"] is True
     assert "critical_flag:fracture_alert" in payload["runtime_controls"]["overlay_block_reasons"]
+    assert payload["runtime_decision"]["entry_blocked"] is True
+    assert any("external_overlay" in x for x in payload["runtime_decision"]["entry_block_reasons"])
     assert payload["external_runtime_context"]["runtime_multiplier"] == 0.82
     assert payload["external_overlay_runtime"]["exists"] is True
     assert payload["external_overlay_runtime"]["stale"] is False

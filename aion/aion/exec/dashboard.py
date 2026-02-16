@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import urlopen
 
 from .. import config as cfg
+from .runtime_decision import runtime_decision_summary
 from .runtime_health import runtime_controls_stale_info
 
 
@@ -196,6 +197,11 @@ def _status_payload():
         "ops_guard_ok": ops_guard_ok,
         "ops_guard": ops_guard if isinstance(ops_guard, dict) else {},
         "runtime_controls": runtime_controls if isinstance(runtime_controls, dict) else {},
+        "runtime_decision": runtime_decision_summary(
+            runtime_controls if isinstance(runtime_controls, dict) else {},
+            ext_runtime,
+            risk_flags,
+        ),
         "runtime_controls_age_sec": rc_age,
         "runtime_controls_stale_threshold_sec": rc_threshold,
         "runtime_controls_stale": rc_stale,
