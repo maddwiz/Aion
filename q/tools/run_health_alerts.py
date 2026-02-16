@@ -24,10 +24,10 @@ if str(ROOT) not in sys.path:
 
 from qmods.aion_feedback import (  # noqa: E402
     choose_feedback_source,
+    feedback_lineage,
     feedback_has_metrics,
     load_outcome_feedback,
     normalize_source_preference,
-    normalize_source_tag,
 )
 
 RUNS = ROOT / "runs_plus"
@@ -219,16 +219,15 @@ def build_alert_payload(
         prefer_overlay_when_fresh=True,
     )
     if feedback_has_metrics(af):
-        aion_feedback_source_selected = normalize_source_tag(af_source, default="unknown")
-        source_from_payload = normalize_source_tag(
-            af.get("source", af.get("source_selected", "unknown")),
-            default="unknown",
+        lineage = feedback_lineage(
+            af,
+            selected_source=af_source,
+            source_preference=aion_feedback_source_pref,
+            default_source="unknown",
         )
-        aion_feedback_source = (
-            source_from_payload
-            if source_from_payload not in {"", "unknown"}
-            else aion_feedback_source_selected
-        )
+        aion_feedback_source = str(lineage.get("source", "unknown"))
+        aion_feedback_source_selected = str(lineage.get("source_selected", "unknown"))
+        aion_feedback_source_preference = str(lineage.get("source_preference", "auto"))
         aion_feedback_active = bool(af.get("active", False))
         aion_feedback_status = str(af.get("status", "unknown")).strip().lower() or "unknown"
         try:

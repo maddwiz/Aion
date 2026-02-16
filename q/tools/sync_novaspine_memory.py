@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
 from qmods.novaspine_adapter import publish_events  # noqa: E402
 from qmods.aion_feedback import (  # noqa: E402
     choose_feedback_source,
+    feedback_lineage,
     load_outcome_feedback,
     normalize_source_preference,
     normalize_source_tag,
@@ -117,21 +118,13 @@ def _safe_float(x, default: float = 0.0) -> float:
 
 def _summarize_aion_feedback(payload: dict | None) -> dict:
     aion_feedback = payload if isinstance(payload, dict) else {}
-    src = normalize_source_tag(
-        str(aion_feedback.get("source", aion_feedback.get("source_selected", "unknown"))),
-        default="unknown",
-    )
-    src_selected = normalize_source_tag(
-        str(aion_feedback.get("source_selected", src)),
-        default=src,
-    )
-    src_pref = normalize_source_preference(aion_feedback.get("source_preference", "auto"))
+    lineage = feedback_lineage(aion_feedback, default_source="unknown")
     out = {
         "active": bool(aion_feedback.get("active", False)),
         "status": str(aion_feedback.get("status", "unknown")).strip().lower() or "unknown",
-        "source": src,
-        "source_selected": src_selected,
-        "source_preference": src_pref,
+        "source": str(lineage.get("source", "unknown")),
+        "source_selected": str(lineage.get("source_selected", "unknown")),
+        "source_preference": str(lineage.get("source_preference", "auto")),
         "risk_scale": _safe_float(aion_feedback.get("risk_scale", 1.0), 1.0),
         "closed_trades": int(max(0, _safe_float(aion_feedback.get("closed_trades", 0), 0))),
         "hit_rate": _safe_float(aion_feedback.get("hit_rate", np.nan), np.nan),
@@ -228,11 +221,16 @@ def build_events():
         prefer_overlay_when_fresh=True,
     )
     aion_feedback_summary = _summarize_aion_feedback(selected_feedback)
-    selected_source_norm = normalize_source_tag(selected_source, default="unknown")
+    lineage = feedback_lineage(
+        selected_feedback if isinstance(selected_feedback, dict) else {},
+        selected_source=selected_source,
+        source_preference=aion_source_pref,
+        default_source="unknown",
+    )
+    selected_source_norm = normalize_source_tag(lineage.get("source_selected", "unknown"), default="unknown")
+    aion_feedback_summary["source"] = str(lineage.get("source", "unknown"))
     aion_feedback_summary["source_selected"] = selected_source_norm
-    aion_feedback_summary["source_preference"] = normalize_source_preference(aion_source_pref)
-    if str(aion_feedback_summary.get("source", "")).strip() in {"", "unknown"}:
-        aion_feedback_summary["source"] = str(aion_feedback_summary["source_selected"])
+    aion_feedback_summary["source_preference"] = str(lineage.get("source_preference", "auto"))
     cross_ad = cross.get("adaptive_diagnostics", {}) if isinstance(cross, dict) and isinstance(cross.get("adaptive_diagnostics"), dict) else {}
     cross_dis = _safe_float(cross_ad.get("mean_disagreement", 0.0))
     cross_disp = _safe_float(cross_ad.get("mean_stability_dispersion", 0.0))

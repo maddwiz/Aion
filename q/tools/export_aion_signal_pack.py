@@ -24,7 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from qmods.aion_feedback import load_outcome_feedback, normalize_source_preference, normalize_source_tag  # noqa: E402
+from qmods.aion_feedback import (  # noqa: E402
+    feedback_lineage,
+    load_outcome_feedback,
+    normalize_source_preference,
+)
 
 RUNS = ROOT / "runs_plus"
 
@@ -369,13 +373,14 @@ def _aion_outcome_feedback():
     if not isinstance(out, dict):
         return out
     source_pref = normalize_source_preference(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto"))
-    source = normalize_source_tag(
-        out.get("source", out.get("source_selected", "shadow_trades")),
-        default="shadow_trades",
+    lineage = feedback_lineage(
+        out,
+        source_preference=source_pref,
+        default_source="shadow_trades",
     )
-    out.setdefault("source", source)
-    out.setdefault("source_selected", source)
-    out.setdefault("source_preference", source_pref)
+    out.setdefault("source", str(lineage.get("source", "shadow_trades")))
+    out.setdefault("source_selected", str(lineage.get("source_selected", "shadow_trades")))
+    out.setdefault("source_preference", str(lineage.get("source_preference", source_pref)))
     return out
 
 

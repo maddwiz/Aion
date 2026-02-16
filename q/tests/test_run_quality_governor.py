@@ -249,6 +249,8 @@ def test_load_aion_feedback_source_override_overlay(monkeypatch, tmp_path):
 
     fb, src = rqg._load_aion_feedback()
     assert src["source"] == "overlay"
+    assert src["source_selected"] == "overlay"
+    assert src["source_preference"] == "overlay"
     assert int(fb["closed_trades"]) == 12
 
 
@@ -275,4 +277,6 @@ def test_load_aion_feedback_auto_prefers_fresh_overlay_when_shadow_stale(monkeyp
 
     fb, src = rqg._load_aion_feedback()
     assert src["source"] == "overlay"
+    assert src["source_selected"] == "overlay"
+    assert src["source_preference"] == "auto"
     assert int(fb["closed_trades"]) == 18

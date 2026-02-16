@@ -48,6 +48,29 @@ def normalize_source_preference(raw: str | None) -> str:
     return "auto"
 
 
+def feedback_lineage(
+    payload: dict | None,
+    *,
+    selected_source: str | None = None,
+    source_preference: str | None = None,
+    default_source: str = "unknown",
+) -> dict:
+    af = payload if isinstance(payload, dict) else {}
+    selected = normalize_source_tag(
+        selected_source if selected_source is not None else af.get("source_selected", af.get("source", default_source)),
+        default=default_source,
+    )
+    reported = normalize_source_tag(af.get("source", selected), default=selected)
+    pref = normalize_source_preference(
+        source_preference if source_preference is not None else af.get("source_preference", "auto")
+    )
+    return {
+        "source": reported,
+        "source_selected": selected,
+        "source_preference": pref,
+    }
+
+
 def resolve_shadow_trades_path(root: Path | None = None) -> Path:
     env_path = str(os.getenv("Q_AION_SHADOW_TRADES", "")).strip()
     if env_path:

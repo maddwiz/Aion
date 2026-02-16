@@ -21,10 +21,10 @@ if str(ROOT) not in sys.path:
 
 from qmods.aion_feedback import (  # noqa: E402
     choose_feedback_source,
+    feedback_lineage,
     feedback_has_metrics,
     load_outcome_feedback,
     normalize_source_preference,
-    normalize_source_tag,
 )
 
 RUNS = ROOT / "runs_plus"
@@ -212,12 +212,12 @@ def _overlay_aion_feedback_metrics_with_fallback(
     if (not stale) and age_hours is not None and np.isfinite(age_hours) and max_age_hours is not None:
         stale = bool(age_hours > max_age_hours)
 
-    source_selected = normalize_source_tag(source or "unknown", default="unknown")
-    source_reported = normalize_source_tag(
-        str(af.get("source", af.get("source_selected", source_selected))),
-        default=source_selected,
+    lineage = feedback_lineage(
+        af,
+        selected_source=source,
+        source_preference=source_pref,
+        default_source="unknown",
     )
-    source_preference = normalize_source_preference(source_pref)
 
     metrics["aion_feedback_active"] = active
     metrics["aion_feedback_status"] = status
@@ -230,9 +230,9 @@ def _overlay_aion_feedback_metrics_with_fallback(
     metrics["aion_feedback_age_hours"] = age_hours
     metrics["aion_feedback_stale"] = stale
     metrics["aion_feedback_max_age_hours"] = max_age_hours
-    metrics["aion_feedback_source"] = source_reported
-    metrics["aion_feedback_source_selected"] = source_selected
-    metrics["aion_feedback_source_preference"] = source_preference
+    metrics["aion_feedback_source"] = str(lineage.get("source", "unknown"))
+    metrics["aion_feedback_source_selected"] = str(lineage.get("source_selected", "unknown"))
+    metrics["aion_feedback_source_preference"] = str(lineage.get("source_preference", "auto"))
 
     enough_closed = closed >= 8
     if active and stale:

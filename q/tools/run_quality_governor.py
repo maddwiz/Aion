@@ -29,6 +29,7 @@ from qmods.quality_governor import (  # noqa: E402
 )
 from qmods.aion_feedback import (  # noqa: E402
     choose_feedback_source,
+    feedback_lineage,
     load_outcome_feedback,
     normalize_source_preference,
 )
@@ -274,7 +275,7 @@ def _aion_feedback_from_shadow_trades():
 
 
 def _load_aion_feedback():
-    source_pref = str(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto")).strip().lower() or "auto"
+    source_pref = normalize_source_preference(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto"))
     overlay_path = RUNS / "q_signal_overlay.json"
     overlay = _load_json(overlay_path)
     overlay_fb = None
@@ -292,9 +293,19 @@ def _load_aion_feedback():
                     overlay_fb = af
     fb = _aion_feedback_from_shadow_trades()
     selected, src = choose_feedback_source(overlay_fb, fb, source_pref=source_pref)
-    if src == "overlay":
-        return selected, {"source": "overlay", "path": str(overlay_path)}
-    return selected, {"source": "shadow_trades", "path": str(selected.get("path", fb.get("path", "")))}
+    lineage = feedback_lineage(selected if isinstance(selected, dict) else {}, selected_source=src, source_preference=source_pref)
+    source = str(lineage.get("source", "unknown"))
+    selected_source = str(lineage.get("source_selected", source))
+    if source == "overlay":
+        path = str(overlay_path)
+    else:
+        path = str((selected if isinstance(selected, dict) else {}).get("path", fb.get("path", "")))
+    return selected, {
+        "source": source,
+        "source_selected": selected_source,
+        "source_preference": str(lineage.get("source_preference", source_pref)),
+        "path": path,
+    }
 
 
 def _aion_outcome_quality(aion_feedback: dict | None, min_closed_trades: int = 8):

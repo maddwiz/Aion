@@ -128,3 +128,29 @@ def test_normalize_source_preference_accepts_known_values_and_falls_back():
     assert af.normalize_source_preference("overlay") == "overlay"
     assert af.normalize_source_preference("shadow") == "shadow"
     assert af.normalize_source_preference("weird") == "auto"
+
+
+def test_feedback_lineage_uses_selected_source_when_reported_missing():
+    out = af.feedback_lineage(
+        {"active": True, "status": "ok"},
+        selected_source="shadow",
+        source_preference="shadow",
+    )
+    assert out["source"] == "shadow_trades"
+    assert out["source_selected"] == "shadow_trades"
+    assert out["source_preference"] == "shadow"
+
+
+def test_feedback_lineage_preserves_reported_source_and_normalizes_aliases():
+    out = af.feedback_lineage(
+        {
+            "source": "overlay",
+            "source_selected": "shadow",
+            "source_preference": "overlay",
+        },
+        selected_source="shadow",
+        source_preference="overlay",
+    )
+    assert out["source"] == "overlay"
+    assert out["source_selected"] == "shadow_trades"
+    assert out["source_preference"] == "overlay"
