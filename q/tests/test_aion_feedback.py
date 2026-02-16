@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 from qmods import aion_feedback as af
 
@@ -42,7 +43,8 @@ def test_load_outcome_feedback_computes_stale_alert(monkeypatch, tmp_path: Path)
 
     assert out["active"] is True
     assert int(out["closed_trades"]) == 8
-    assert float(out["risk_scale"]) < 1.0
+    assert float(out["risk_scale"]) <= 1.0
+    assert float(out.get("freshness_weight", 1.0)) < 0.05
     assert out["stale"] is True
     assert out["last_closed_ts"] is not None
     assert "stale_feedback" in out["reasons"]
@@ -68,6 +70,27 @@ def test_load_outcome_feedback_can_skip_stale_reason(monkeypatch, tmp_path: Path
     assert out["active"] is True
     assert out["stale"] is True
     assert "stale_feedback" not in out["reasons"]
+
+
+def test_load_outcome_feedback_applies_age_decay_to_risk_scale(monkeypatch, tmp_path: Path):
+    shadow = tmp_path / "shadow_trades.csv"
+    base = datetime.now(timezone.utc) - timedelta(hours=18)
+    rows = ["timestamp,symbol,side,pnl"]
+    for i in range(8):
+        ts = (base + timedelta(minutes=i * 5)).strftime("%Y-%m-%d %H:%M:%S")
+        side = "EXIT_BUY" if i % 2 == 0 else "EXIT_SELL"
+        rows.append(f"{ts},S{i:02d},{side},-8.0")
+    shadow.write_text("\n".join(rows), encoding="utf-8")
+    monkeypatch.setenv("Q_AION_SHADOW_TRADES", str(shadow))
+
+    monkeypatch.setenv("Q_AION_FEEDBACK_DECAY_HALFLIFE_HOURS", "1000")
+    slow = af.load_outcome_feedback(root=tmp_path, min_trades=8, max_age_hours=240.0)
+    monkeypatch.setenv("Q_AION_FEEDBACK_DECAY_HALFLIFE_HOURS", "4")
+    fast = af.load_outcome_feedback(root=tmp_path, min_trades=8, max_age_hours=240.0)
+
+    assert fast["stale"] is False
+    assert float(fast["risk_scale"]) > float(slow["risk_scale"])
+    assert float(fast.get("freshness_weight", 0.0)) < float(slow.get("freshness_weight", 1.0))
 
 
 def test_choose_feedback_source_prefers_fresh_shadow_when_overlay_stale():

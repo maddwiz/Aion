@@ -246,6 +246,15 @@ def load_outcome_feedback(
     else:
         status = "insufficient"
 
+    decay_halflife_h = _safe_float(os.getenv("Q_AION_FEEDBACK_DECAY_HALFLIFE_HOURS", 16.0), 16.0)
+    decay_halflife_h = float(np.clip(decay_halflife_h, 1.0, 24.0 * 30.0))
+    freshness_weight = None
+    if age_hours is not None and age_hours > 0.0:
+        freshness_weight = float(np.exp(-np.log(2.0) * float(age_hours) / max(1e-6, decay_halflife_h)))
+        freshness_weight = float(np.clip(freshness_weight, 0.0, 1.0))
+        # Age-decay the impact so older outcomes do not dominate next-session behavior.
+        risk_scale = 1.0 - freshness_weight * (1.0 - float(risk_scale))
+
     risk_scale = float(_clamp(risk_scale, 0.65, 1.05))
     if n >= min_n and risk_scale <= 0.82:
         status = "alert"
@@ -275,6 +284,7 @@ def load_outcome_feedback(
         "last_closed_ts": last_closed_ts,
         "age_hours": age_hours,
         "max_age_hours": max_age,
+        "freshness_weight": freshness_weight,
         "stale": stale,
         "reasons": _uniq_str_flags(reasons),
     }
