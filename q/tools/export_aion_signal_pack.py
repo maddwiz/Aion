@@ -14,12 +14,18 @@ import datetime as dt
 import json
 import math
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from qmods.aion_feedback import load_outcome_feedback  # noqa: E402
+
 RUNS = ROOT / "runs_plus"
 
 
@@ -359,132 +365,7 @@ def _aion_outcome_feedback():
     Optional closed-loop outcome signal from recent AION realized trades.
     Reads AION shadow_trades.csv and maps realized quality into a risk scalar.
     """
-    env_path = str(os.getenv("Q_AION_SHADOW_TRADES", "")).strip()
-    if env_path:
-        p = Path(env_path)
-    else:
-        aion_home = str(os.getenv("Q_AION_HOME", str(ROOT.parent / "aion"))).strip()
-        p = Path(aion_home) / "logs" / "shadow_trades.csv"
-    if (not p.exists()) or p.is_dir():
-        return {"active": False, "status": "missing", "risk_scale": 1.0, "reasons": [], "path": str(p)}
-
-    try:
-        df = pd.read_csv(p)
-    except Exception:
-        return {"active": False, "status": "read_error", "risk_scale": 1.0, "reasons": ["read_error"], "path": str(p)}
-    if df.empty or ("side" not in df.columns) or ("pnl" not in df.columns):
-        return {"active": False, "status": "schema_missing", "risk_scale": 1.0, "reasons": ["schema_missing"], "path": str(p)}
-
-    lookback = int(np.clip(_safe_float(os.getenv("Q_AION_FEEDBACK_LOOKBACK", 30), 30), 5, 400))
-    min_trades = int(np.clip(_safe_float(os.getenv("Q_AION_FEEDBACK_MIN_TRADES", 8), 8), 3, 100))
-    closed = df.copy()
-    side = closed["side"].astype(str).str.upper()
-    closed = closed[side.str.contains("EXIT") | side.str.contains("PARTIAL")]
-    if closed.empty:
-        return {"active": False, "status": "no_closed_trades", "risk_scale": 1.0, "reasons": ["no_closed_trades"], "path": str(p)}
-
-    if "timestamp" in closed.columns:
-        try:
-            closed = closed.assign(_ts=pd.to_datetime(closed["timestamp"], errors="coerce")).sort_values("_ts")
-        except Exception:
-            pass
-    pnl = pd.to_numeric(closed["pnl"], errors="coerce").fillna(0.0).values.astype(float)
-    pnl = pnl[-lookback:]
-    n = int(len(pnl))
-    if n <= 0:
-        return {"active": False, "status": "no_closed_trades", "risk_scale": 1.0, "reasons": ["no_closed_trades"], "path": str(p)}
-
-    wins = int(np.sum(pnl > 0.0))
-    losses = int(np.sum(pnl < 0.0))
-    hit = float(wins / max(1, wins + losses))
-    gross_win = float(np.sum(pnl[pnl > 0.0])) if wins else 0.0
-    gross_loss = float(np.abs(np.sum(pnl[pnl < 0.0]))) if losses else 0.0
-    pf = float(gross_win / max(1e-9, gross_loss)) if gross_loss > 1e-9 else (2.5 if gross_win > 0 else 1.0)
-    expectancy = float(np.mean(pnl))
-    abs_mean = float(np.mean(np.abs(pnl))) if n else 0.0
-    exp_norm = float(expectancy / max(1e-9, abs_mean)) if abs_mean > 0 else 0.0
-    eq = np.cumsum(pnl)
-    peak = np.maximum.accumulate(eq)
-    max_dd = float(np.max(peak - eq)) if len(eq) else 0.0
-    dd_norm = float(max_dd / max(1e-9, abs_mean * max(1.0, float(np.sqrt(n))))) if abs_mean > 0 else 0.0
-    last_closed_ts = None
-    age_hours = None
-    if "_ts" in closed.columns:
-        try:
-            ts = pd.to_datetime(closed["_ts"], errors="coerce").dropna()
-            if len(ts):
-                last_dt = pd.Timestamp(ts.iloc[-1])
-                if last_dt.tzinfo is None:
-                    last_dt = last_dt.tz_localize("UTC")
-                else:
-                    last_dt = last_dt.tz_convert("UTC")
-                now_dt = pd.Timestamp.now(tz="UTC")
-                last_closed_ts = last_dt.isoformat()
-                age_hours = float(max(0.0, (now_dt - last_dt).total_seconds() / 3600.0))
-        except Exception:
-            last_closed_ts = None
-            age_hours = None
-
-    risk_scale = 1.0
-    reasons = []
-    if n >= min_trades:
-        if hit < 0.36:
-            risk_scale *= 0.78
-            reasons.append("low_hit_rate_alert")
-        elif hit < 0.42:
-            risk_scale *= 0.90
-            reasons.append("low_hit_rate_warn")
-        if pf < 0.75:
-            risk_scale *= 0.74
-            reasons.append("low_profit_factor_alert")
-        elif pf < 0.95:
-            risk_scale *= 0.88
-            reasons.append("low_profit_factor_warn")
-        if exp_norm < -0.30:
-            risk_scale *= 0.80
-            reasons.append("negative_expectancy_alert")
-        elif exp_norm < -0.15:
-            risk_scale *= 0.92
-            reasons.append("negative_expectancy_warn")
-        if dd_norm > 3.0:
-            risk_scale *= 0.82
-            reasons.append("drawdown_pressure_alert")
-        elif dd_norm > 2.0:
-            risk_scale *= 0.92
-            reasons.append("drawdown_pressure_warn")
-        status = "ok"
-    else:
-        status = "insufficient"
-
-    risk_scale = float(_clamp(risk_scale, 0.65, 1.05))
-    if n >= min_trades and risk_scale <= 0.82:
-        status = "alert"
-    elif n >= min_trades and risk_scale <= 0.94:
-        status = "warn"
-
-    max_age_hours = float(np.clip(_safe_float(os.getenv("Q_AION_FEEDBACK_MAX_AGE_HOURS", 72.0), 72.0), 1.0, 24.0 * 90.0))
-    stale = bool(age_hours is not None and age_hours > max_age_hours)
-    if stale:
-        reasons.append("stale_feedback")
-
-    return {
-        "active": True,
-        "status": status,
-        "path": str(p),
-        "closed_trades": int(n),
-        "hit_rate": float(hit),
-        "profit_factor": float(pf),
-        "expectancy": float(expectancy),
-        "expectancy_norm": float(exp_norm),
-        "max_drawdown": float(max_dd),
-        "drawdown_norm": float(dd_norm),
-        "risk_scale": float(risk_scale),
-        "last_closed_ts": last_closed_ts,
-        "age_hours": age_hours,
-        "max_age_hours": float(max_age_hours),
-        "stale": stale,
-        "reasons": _uniq_str_flags(reasons),
-    }
+    return load_outcome_feedback(root=ROOT)
 
 
 def _runtime_context(runs_dir: Path):
