@@ -55,6 +55,7 @@ def build_alert_payload(
     drift_watch: dict,
     thresholds: dict,
     fracture: dict | None = None,
+    cross_hive: dict | None = None,
     overlay: dict | None = None,
     aion_feedback_fallback: dict | None = None,
     aion_feedback_source_pref: str = "auto",
@@ -82,6 +83,9 @@ def build_alert_payload(
     max_hive_crowding_mean = float(thresholds.get("max_hive_crowding_mean", 0.65))
     max_hive_entropy_strength_mean = float(thresholds.get("max_hive_entropy_strength_mean", 0.90))
     max_hive_entropy_target_mean = float(thresholds.get("max_hive_entropy_target_mean", 0.84))
+    max_cross_hive_mean_turnover = float(thresholds.get("max_cross_hive_mean_turnover", 0.45))
+    max_cross_hive_max_turnover = float(thresholds.get("max_cross_hive_max_turnover", 1.00))
+    max_cross_hive_rolling_turnover = float(thresholds.get("max_cross_hive_rolling_turnover", 1.25))
     min_aion_feedback_risk_scale = float(thresholds.get("min_aion_feedback_risk_scale", 0.80))
     min_aion_feedback_closed_trades = int(thresholds.get("min_aion_feedback_closed_trades", 8))
     min_aion_feedback_hit_rate = float(thresholds.get("min_aion_feedback_hit_rate", 0.38))
@@ -112,6 +116,9 @@ def build_alert_payload(
     hive_crowding_mean = None
     hive_entropy_strength_mean = None
     hive_entropy_target_mean = None
+    cross_hive_mean_turnover = None
+    cross_hive_max_turnover = None
+    cross_hive_rolling_turnover = None
     aion_feedback_active = False
     aion_feedback_status = "unknown"
     aion_feedback_risk_scale = None
@@ -206,6 +213,43 @@ def build_alert_payload(
         and hive_entropy_target_mean > max_hive_entropy_target_mean
     ):
         issues.append(f"hive_entropy_target_mean>{max_hive_entropy_target_mean} ({hive_entropy_target_mean:.3f})")
+    if isinstance(cross_hive, dict):
+        try:
+            cross_hive_mean_turnover = float(cross_hive.get("mean_turnover", np.nan))
+        except Exception:
+            cross_hive_mean_turnover = None
+        try:
+            cross_hive_max_turnover = float(cross_hive.get("max_turnover", np.nan))
+        except Exception:
+            cross_hive_max_turnover = None
+        try:
+            cross_hive_rolling_turnover = float(cross_hive.get("rolling_turnover_max", np.nan))
+        except Exception:
+            cross_hive_rolling_turnover = None
+    if (
+        cross_hive_mean_turnover is not None
+        and np.isfinite(cross_hive_mean_turnover)
+        and cross_hive_mean_turnover > max_cross_hive_mean_turnover
+    ):
+        issues.append(
+            f"cross_hive_mean_turnover>{max_cross_hive_mean_turnover} ({cross_hive_mean_turnover:.3f})"
+        )
+    if (
+        cross_hive_max_turnover is not None
+        and np.isfinite(cross_hive_max_turnover)
+        and cross_hive_max_turnover > max_cross_hive_max_turnover
+    ):
+        issues.append(
+            f"cross_hive_max_turnover>{max_cross_hive_max_turnover} ({cross_hive_max_turnover:.3f})"
+        )
+    if (
+        cross_hive_rolling_turnover is not None
+        and np.isfinite(cross_hive_rolling_turnover)
+        and cross_hive_rolling_turnover > max_cross_hive_rolling_turnover
+    ):
+        issues.append(
+            f"cross_hive_rolling_turnover>{max_cross_hive_rolling_turnover} ({cross_hive_rolling_turnover:.3f})"
+        )
 
     overlay_af = None
     if isinstance(overlay, dict):
@@ -494,6 +538,9 @@ def build_alert_payload(
             "max_hive_crowding_mean": max_hive_crowding_mean,
             "max_hive_entropy_strength_mean": max_hive_entropy_strength_mean,
             "max_hive_entropy_target_mean": max_hive_entropy_target_mean,
+            "max_cross_hive_mean_turnover": max_cross_hive_mean_turnover,
+            "max_cross_hive_max_turnover": max_cross_hive_max_turnover,
+            "max_cross_hive_rolling_turnover": max_cross_hive_rolling_turnover,
             "min_aion_feedback_risk_scale": min_aion_feedback_risk_scale,
             "min_aion_feedback_closed_trades": min_aion_feedback_closed_trades,
             "min_aion_feedback_hit_rate": min_aion_feedback_hit_rate,
@@ -514,6 +561,9 @@ def build_alert_payload(
             "hive_crowding_mean": hive_crowding_mean,
             "hive_entropy_strength_mean": hive_entropy_strength_mean,
             "hive_entropy_target_mean": hive_entropy_target_mean,
+            "cross_hive_mean_turnover": cross_hive_mean_turnover,
+            "cross_hive_max_turnover": cross_hive_max_turnover,
+            "cross_hive_rolling_turnover": cross_hive_rolling_turnover,
             "aion_feedback_active": aion_feedback_active,
             "aion_feedback_source": aion_feedback_source,
             "aion_feedback_source_selected": aion_feedback_source_selected,
@@ -571,6 +621,9 @@ if __name__ == "__main__":
     max_hive_crowding_mean = float(os.getenv("Q_MAX_HIVE_CROWDING_MEAN", "0.65"))
     max_hive_entropy_strength_mean = float(os.getenv("Q_MAX_HIVE_ENTROPY_STRENGTH_MEAN", "0.90"))
     max_hive_entropy_target_mean = float(os.getenv("Q_MAX_HIVE_ENTROPY_TARGET_MEAN", "0.84"))
+    max_cross_hive_mean_turnover = float(os.getenv("Q_MAX_CROSS_HIVE_MEAN_TURNOVER", "0.45"))
+    max_cross_hive_max_turnover = float(os.getenv("Q_MAX_CROSS_HIVE_MAX_TURNOVER", "1.00"))
+    max_cross_hive_rolling_turnover = float(os.getenv("Q_MAX_CROSS_HIVE_ROLLING_TURNOVER", "1.25"))
     aion_feedback_source_pref = normalize_source_preference(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto"))
     max_aion_feedback_age_hours = float(
         os.getenv("Q_MAX_AION_FEEDBACK_AGE_HOURS", os.getenv("Q_AION_FEEDBACK_MAX_AGE_HOURS", "72"))
@@ -586,6 +639,7 @@ if __name__ == "__main__":
     concentration = _load_json(RUNS / "concentration_governor_info.json") or {}
     drift_watch = _load_json(RUNS / "portfolio_drift_watch.json") or {}
     fracture = _load_json(RUNS / "regime_fracture_info.json") or {}
+    cross_hive = _load_json(RUNS / "cross_hive_summary.json") or {}
     overlay = _load_json(RUNS / "q_signal_overlay.json") or {}
     fallback_aion_feedback = load_outcome_feedback(root=ROOT, mark_stale_reason=False)
     payload = build_alert_payload(
@@ -599,6 +653,7 @@ if __name__ == "__main__":
         concentration=concentration,
         drift_watch=drift_watch,
         fracture=fracture,
+        cross_hive=cross_hive,
         overlay=overlay,
         aion_feedback_fallback=fallback_aion_feedback,
         aion_feedback_source_pref=aion_feedback_source_pref,
@@ -626,6 +681,9 @@ if __name__ == "__main__":
             "max_hive_crowding_mean": max_hive_crowding_mean,
             "max_hive_entropy_strength_mean": max_hive_entropy_strength_mean,
             "max_hive_entropy_target_mean": max_hive_entropy_target_mean,
+            "max_cross_hive_mean_turnover": max_cross_hive_mean_turnover,
+            "max_cross_hive_max_turnover": max_cross_hive_max_turnover,
+            "max_cross_hive_rolling_turnover": max_cross_hive_rolling_turnover,
             "min_aion_feedback_risk_scale": float(os.getenv("Q_MIN_AION_FEEDBACK_RISK_SCALE", "0.80")),
             "min_aion_feedback_closed_trades": int(os.getenv("Q_MIN_AION_FEEDBACK_CLOSED_TRADES", "8")),
             "min_aion_feedback_hit_rate": float(os.getenv("Q_MIN_AION_FEEDBACK_HIT_RATE", "0.38")),
