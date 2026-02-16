@@ -64,6 +64,9 @@ def build_alert_payload(
     max_stale_required = int(thresholds.get("max_stale_required_count", 0))
     max_quality_gov_step = float(thresholds.get("max_quality_governor_abs_step", 0.12))
     max_fracture_score = float(thresholds.get("max_fracture_score", 0.78))
+    max_hive_crowding_mean = float(thresholds.get("max_hive_crowding_mean", 0.65))
+    max_hive_entropy_strength_mean = float(thresholds.get("max_hive_entropy_strength_mean", 0.90))
+    max_hive_entropy_target_mean = float(thresholds.get("max_hive_entropy_target_mean", 0.84))
 
     issues = []
     score = float(health.get("health_score", 0.0))
@@ -86,6 +89,9 @@ def build_alert_payload(
     exec_gross_ret = None
     exec_turn_ret = None
     stale_required_count = None
+    hive_crowding_mean = None
+    hive_entropy_strength_mean = None
+    hive_entropy_target_mean = None
     if isinstance(health, dict):
         shape = health.get("shape", {})
         if isinstance(shape, dict):
@@ -113,6 +119,18 @@ def build_alert_payload(
                 stale_required_count = int(shape.get("stale_required_count"))
             except Exception:
                 stale_required_count = None
+            try:
+                hive_crowding_mean = float(shape.get("hive_crowding_mean", np.nan))
+            except Exception:
+                hive_crowding_mean = None
+            try:
+                hive_entropy_strength_mean = float(shape.get("hive_entropy_strength_mean", np.nan))
+            except Exception:
+                hive_entropy_strength_mean = None
+            try:
+                hive_entropy_target_mean = float(shape.get("hive_entropy_target_mean", np.nan))
+            except Exception:
+                hive_entropy_target_mean = None
     if hb_stress is not None and np.isfinite(hb_stress) and hb_stress > max_heartbeat_stress:
         issues.append(f"heartbeat_stress_mean>{max_heartbeat_stress} ({hb_stress:.3f})")
     if (
@@ -139,6 +157,22 @@ def build_alert_payload(
             issues.append(f"exec_turnover_retention>{max_exec_turnover_retention} ({exec_turn_ret:.3f})")
     if stale_required_count is not None and stale_required_count > max_stale_required:
         issues.append(f"stale_required_count>{max_stale_required} ({stale_required_count})")
+    if hive_crowding_mean is not None and np.isfinite(hive_crowding_mean) and hive_crowding_mean > max_hive_crowding_mean:
+        issues.append(f"hive_crowding_mean>{max_hive_crowding_mean} ({hive_crowding_mean:.3f})")
+    if (
+        hive_entropy_strength_mean is not None
+        and np.isfinite(hive_entropy_strength_mean)
+        and hive_entropy_strength_mean > max_hive_entropy_strength_mean
+    ):
+        issues.append(
+            f"hive_entropy_strength_mean>{max_hive_entropy_strength_mean} ({hive_entropy_strength_mean:.3f})"
+        )
+    if (
+        hive_entropy_target_mean is not None
+        and np.isfinite(hive_entropy_target_mean)
+        and hive_entropy_target_mean > max_hive_entropy_target_mean
+    ):
+        issues.append(f"hive_entropy_target_mean>{max_hive_entropy_target_mean} ({hive_entropy_target_mean:.3f})")
 
     gg = guards.get("global_governor", {}) if isinstance(guards, dict) else {}
     gmean = gg.get("mean", None)
@@ -289,6 +323,9 @@ def build_alert_payload(
             "max_stale_required_count": max_stale_required,
             "max_quality_governor_abs_step": max_quality_gov_step,
             "max_fracture_score": max_fracture_score,
+            "max_hive_crowding_mean": max_hive_crowding_mean,
+            "max_hive_entropy_strength_mean": max_hive_entropy_strength_mean,
+            "max_hive_entropy_target_mean": max_hive_entropy_target_mean,
         },
         "observed": {
             "health_score": score,
@@ -301,6 +338,9 @@ def build_alert_payload(
             "exec_gross_retention": exec_gross_ret,
             "exec_turnover_retention": exec_turn_ret,
             "stale_required_count": stale_required_count,
+            "hive_crowding_mean": hive_crowding_mean,
+            "hive_entropy_strength_mean": hive_entropy_strength_mean,
+            "hive_entropy_target_mean": hive_entropy_target_mean,
             "global_governor_mean": gmean,
             "quality_governor_mean": q_mean,
             "quality_score": q_score,
@@ -343,6 +383,9 @@ if __name__ == "__main__":
     max_exec_turnover_retention = float(os.getenv("Q_MAX_EXEC_TURNOVER_RETENTION", "1.10"))
     max_stale_required = int(os.getenv("Q_MAX_STALE_REQUIRED_COUNT", "0"))
     max_quality_gov_step = float(os.getenv("Q_MAX_QUALITY_GOV_ABS_STEP", "0.12"))
+    max_hive_crowding_mean = float(os.getenv("Q_MAX_HIVE_CROWDING_MEAN", "0.65"))
+    max_hive_entropy_strength_mean = float(os.getenv("Q_MAX_HIVE_ENTROPY_STRENGTH_MEAN", "0.90"))
+    max_hive_entropy_target_mean = float(os.getenv("Q_MAX_HIVE_ENTROPY_TARGET_MEAN", "0.84"))
 
     health = _load_json(RUNS / "system_health.json") or {}
     guards = _load_json(RUNS / "guardrails_summary.json") or {}
@@ -386,6 +429,9 @@ if __name__ == "__main__":
             "max_stale_required_count": max_stale_required,
             "max_quality_governor_abs_step": max_quality_gov_step,
             "max_fracture_score": float(os.getenv("Q_MAX_FRACTURE_SCORE", "0.78")),
+            "max_hive_crowding_mean": max_hive_crowding_mean,
+            "max_hive_entropy_strength_mean": max_hive_entropy_strength_mean,
+            "max_hive_entropy_target_mean": max_hive_entropy_target_mean,
         },
     )
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))
