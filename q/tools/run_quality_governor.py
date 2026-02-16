@@ -264,6 +264,196 @@ def _nested_leakage_quality(nested: dict | None):
     return q, out
 
 
+def _aion_feedback_from_shadow_trades():
+    env_path = str(os.getenv("Q_AION_SHADOW_TRADES", "")).strip()
+    if env_path:
+        p = Path(env_path)
+    else:
+        aion_home = str(os.getenv("Q_AION_HOME", str(ROOT.parent / "aion"))).strip()
+        p = Path(aion_home) / "logs" / "shadow_trades.csv"
+
+    if (not p.exists()) or p.is_dir():
+        return {"active": False, "status": "missing", "risk_scale": 1.0, "reasons": [], "path": str(p)}
+
+    try:
+        df = pd.read_csv(p)
+    except Exception:
+        return {"active": False, "status": "read_error", "risk_scale": 1.0, "reasons": ["read_error"], "path": str(p)}
+    if df.empty or ("side" not in df.columns) or ("pnl" not in df.columns):
+        return {"active": False, "status": "schema_missing", "risk_scale": 1.0, "reasons": ["schema_missing"], "path": str(p)}
+
+    lookback = int(np.clip(float(os.getenv("Q_AION_FEEDBACK_LOOKBACK", "30")), 5, 400))
+    min_trades = int(np.clip(float(os.getenv("Q_AION_FEEDBACK_MIN_TRADES", "8")), 3, 100))
+    closed = df.copy()
+    side = closed["side"].astype(str).str.upper()
+    closed = closed[side.str.contains("EXIT") | side.str.contains("PARTIAL")]
+    if closed.empty:
+        return {"active": False, "status": "no_closed_trades", "risk_scale": 1.0, "reasons": ["no_closed_trades"], "path": str(p)}
+
+    if "timestamp" in closed.columns:
+        try:
+            closed = closed.assign(_ts=pd.to_datetime(closed["timestamp"], errors="coerce")).sort_values("_ts")
+        except Exception:
+            pass
+    pnl = pd.to_numeric(closed["pnl"], errors="coerce").fillna(0.0).values.astype(float)
+    pnl = pnl[-lookback:]
+    n = int(len(pnl))
+    if n <= 0:
+        return {"active": False, "status": "no_closed_trades", "risk_scale": 1.0, "reasons": ["no_closed_trades"], "path": str(p)}
+
+    wins = int(np.sum(pnl > 0.0))
+    losses = int(np.sum(pnl < 0.0))
+    hit = float(wins / max(1, wins + losses))
+    gross_win = float(np.sum(pnl[pnl > 0.0])) if wins else 0.0
+    gross_loss = float(np.abs(np.sum(pnl[pnl < 0.0]))) if losses else 0.0
+    pf = float(gross_win / max(1e-9, gross_loss)) if gross_loss > 1e-9 else (2.5 if gross_win > 0 else 1.0)
+    expectancy = float(np.mean(pnl))
+    abs_mean = float(np.mean(np.abs(pnl))) if n else 0.0
+    exp_norm = float(expectancy / max(1e-9, abs_mean)) if abs_mean > 0 else 0.0
+    eq = np.cumsum(pnl)
+    peak = np.maximum.accumulate(eq)
+    max_dd = float(np.max(peak - eq)) if len(eq) else 0.0
+    dd_norm = float(max_dd / max(1e-9, abs_mean * max(1.0, float(np.sqrt(n))))) if abs_mean > 0 else 0.0
+
+    risk_scale = 1.0
+    reasons = []
+    if n >= min_trades:
+        if hit < 0.36:
+            risk_scale *= 0.78
+            reasons.append("low_hit_rate_alert")
+        elif hit < 0.42:
+            risk_scale *= 0.90
+            reasons.append("low_hit_rate_warn")
+        if pf < 0.75:
+            risk_scale *= 0.74
+            reasons.append("low_profit_factor_alert")
+        elif pf < 0.95:
+            risk_scale *= 0.88
+            reasons.append("low_profit_factor_warn")
+        if exp_norm < -0.30:
+            risk_scale *= 0.80
+            reasons.append("negative_expectancy_alert")
+        elif exp_norm < -0.15:
+            risk_scale *= 0.92
+            reasons.append("negative_expectancy_warn")
+        if dd_norm > 3.0:
+            risk_scale *= 0.82
+            reasons.append("drawdown_pressure_alert")
+        elif dd_norm > 2.0:
+            risk_scale *= 0.92
+            reasons.append("drawdown_pressure_warn")
+        status = "ok"
+    else:
+        status = "insufficient"
+
+    risk_scale = float(np.clip(risk_scale, 0.65, 1.05))
+    if n >= min_trades and risk_scale <= 0.82:
+        status = "alert"
+    elif n >= min_trades and risk_scale <= 0.94:
+        status = "warn"
+
+    return {
+        "active": True,
+        "status": status,
+        "path": str(p),
+        "closed_trades": int(n),
+        "hit_rate": float(hit),
+        "profit_factor": float(pf),
+        "expectancy": float(expectancy),
+        "expectancy_norm": float(exp_norm),
+        "max_drawdown": float(max_dd),
+        "drawdown_norm": float(dd_norm),
+        "risk_scale": float(risk_scale),
+        "reasons": reasons,
+    }
+
+
+def _load_aion_feedback():
+    overlay_path = RUNS / "q_signal_overlay.json"
+    overlay = _load_json(overlay_path)
+    if isinstance(overlay, dict):
+        rt = overlay.get("runtime_context", {})
+        if isinstance(rt, dict):
+            af = rt.get("aion_feedback", {})
+            if isinstance(af, dict):
+                active = bool(af.get("active", False))
+                has_metrics = any(
+                    k in af
+                    for k in ["risk_scale", "closed_trades", "hit_rate", "profit_factor", "expectancy", "drawdown_norm"]
+                )
+                if active or has_metrics:
+                    return af, {"source": "overlay", "path": str(overlay_path)}
+    fb = _aion_feedback_from_shadow_trades()
+    return fb, {"source": "shadow_trades", "path": str(fb.get("path", ""))}
+
+
+def _aion_outcome_quality(aion_feedback: dict | None, min_closed_trades: int = 8):
+    if not isinstance(aion_feedback, dict):
+        return None, {"active": False}
+    active = bool(aion_feedback.get("active", False))
+    status = str(aion_feedback.get("status", "unknown")).strip().lower() or "unknown"
+    if not active:
+        return None, {"active": False, "status": status}
+
+    def _f(x):
+        try:
+            v = float(x)
+            return v if np.isfinite(v) else None
+        except Exception:
+            return None
+
+    closed = int(max(0, _f(aion_feedback.get("closed_trades", 0)) or 0))
+    risk_scale = _f(aion_feedback.get("risk_scale"))
+    hit_rate = _f(aion_feedback.get("hit_rate"))
+    profit_factor = _f(aion_feedback.get("profit_factor"))
+    expectancy_norm = _f(aion_feedback.get("expectancy_norm"))
+    if expectancy_norm is None:
+        expectancy_norm = _f(aion_feedback.get("expectancy"))
+    drawdown_norm = _f(aion_feedback.get("drawdown_norm"))
+
+    status_q = {
+        "ok": 1.00,
+        "warn": 0.72,
+        "alert": 0.35,
+        "hard": 0.25,
+        "insufficient": 0.62,
+    }.get(status, 0.50)
+    q_risk = float(np.clip((risk_scale - 0.65) / (1.05 - 0.65 + 1e-9), 0.0, 1.0)) if risk_scale is not None else None
+    q_hit = float(np.clip((hit_rate - 0.34) / (0.58 - 0.34 + 1e-9), 0.0, 1.0)) if hit_rate is not None else None
+    q_pf = float(np.clip((profit_factor - 0.70) / (1.30 - 0.70 + 1e-9), 0.0, 1.0)) if profit_factor is not None else None
+    q_exp = float(np.clip((expectancy_norm + 0.35) / (0.55 + 0.35 + 1e-9), 0.0, 1.0)) if expectancy_norm is not None else None
+    q_dd = float(np.clip(1.0 - drawdown_norm / 3.0, 0.0, 1.0)) if drawdown_norm is not None else None
+
+    mature = closed >= int(max(1, min_closed_trades))
+    aion_q, q_detail = blend_quality(
+        {
+            "status": (status_q, 0.18),
+            "risk_scale": (q_risk, 0.26),
+            "hit_rate": (q_hit, 0.21 if mature else 0.10),
+            "profit_factor": (q_pf, 0.20 if mature else 0.10),
+            "expectancy": (q_exp, 0.10 if mature else 0.05),
+            "drawdown": (q_dd, 0.05 if mature else 0.03),
+        }
+    )
+    if not mature:
+        aion_q = float(np.clip(0.75 * aion_q + 0.25 * 0.60, 0.0, 1.0))
+
+    detail = {
+        "active": active,
+        "status": status,
+        "closed_trades": closed,
+        "min_closed_trades": int(max(1, min_closed_trades)),
+        "mature_window": bool(mature),
+        "risk_scale": risk_scale,
+        "hit_rate": hit_rate,
+        "profit_factor": profit_factor,
+        "expectancy_norm": expectancy_norm,
+        "drawdown_norm": drawdown_norm,
+        "quality_components": q_detail,
+    }
+    return aion_q, detail
+
+
 if __name__ == "__main__":
     nested = _load_json(RUNS / "nested_wf_summary.json") or {}
     health = _load_json(RUNS / "system_health.json") or {}
@@ -280,6 +470,9 @@ if __name__ == "__main__":
     sym_info = _load_json(RUNS / "symbolic_governor_info.json") or {}
     cross_info = _load_json(RUNS / "cross_hive_summary.json") or {}
     exec_info = _load_json(RUNS / "execution_constraints_info.json") or {}
+    aion_feedback, aion_feedback_source = _load_aion_feedback()
+    aion_min_closed = int(np.clip(float(os.getenv("Q_AION_QUALITY_MIN_CLOSED_TRADES", "8")), 3, 100))
+    aion_q, aion_q_detail = _aion_outcome_quality(aion_feedback, min_closed_trades=aion_min_closed)
 
     hive_sh = None
     hive_hit = None
@@ -518,6 +711,7 @@ if __name__ == "__main__":
             "dna_downside": (dna_downside_q, 0.06),
             "system_health": (health_q, 0.13),
             "execution_constraints": (exec_q, 0.12),
+            "aion_outcomes": (aion_q, 0.14),
             "ecosystem": (eco_q, 0.07),
             "ecosystem_persistence": (persistence_q, 0.06),
             "shock_env": (shock_q, 0.05),
@@ -664,6 +858,8 @@ if __name__ == "__main__":
     # Execution constraints quality modifier.
     if exec_q is not None:
         runtime_mod *= float(np.clip(0.82 + 0.35 * exec_q, 0.70, 1.10))
+    if aion_q is not None:
+        runtime_mod *= float(np.clip(0.78 + 0.42 * aion_q, 0.70, 1.10))
 
     q_lo = float(np.clip(float(os.getenv("Q_QUALITY_GOV_LO", "0.58")), 0.30, 1.20))
     q_hi = float(np.clip(float(os.getenv("Q_QUALITY_GOV_HI", "1.15")), 0.50, 1.30))
@@ -710,6 +906,11 @@ if __name__ == "__main__":
             "regime_fracture": {"score": float(fracture_q) if fracture_q is not None else None},
             "system_health": {"score": float(health_q)},
             "execution_constraints": {"score": float(exec_q) if exec_q is not None else None, "detail": exec_detail},
+            "aion_outcomes": {
+                "score": float(aion_q) if aion_q is not None else None,
+                "detail": aion_q_detail,
+                "source": aion_feedback_source,
+            },
             "novaspine_context": {"score": float(nctx_q) if nctx_q is not None else None},
         },
         "blend_detail": quality_detail,
@@ -739,6 +940,7 @@ if __name__ == "__main__":
             "symbolic_governor": (RUNS / "symbolic_governor.csv").exists(),
             "hive_persistence_governor": (RUNS / "hive_persistence_governor.csv").exists(),
             "execution_constraints_info": (RUNS / "execution_constraints_info.json").exists(),
+            "q_signal_overlay": (RUNS / "q_signal_overlay.json").exists(),
             "system_health": (RUNS / "system_health.json").exists(),
             "novaspine_context": (RUNS / "novaspine_context.json").exists(),
         },
