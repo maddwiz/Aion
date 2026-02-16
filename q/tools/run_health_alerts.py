@@ -86,6 +86,7 @@ def build_alert_payload(
     max_cross_hive_mean_turnover = float(thresholds.get("max_cross_hive_mean_turnover", 0.45))
     max_cross_hive_max_turnover = float(thresholds.get("max_cross_hive_max_turnover", 1.00))
     max_cross_hive_rolling_turnover = float(thresholds.get("max_cross_hive_rolling_turnover", 1.25))
+    min_novaspine_turnover_quality = float(thresholds.get("min_novaspine_turnover_quality", 0.45))
     max_memory_turnover_pressure = float(thresholds.get("max_memory_turnover_pressure", 0.72))
     max_memory_turnover_dampener = float(thresholds.get("max_memory_turnover_dampener", 0.10))
     min_aion_feedback_risk_scale = float(thresholds.get("min_aion_feedback_risk_scale", 0.80))
@@ -123,6 +124,7 @@ def build_alert_payload(
     cross_hive_rolling_turnover = None
     memory_turnover_pressure = None
     memory_turnover_dampener = None
+    novaspine_turnover_quality = None
     aion_feedback_active = False
     aion_feedback_status = "unknown"
     aion_feedback_risk_scale = None
@@ -471,6 +473,23 @@ def build_alert_payload(
                     dream_score = None
     if dream_score is not None and np.isfinite(dream_score) and dream_score < min_dream_coherence:
         issues.append(f"dream_coherence<{min_dream_coherence} ({dream_score:.3f})")
+    if isinstance(quality, dict):
+        comps = quality.get("components", {})
+        if isinstance(comps, dict):
+            nt = comps.get("novaspine_turnover", {})
+            if isinstance(nt, dict):
+                try:
+                    novaspine_turnover_quality = float(nt.get("score", np.nan))
+                except Exception:
+                    novaspine_turnover_quality = None
+    if (
+        novaspine_turnover_quality is not None
+        and np.isfinite(novaspine_turnover_quality)
+        and novaspine_turnover_quality < min_novaspine_turnover_quality
+    ):
+        issues.append(
+            f"novaspine_turnover_quality<{min_novaspine_turnover_quality} ({novaspine_turnover_quality:.3f})"
+        )
 
     shock_rate = None
     if isinstance(shock, dict):
@@ -569,6 +588,7 @@ def build_alert_payload(
             "max_cross_hive_mean_turnover": max_cross_hive_mean_turnover,
             "max_cross_hive_max_turnover": max_cross_hive_max_turnover,
             "max_cross_hive_rolling_turnover": max_cross_hive_rolling_turnover,
+            "min_novaspine_turnover_quality": min_novaspine_turnover_quality,
             "max_memory_turnover_pressure": max_memory_turnover_pressure,
             "max_memory_turnover_dampener": max_memory_turnover_dampener,
             "min_aion_feedback_risk_scale": min_aion_feedback_risk_scale,
@@ -594,6 +614,7 @@ def build_alert_payload(
             "cross_hive_mean_turnover": cross_hive_mean_turnover,
             "cross_hive_max_turnover": cross_hive_max_turnover,
             "cross_hive_rolling_turnover": cross_hive_rolling_turnover,
+            "novaspine_turnover_quality": novaspine_turnover_quality,
             "memory_turnover_pressure": memory_turnover_pressure,
             "memory_turnover_dampener": memory_turnover_dampener,
             "aion_feedback_active": aion_feedback_active,
@@ -656,6 +677,7 @@ if __name__ == "__main__":
     max_cross_hive_mean_turnover = float(os.getenv("Q_MAX_CROSS_HIVE_MEAN_TURNOVER", "0.45"))
     max_cross_hive_max_turnover = float(os.getenv("Q_MAX_CROSS_HIVE_MAX_TURNOVER", "1.00"))
     max_cross_hive_rolling_turnover = float(os.getenv("Q_MAX_CROSS_HIVE_ROLLING_TURNOVER", "1.25"))
+    min_novaspine_turnover_quality = float(os.getenv("Q_MIN_NOVASPINE_TURNOVER_QUALITY", "0.45"))
     max_memory_turnover_pressure = float(os.getenv("Q_MAX_MEMORY_TURNOVER_PRESSURE", "0.72"))
     max_memory_turnover_dampener = float(os.getenv("Q_MAX_MEMORY_TURNOVER_DAMPENER", "0.10"))
     aion_feedback_source_pref = normalize_source_preference(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto"))
@@ -718,6 +740,7 @@ if __name__ == "__main__":
             "max_cross_hive_mean_turnover": max_cross_hive_mean_turnover,
             "max_cross_hive_max_turnover": max_cross_hive_max_turnover,
             "max_cross_hive_rolling_turnover": max_cross_hive_rolling_turnover,
+            "min_novaspine_turnover_quality": min_novaspine_turnover_quality,
             "max_memory_turnover_pressure": max_memory_turnover_pressure,
             "max_memory_turnover_dampener": max_memory_turnover_dampener,
             "min_aion_feedback_risk_scale": float(os.getenv("Q_MIN_AION_FEEDBACK_RISK_SCALE", "0.80")),
