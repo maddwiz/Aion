@@ -57,6 +57,13 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
             "external_position_risk_scale": 0.82,
             "overlay_block_new_entries": True,
             "overlay_block_reasons": ["critical_flag:fracture_alert"],
+            "aion_feedback_active": True,
+            "aion_feedback_status": "warn",
+            "aion_feedback_risk_scale": 0.88,
+            "aion_feedback_closed_trades": 12,
+            "aion_feedback_age_hours": 96.0,
+            "aion_feedback_max_age_hours": 72.0,
+            "aion_feedback_stale": False,
             "policy_block_new_entries": False,
         },
     )
@@ -90,6 +97,10 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     assert s["runtime_controls"]["external_position_risk_scale"] == 0.82
     assert s["runtime_controls"]["overlay_block_new_entries"] is True
     assert "critical_flag:fracture_alert" in s["runtime_controls"]["overlay_block_reasons"]
+    assert s["aion_feedback_runtime"]["present"] is True
+    assert s["aion_feedback_runtime"]["source"] == "runtime_controls"
+    assert s["aion_feedback_runtime"]["state"] == "stale"
+    assert s["aion_feedback_runtime"]["stale"] is True
     assert s["runtime_decision"]["entry_blocked"] is True
     assert any("external_overlay" in x for x in s["runtime_decision"]["entry_block_reasons"])
     assert s["runtime_decision"]["throttle_state"] in {"warn", "alert"}

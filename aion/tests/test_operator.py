@@ -37,7 +37,14 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
     state_dir.mkdir(parents=True, exist_ok=True)
     (log_dir / "doctor_report.json").write_text('{"ok": true, "ib": {"configured_port": 4002}}', encoding="utf-8")
     (state_dir / "runtime_controls.json").write_text(
-        '{"max_trades_cap_runtime": 9, "overlay_block_new_entries": true, "overlay_block_reasons": ["critical_flag:fracture_alert"]}',
+        (
+            '{"max_trades_cap_runtime": 9, "overlay_block_new_entries": true, '
+            '"overlay_block_reasons": ["critical_flag:fracture_alert"], '
+            '"aion_feedback_active": true, "aion_feedback_status": "warn", '
+            '"aion_feedback_risk_scale": 0.88, "aion_feedback_closed_trades": 12, '
+            '"aion_feedback_age_hours": 80.0, "aion_feedback_max_age_hours": 72.0, '
+            '"aion_feedback_stale": false}'
+        ),
         encoding="utf-8",
     )
     ext = tmp_path / "overlay.json"
@@ -65,6 +72,10 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
     assert payload["runtime_controls"]["max_trades_cap_runtime"] == 9
     assert payload["runtime_controls"]["overlay_block_new_entries"] is True
     assert "critical_flag:fracture_alert" in payload["runtime_controls"]["overlay_block_reasons"]
+    assert payload["aion_feedback_runtime"]["present"] is True
+    assert payload["aion_feedback_runtime"]["source"] == "runtime_controls"
+    assert payload["aion_feedback_runtime"]["state"] == "stale"
+    assert payload["aion_feedback_runtime"]["stale"] is True
     assert payload["runtime_decision"]["entry_blocked"] is True
     assert any("external_overlay" in x for x in payload["runtime_decision"]["entry_block_reasons"])
     assert isinstance(payload["runtime_remediation"], list)

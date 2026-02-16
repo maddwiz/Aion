@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from aion.exec.runtime_health import runtime_controls_stale_info, runtime_controls_stale_threshold_sec
+from aion.exec.runtime_health import (
+    aion_feedback_runtime_info,
+    runtime_controls_stale_info,
+    runtime_controls_stale_threshold_sec,
+)
 
 
 def test_runtime_controls_stale_threshold_uses_watchlist_and_loop_seconds():
@@ -25,3 +29,42 @@ def test_runtime_controls_stale_info_reads_payload_and_age(tmp_path: Path):
     assert info["payload"]["loop_seconds"] == 20
     assert info["age_sec"] is not None
     assert info["threshold_sec"] >= 120
+
+
+def test_aion_feedback_runtime_info_prefers_runtime_controls_and_flags_stale():
+    out = aion_feedback_runtime_info(
+        {
+            "aion_feedback_active": True,
+            "aion_feedback_status": "warn",
+            "aion_feedback_risk_scale": 0.88,
+            "aion_feedback_closed_trades": 14,
+            "aion_feedback_age_hours": 96.0,
+            "aion_feedback_max_age_hours": 72.0,
+            "aion_feedback_stale": False,
+        },
+        {"runtime_context": {"aion_feedback": {"active": True, "status": "ok", "risk_scale": 1.0}}},
+    )
+    assert out["source"] == "runtime_controls"
+    assert out["present"] is True
+    assert out["stale"] is True
+    assert out["state"] == "stale"
+
+
+def test_aion_feedback_runtime_info_falls_back_to_overlay_context():
+    out = aion_feedback_runtime_info(
+        {},
+        {
+            "runtime_context": {
+                "aion_feedback": {
+                    "active": True,
+                    "status": "alert",
+                    "risk_scale": 0.76,
+                    "closed_trades": 20,
+                    "stale": False,
+                }
+            }
+        },
+    )
+    assert out["source"] == "overlay_runtime_context"
+    assert out["state"] == "alert"
+    assert out["present"] is True

@@ -267,7 +267,13 @@ def runtime_decision_summary(
     elif aion_state == "warn":
         score += 1
         throttle_reasons.append("aion_outcome_warn")
-    if _to_bool(rc.get("aion_feedback_stale", False)):
+    aion_stale = _to_bool(rc.get("aion_feedback_stale", False))
+    if not aion_stale:
+        af_age = _to_float(rc.get("aion_feedback_age_hours"), None)
+        af_max_age = _to_float(rc.get("aion_feedback_max_age_hours"), None)
+        if af_age is not None and af_max_age is not None and af_max_age > 0 and af_age > af_max_age:
+            aion_stale = True
+    if aion_stale:
         score += 1
         throttle_reasons.append("aion_outcome_stale")
 

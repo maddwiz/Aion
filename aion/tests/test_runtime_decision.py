@@ -147,3 +147,23 @@ def test_runtime_decision_summary_aion_feedback_stale_triggers_recalibration():
     )
     assert "aion_outcome_stale" in out["throttle_reasons"]
     assert any(a.get("id") == "aion_outcome_recalibration" for a in out["recommended_actions"])
+
+
+def test_runtime_decision_summary_aion_feedback_age_based_stale_triggers_recalibration():
+    out = runtime_decision_summary(
+        runtime_controls={
+            "overlay_block_new_entries": False,
+            "policy_block_new_entries": False,
+            "aion_feedback_stale": False,
+            "aion_feedback_age_hours": 96.0,
+            "aion_feedback_max_age_hours": 72.0,
+            "external_position_risk_scale": 1.0,
+            "external_runtime_scale": 1.0,
+            "exec_governor_state": "ok",
+            "memory_feedback_status": "ok",
+        },
+        external_overlay_runtime={"stale": False},
+        external_overlay_risk_flags=[],
+    )
+    assert "aion_outcome_stale" in out["throttle_reasons"]
+    assert any(a.get("id") == "aion_outcome_recalibration" for a in out["recommended_actions"])
