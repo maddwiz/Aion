@@ -128,6 +128,11 @@ def test_event_to_novaspine_ingest_promotes_runtime_context_summary():
                 "external_regime": "balanced",
                 "external_overlay_stale": False,
                 "external_risk_flags": ["drift_warn", "aion_outcome_warn"],
+                "memory_feedback_status": "warn",
+                "memory_feedback_risk_scale": 0.89,
+                "memory_feedback_turnover_pressure": 0.47,
+                "memory_feedback_turnover_dampener": 0.04,
+                "memory_feedback_block_new_entries": False,
                 "aion_feedback_status": "warn",
                 "aion_feedback_source": "overlay",
                 "aion_feedback_source_selected": "shadow_trades",
@@ -148,6 +153,10 @@ def test_event_to_novaspine_ingest_promotes_runtime_context_summary():
     assert rc.get("aion_feedback_source") == "overlay"
     assert rc.get("aion_feedback_source_selected") == "shadow_trades"
     assert rc.get("aion_feedback_source_preference") == "shadow"
+    assert rc.get("memory_feedback_status") == "warn"
+    assert rc.get("memory_feedback_risk_scale") == 0.89
+    assert rc.get("memory_feedback_turnover_pressure") == 0.47
+    assert rc.get("memory_feedback_turnover_dampener") == 0.04
     assert rc.get("exec_governor_state") == "warn"
     assert rc.get("policy_block_new_entries") is False
 

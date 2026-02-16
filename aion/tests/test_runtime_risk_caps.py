@@ -555,6 +555,8 @@ def test_memory_feedback_controls_scale_runtime_and_block(monkeypatch):
             "risk_scale": 0.80,
             "max_trades_scale": 0.76,
             "max_open_scale": 0.82,
+            "turnover_pressure": 0.78,
+            "turnover_dampener": 0.11,
             "block_new_entries": False,
             "reasons": ["low_context_resonance"],
         },
@@ -564,6 +566,8 @@ def test_memory_feedback_controls_scale_runtime_and_block(monkeypatch):
     assert out["max_trades_cap_runtime"] < 15
     assert out["max_open_positions_runtime"] < 6
     assert out["risk_per_trade_runtime"] < 0.02
+    assert out["turnover_pressure"] == 0.78
+    assert out["turnover_dampener"] == 0.11
 
 
 def test_memory_feedback_controls_disabled_noop(monkeypatch):

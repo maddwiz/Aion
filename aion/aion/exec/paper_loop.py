@@ -87,6 +87,8 @@ def _compact_memory_runtime_context(
     ext_overlay_age_source: str,
     memory_feedback_status: str,
     memory_feedback_risk_scale: float,
+    memory_feedback_turnover_pressure: float | None,
+    memory_feedback_turnover_dampener: float | None,
     memory_feedback_block_new_entries: bool,
     aion_feedback_status: str,
     aion_feedback_source: str,
@@ -121,6 +123,16 @@ def _compact_memory_runtime_context(
         "external_risk_flags": flags,
         "memory_feedback_status": str(memory_feedback_status or "unknown").strip().lower() or "unknown",
         "memory_feedback_risk_scale": float(_safe_float(memory_feedback_risk_scale, 1.0)),
+        "memory_feedback_turnover_pressure": (
+            None
+            if memory_feedback_turnover_pressure is None
+            else float(_safe_float(memory_feedback_turnover_pressure, 0.0))
+        ),
+        "memory_feedback_turnover_dampener": (
+            None
+            if memory_feedback_turnover_dampener is None
+            else float(_safe_float(memory_feedback_turnover_dampener, 0.0))
+        ),
         "memory_feedback_block_new_entries": bool(memory_feedback_block_new_entries),
         "aion_feedback_status": str(aion_feedback_status or "unknown").strip().lower() or "unknown",
         "aion_feedback_source": str(aion_feedback_source or "unknown").strip().lower() or "unknown",
@@ -440,6 +452,8 @@ def _memory_feedback_controls(
         "risk_scale": 1.0,
         "trades_scale": 1.0,
         "open_scale": 1.0,
+        "turnover_pressure": None,
+        "turnover_dampener": None,
         "block_new_entries": False,
         "max_trades_cap_runtime": int(max(1, int(max_trades_cap_runtime))),
         "max_open_positions_runtime": int(max(1, int(max_open_positions_runtime))),
@@ -473,6 +487,8 @@ def _memory_feedback_controls(
     out["risk_scale"] = float(risk_scale)
     out["trades_scale"] = float(trades_scale)
     out["open_scale"] = float(open_scale)
+    out["turnover_pressure"] = _safe_float(memory_feedback.get("turnover_pressure"), None)
+    out["turnover_dampener"] = _safe_float(memory_feedback.get("turnover_dampener"), None)
 
     out["max_trades_cap_runtime"] = max(
         1,
@@ -1195,6 +1211,8 @@ def main() -> int:
             memory_feedback_risk_scale = 1.0
             memory_feedback_trades_scale = 1.0
             memory_feedback_open_scale = 1.0
+            memory_feedback_turnover_pressure = None
+            memory_feedback_turnover_dampener = None
             memory_feedback_block_new_entries = False
             aion_feedback_active = False
             aion_feedback_status = "unknown"
@@ -1307,6 +1325,8 @@ def main() -> int:
                 memory_feedback_risk_scale = _safe_float(mem_ctl.get("risk_scale"), 1.0)
                 memory_feedback_trades_scale = _safe_float(mem_ctl.get("trades_scale"), 1.0)
                 memory_feedback_open_scale = _safe_float(mem_ctl.get("open_scale"), 1.0)
+                memory_feedback_turnover_pressure = _safe_float(mem_ctl.get("turnover_pressure"), None)
+                memory_feedback_turnover_dampener = _safe_float(mem_ctl.get("turnover_dampener"), None)
                 memory_feedback_block_new_entries = bool(mem_ctl.get("block_new_entries", False))
                 aion_fb = ext_bundle.get("aion_feedback", {}) if isinstance(ext_bundle, dict) else {}
                 aion_ctl = _aion_feedback_controls(aion_fb if isinstance(aion_fb, dict) else {})
@@ -1379,18 +1399,28 @@ def main() -> int:
                     round(float(memory_feedback_risk_scale), 4),
                     round(float(memory_feedback_trades_scale), 4),
                     round(float(memory_feedback_open_scale), 4),
+                    None
+                    if memory_feedback_turnover_pressure is None
+                    else round(float(memory_feedback_turnover_pressure), 4),
+                    None
+                    if memory_feedback_turnover_dampener is None
+                    else round(float(memory_feedback_turnover_dampener), 4),
                 )
                 if mem_sig != last_memory_feedback_sig and mem_sig[0]:
                     reason_txt = ",".join(mem_sig[2]) if mem_sig[2] else "none"
                     log_run(
                         "NovaSpine memory feedback "
                         f"status={mem_sig[1]} reasons={reason_txt} block_new={mem_sig[3]} "
-                        f"risk_scale={mem_sig[4]:.3f} trades_scale={mem_sig[5]:.3f} open_scale={mem_sig[6]:.3f}"
+                        f"risk_scale={mem_sig[4]:.3f} trades_scale={mem_sig[5]:.3f} open_scale={mem_sig[6]:.3f} "
+                        f"turnover_pressure={(f'{mem_sig[7]:.3f}' if isinstance(mem_sig[7], float) else 'na')} "
+                        f"turnover_dampener={(f'{mem_sig[8]:.3f}' if isinstance(mem_sig[8], float) else 'na')}"
                     )
                     if cfg.MONITORING_ENABLED and (mem_sig[1] in {"warn", "alert"} or mem_sig[3]):
                         monitor.record_system_event(
                             "novaspine_memory_feedback",
-                            f"status={mem_sig[1]} reasons={reason_txt} block_new={mem_sig[3]} risk_scale={mem_sig[4]:.3f}",
+                            f"status={mem_sig[1]} reasons={reason_txt} block_new={mem_sig[3]} risk_scale={mem_sig[4]:.3f} "
+                            f"turnover_pressure={(f'{mem_sig[7]:.3f}' if isinstance(mem_sig[7], float) else 'na')} "
+                            f"turnover_dampener={(f'{mem_sig[8]:.3f}' if isinstance(mem_sig[8], float) else 'na')}",
                         )
                 last_memory_feedback_sig = mem_sig
                 aion_sig = (
@@ -1602,6 +1632,16 @@ def main() -> int:
                     "memory_feedback_risk_scale": float(memory_feedback_risk_scale),
                     "memory_feedback_trades_scale": float(memory_feedback_trades_scale),
                     "memory_feedback_open_scale": float(memory_feedback_open_scale),
+                    "memory_feedback_turnover_pressure": (
+                        None
+                        if memory_feedback_turnover_pressure is None
+                        else float(memory_feedback_turnover_pressure)
+                    ),
+                    "memory_feedback_turnover_dampener": (
+                        None
+                        if memory_feedback_turnover_dampener is None
+                        else float(memory_feedback_turnover_dampener)
+                    ),
                     "memory_feedback_block_new_entries": bool(memory_feedback_block_new_entries),
                     "aion_feedback_active": bool(aion_feedback_active),
                     "aion_feedback_status": str(aion_feedback_status),
@@ -1660,6 +1700,8 @@ def main() -> int:
                 ext_overlay_age_source=str(ext_overlay_age_source),
                 memory_feedback_status=str(memory_feedback_status),
                 memory_feedback_risk_scale=float(memory_feedback_risk_scale),
+                memory_feedback_turnover_pressure=memory_feedback_turnover_pressure,
+                memory_feedback_turnover_dampener=memory_feedback_turnover_dampener,
                 memory_feedback_block_new_entries=bool(memory_feedback_block_new_entries),
                 aion_feedback_status=str(aion_feedback_status),
                 aion_feedback_source=str(aion_feedback_source),

@@ -36,6 +36,8 @@ def test_aion_feedback_lineage_flows_into_novaspine_metadata(monkeypatch):
         ext_overlay_age_source="payload",
         memory_feedback_status="ok",
         memory_feedback_risk_scale=1.0,
+        memory_feedback_turnover_pressure=0.42,
+        memory_feedback_turnover_dampener=0.03,
         memory_feedback_block_new_entries=False,
         aion_feedback_status=str(ctl["status"]),
         aion_feedback_source=str(ctl["source"]),
@@ -71,4 +73,7 @@ def test_aion_feedback_lineage_flows_into_novaspine_metadata(monkeypatch):
     assert rc.get("aion_feedback_source_selected") == "shadow_trades"
     assert rc.get("aion_feedback_source_preference") == "shadow"
     assert rc.get("external_regime") == "balanced"
+    assert rc.get("memory_feedback_status") == "ok"
+    assert rc.get("memory_feedback_turnover_pressure") == 0.42
+    assert rc.get("memory_feedback_turnover_dampener") == 0.03
     assert rc.get("exec_governor_state") == "warn"
