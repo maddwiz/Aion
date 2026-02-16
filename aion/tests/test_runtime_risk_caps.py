@@ -229,6 +229,17 @@ def test_runtime_risk_caps_hive_turnover_alert_tightens_caps():
     assert opens <= 2
 
 
+def test_runtime_risk_caps_memory_turnover_alert_tightens_caps():
+    trades, opens = _runtime_risk_caps(
+        max_trades_cap=20,
+        max_open_positions_cap=8,
+        ext_runtime_scale=1.0,
+        ext_runtime_diag={"flags": ["memory_turnover_alert"], "degraded": False, "quality_gate_ok": True, "regime": "balanced"},
+    )
+    assert trades <= 12
+    assert opens <= 2
+
+
 def test_runtime_position_risk_scale_hive_entropy_alert_tighter_than_warn():
     s_warn = _runtime_position_risk_scale(
         ext_runtime_scale=1.0,
@@ -249,6 +260,18 @@ def test_runtime_position_risk_scale_hive_turnover_alert_tighter_than_warn():
     s_alert = _runtime_position_risk_scale(
         ext_runtime_scale=1.0,
         ext_runtime_diag={"flags": ["hive_turnover_alert"], "degraded": False, "quality_gate_ok": True, "regime": "balanced"},
+    )
+    assert 0.2 <= s_alert < s_warn < 1.0
+
+
+def test_runtime_position_risk_scale_memory_turnover_alert_tighter_than_warn():
+    s_warn = _runtime_position_risk_scale(
+        ext_runtime_scale=1.0,
+        ext_runtime_diag={"flags": ["memory_turnover_warn"], "degraded": False, "quality_gate_ok": True, "regime": "balanced"},
+    )
+    s_alert = _runtime_position_risk_scale(
+        ext_runtime_scale=1.0,
+        ext_runtime_diag={"flags": ["memory_turnover_alert"], "degraded": False, "quality_gate_ok": True, "regime": "balanced"},
     )
     assert 0.2 <= s_alert < s_warn < 1.0
 
@@ -369,6 +392,21 @@ def test_overlay_entry_gate_blocks_hive_turnover_critical_flag(monkeypatch):
     )
     assert blocked is True
     assert "critical_flag:hive_turnover_alert" in reasons
+
+
+def test_overlay_entry_gate_blocks_memory_turnover_critical_flag(monkeypatch):
+    monkeypatch.setattr(pl.cfg, "EXT_SIGNAL_ENABLED", True)
+    monkeypatch.setattr(pl.cfg, "EXT_SIGNAL_BLOCK_CRITICAL", True)
+    monkeypatch.setattr(pl.cfg, "EXT_SIGNAL_BLOCK_CRITICAL_FLAGS", ["memory_turnover_alert"])
+    monkeypatch.setattr(pl.cfg, "EXT_SIGNAL_BLOCK_ON_QUALITY_FAIL", False)
+    monkeypatch.setattr(pl.cfg, "EXT_SIGNAL_BLOCK_STALE_HOURS", 24.0)
+
+    blocked, reasons = pl._overlay_entry_gate(
+        ext_runtime_diag={"flags": ["memory_turnover_alert"], "quality_gate_ok": True, "overlay_stale": False},
+        overlay_age_hours=2.0,
+    )
+    assert blocked is True
+    assert "critical_flag:memory_turnover_alert" in reasons
 
 
 def test_overlay_entry_gate_blocks_stale_when_age_over_threshold(monkeypatch):

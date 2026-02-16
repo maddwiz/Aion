@@ -176,6 +176,20 @@ def _remediation_actions(blocked_reasons: list[str], throttle_reasons: list[str]
                 ],
             )
         )
+    if any(x in {"memory_turnover_alert", "memory_turnover_warn"} for x in tr):
+        acts.append(
+            _action(
+                "memory_turnover_throttle",
+                1,
+                "Stabilize NovaSpine memory turnover stress",
+                "NovaSpine turnover pressure indicates unstable memory-driven regime transitions.",
+                [
+                    "Inspect /Users/desmondpottle/Documents/New project/q/runs_plus/novaspine_context.json turnover_pressure and turnover_dampener",
+                    "Inspect /Users/desmondpottle/Documents/New project/q/runs_plus/novaspine_hive_feedback.json turnover_pressure and per_hive boosts",
+                    "Re-run q/tools/run_novaspine_context.py, q/tools/run_novaspine_hive_feedback.py, and q/tools/export_aion_signal_pack.py before restoring risk",
+                ],
+            )
+        )
     if any(x.startswith("aion_feedback") for x in br) or any(
         x in {"aion_outcome_alert", "aion_outcome_warn", "aion_outcome_stale"} for x in tr
     ):
@@ -309,6 +323,12 @@ def runtime_decision_summary(
     elif "hive_turnover_warn" in ext_flags:
         score += 1
         throttle_reasons.append("hive_turnover_warn")
+    if "memory_turnover_alert" in ext_flags:
+        score += 2
+        throttle_reasons.append("memory_turnover_alert")
+    elif "memory_turnover_warn" in ext_flags:
+        score += 1
+        throttle_reasons.append("memory_turnover_warn")
     if "aion_outcome_alert" in ext_flags:
         score += 2
         throttle_reasons.append("aion_outcome_alert")
@@ -326,6 +346,7 @@ def runtime_decision_summary(
         or "hive_crowding_alert" in ext_flags
         or "hive_entropy_alert" in ext_flags
         or "hive_turnover_alert" in ext_flags
+        or "memory_turnover_alert" in ext_flags
         or "aion_outcome_alert" in ext_flags
     ):
         score += 1

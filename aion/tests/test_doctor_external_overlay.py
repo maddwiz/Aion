@@ -133,13 +133,14 @@ def test_overlay_remediation_includes_hive_and_outcome_guidance(tmp_path: Path):
                 "degraded_safe_mode": False,
                 "quality_gate_ok": True,
                 "runtime_context_present": True,
-                "risk_flags": [
-                    "hive_crowding_alert",
-                    "hive_entropy_warn",
-                    "hive_turnover_alert",
-                    "aion_outcome_alert",
-                    "aion_outcome_stale",
-                    "memory_feedback_warn",
+                    "risk_flags": [
+                        "hive_crowding_alert",
+                        "hive_entropy_warn",
+                        "hive_turnover_alert",
+                        "memory_turnover_alert",
+                        "aion_outcome_alert",
+                        "aion_outcome_stale",
+                        "memory_feedback_warn",
                 ],
             },
         }
@@ -149,6 +150,7 @@ def test_overlay_remediation_includes_hive_and_outcome_guidance(tmp_path: Path):
     assert "crowding" in joined
     assert "entropy" in joined
     assert "turnover" in joined
+    assert "memory turnover" in joined
     assert "outcome feedback" in joined
     assert "stale" in joined
     assert "memory feedback" in joined

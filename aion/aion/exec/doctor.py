@@ -381,6 +381,10 @@ def _overlay_remediation(checks: list[dict], overlay_path: Path) -> list[str]:
         add_tip("NovaSpine memory feedback ALERT is active. Validate memory backend health and recompute context/hive feedback.")
     elif "memory_feedback_warn" in flags:
         add_tip("NovaSpine memory feedback WARN is active. Check recall quality and monitor feedback risk scale.")
+    if "memory_turnover_alert" in flags:
+        add_tip("NovaSpine memory turnover ALERT is active. Reduce risk and inspect turnover_pressure/turnover_dampener in novaspine_context.json and novaspine_hive_feedback.json.")
+    elif "memory_turnover_warn" in flags:
+        add_tip("NovaSpine memory turnover WARN is active. Verify memory turnover pressure is stable before restoring risk.")
     if "aion_outcome_alert" in flags:
         add_tip("AION outcome feedback ALERT is active. Inspect recent closed-trade quality and recalibrate Q->AION outcome feedback.")
     elif "aion_outcome_warn" in flags:

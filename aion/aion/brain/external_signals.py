@@ -48,6 +48,7 @@ def _canonicalize_flags(flags) -> list[str]:
         ("heartbeat_alert", "heartbeat_warn"),
         ("council_divergence_alert", "council_divergence_warn"),
         ("memory_feedback_alert", "memory_feedback_warn"),
+        ("memory_turnover_alert", "memory_turnover_warn"),
     ]
     s = set(out)
     for strong, weak in stronger_to_weaker:
@@ -163,6 +164,8 @@ def load_external_signal_bundle(
             "max_trades_scale": 1.0,
             "max_open_scale": 1.0,
             "block_new_entries": False,
+            "turnover_pressure": None,
+            "turnover_dampener": None,
             "reasons": [],
         },
         "aion_feedback": {
@@ -237,6 +240,8 @@ def load_external_signal_bundle(
                     "max_trades_scale": _clamp(_safe_float(mf.get("max_trades_scale", 1.0), 1.0), 0.20, 1.20),
                     "max_open_scale": _clamp(_safe_float(mf.get("max_open_scale", 1.0), 1.0), 0.20, 1.20),
                     "block_new_entries": bool(mf.get("block_new_entries", False)),
+                    "turnover_pressure": _safe_float(mf.get("turnover_pressure", float("nan")), default=float("nan")),
+                    "turnover_dampener": _safe_float(mf.get("turnover_dampener", float("nan")), default=float("nan")),
                     "reasons": _uniq_flags(mf.get("reasons", [])),
                 }
             af = ctx.get("aion_feedback", {})
@@ -343,6 +348,8 @@ def runtime_overlay_scale(
     council_divergence_alert_scale: float = 0.74,
     aion_outcome_warn_scale: float = 0.90,
     aion_outcome_alert_scale: float = 0.74,
+    memory_turnover_warn_scale: float = 0.88,
+    memory_turnover_alert_scale: float = 0.72,
     aion_outcome_stale_scale: float = 0.88,
     overlay_stale_scale: float = 0.82,
 ):
@@ -416,6 +423,10 @@ def runtime_overlay_scale(
             scale *= float(_clamp(aion_outcome_alert_scale, 0.20, 1.20))
         elif "aion_outcome_warn" in flags:
             scale *= float(_clamp(aion_outcome_warn_scale, 0.20, 1.20))
+        if "memory_turnover_alert" in flags:
+            scale *= float(_clamp(memory_turnover_alert_scale, 0.20, 1.20))
+        elif "memory_turnover_warn" in flags:
+            scale *= float(_clamp(memory_turnover_warn_scale, 0.20, 1.20))
         if "aion_outcome_stale" in flags:
             scale *= float(_clamp(aion_outcome_stale_scale, 0.20, 1.20))
     scale = _clamp(scale, float(min_scale), float(max_scale))

@@ -50,6 +50,8 @@ def test_load_external_signal_bundle_parses_memory_feedback(tmp_path: Path):
                         "max_trades_scale": 0.88,
                         "max_open_scale": 0.90,
                         "block_new_entries": False,
+                        "turnover_pressure": 0.51,
+                        "turnover_dampener": 0.04,
                         "reasons": ["memory_partial_or_disabled"],
                     },
                 },
@@ -64,6 +66,8 @@ def test_load_external_signal_bundle_parses_memory_feedback(tmp_path: Path):
     assert mf.get("active") is True
     assert mf.get("status") == "warn"
     assert float(mf.get("risk_scale")) < 1.0
+    assert float(mf.get("turnover_pressure")) > 0.0
+    assert float(mf.get("turnover_dampener")) > 0.0
     assert "memory_feedback_warn" in b.get("risk_flags", [])
 
 
@@ -410,6 +414,62 @@ def test_runtime_overlay_scale_uses_stronger_turnover_flag_when_warn_and_alert_p
         {
             "runtime_multiplier": 1.0,
             "risk_flags": ["hive_turnover_warn", "hive_turnover_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.95,
+    )
+    assert scale_both == scale_alert
+
+
+def test_runtime_overlay_scale_applies_memory_turnover_penalty():
+    scale_warn, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["memory_turnover_warn"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.35,
+        max_scale=1.10,
+        flag_scale=0.96,
+        memory_turnover_warn_scale=0.88,
+        memory_turnover_alert_scale=0.72,
+    )
+    scale_alert, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["memory_turnover_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.35,
+        max_scale=1.10,
+        flag_scale=0.96,
+        memory_turnover_warn_scale=0.88,
+        memory_turnover_alert_scale=0.72,
+    )
+    assert scale_alert < scale_warn < 1.0
+
+
+def test_runtime_overlay_scale_uses_stronger_memory_turnover_flag_when_warn_and_alert_present():
+    scale_alert, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["memory_turnover_alert"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.95,
+    )
+    scale_both, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["memory_turnover_warn", "memory_turnover_alert"],
             "degraded_safe_mode": False,
             "quality_gate_ok": True,
         },
