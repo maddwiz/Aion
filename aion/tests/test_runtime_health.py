@@ -160,6 +160,36 @@ def test_memory_feedback_runtime_info_defaults_inactive_when_missing():
     assert out["reasons"] == []
 
 
+def test_memory_feedback_runtime_info_warns_on_dampener_even_without_pressure():
+    out = memory_feedback_runtime_info(
+        {
+            "memory_feedback_active": True,
+            "memory_feedback_status": "ok",
+            "memory_feedback_risk_scale": 1.0,
+            "memory_feedback_turnover_dampener": 0.06,
+        },
+        {},
+    )
+    assert out["state"] == "warn"
+    assert out["severity"] == 2
+    assert out["turnover_dampener"] == 0.06
+
+
+def test_memory_feedback_runtime_info_alerts_on_dampener_threshold():
+    out = memory_feedback_runtime_info(
+        {
+            "memory_feedback_active": True,
+            "memory_feedback_status": "ok",
+            "memory_feedback_risk_scale": 1.0,
+            "memory_feedback_turnover_dampener": 0.12,
+        },
+        {},
+    )
+    assert out["state"] == "alert"
+    assert out["severity"] == 3
+    assert out["turnover_dampener"] == 0.12
+
+
 def test_overlay_runtime_status_prefers_payload_timestamp_over_mtime(tmp_path: Path):
     p = tmp_path / "overlay.json"
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

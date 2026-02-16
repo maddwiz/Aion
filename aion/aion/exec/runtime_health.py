@@ -379,6 +379,7 @@ def memory_feedback_runtime_info(
     active = bool(data.get("active", False))
     risk_scale = data.get("risk_scale")
     pressure = data.get("turnover_pressure")
+    dampener = data.get("turnover_dampener")
 
     if not active:
         state = "inactive"
@@ -393,6 +394,10 @@ def memory_feedback_runtime_info(
     elif pressure is not None and pressure >= 0.72:
         state = "alert"
     elif pressure is not None and pressure >= 0.45:
+        state = "warn"
+    elif dampener is not None and dampener >= 0.10:
+        state = "alert"
+    elif dampener is not None and dampener >= 0.05:
         state = "warn"
     elif status == "ok":
         state = "ok"
