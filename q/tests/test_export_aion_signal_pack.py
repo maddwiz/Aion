@@ -10,6 +10,10 @@ def _write_series(path: Path, vals):
     path.write_text("\n".join(str(v) for v in vals), encoding="utf-8")
 
 
+def _write_json(path: Path, text: str):
+    path.write_text(text, encoding="utf-8")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_aion_feedback_env(monkeypatch, tmp_path: Path):
     # Keep runtime-context tests deterministic regardless of local AION logs.
@@ -401,3 +405,50 @@ def test_runtime_context_carries_aion_feedback_source_preference(tmp_path: Path,
     assert afb.get("source") == "shadow_trades"
     assert afb.get("source_selected") == "shadow_trades"
     assert afb.get("source_preference") == "shadow"
+
+
+def test_quality_gate_treats_soft_aion_alerts_as_effectively_ok(tmp_path: Path, monkeypatch):
+    _write_json(tmp_path / "system_health.json", '{"health_score": 91.0}')
+    _write_json(
+        tmp_path / "health_alerts.json",
+        (
+            '{"ok": false, '
+            '"alerts": ["aion_feedback_warn", "aion_feedback_low_sample", "health_issues>2"]}'
+        ),
+    )
+    monkeypatch.setenv("Q_EXPORT_SOFT_ALERT_PREFIXES", "aion_feedback_")
+
+    qgate = ex._quality_gate(
+        health_json=tmp_path / "system_health.json",
+        alerts_json=tmp_path / "health_alerts.json",
+        min_health_score=70.0,
+        max_health_age_hours=8.0,
+    )
+    assert qgate["ok"] is True
+    assert qgate["alerts_ok"] is False
+    assert qgate["alerts_effective_ok"] is True
+    assert qgate["alerts_total"] == 3
+    assert qgate["alerts_hard"] == 0
+    assert "health alerts not clear" not in qgate["issues"]
+
+
+def test_quality_gate_keeps_hard_alerts_blocking(tmp_path: Path, monkeypatch):
+    _write_json(tmp_path / "system_health.json", '{"health_score": 91.0}')
+    _write_json(
+        tmp_path / "health_alerts.json",
+        '{"ok": false, "alerts": ["aion_feedback_warn", "drift_alert", "health_issues>2"]}',
+    )
+    monkeypatch.setenv("Q_EXPORT_SOFT_ALERT_PREFIXES", "aion_feedback_")
+
+    qgate = ex._quality_gate(
+        health_json=tmp_path / "system_health.json",
+        alerts_json=tmp_path / "health_alerts.json",
+        min_health_score=70.0,
+        max_health_age_hours=8.0,
+    )
+    assert qgate["ok"] is False
+    assert qgate["alerts_ok"] is False
+    assert qgate["alerts_effective_ok"] is False
+    assert qgate["alerts_total"] == 3
+    assert qgate["alerts_hard"] >= 1
+    assert "health alerts not clear" in qgate["issues"]

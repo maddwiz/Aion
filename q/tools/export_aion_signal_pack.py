@@ -801,6 +801,32 @@ def _quality_gate(
     score = _safe_float(health.get("health_score", 0.0), default=0.0)
     age_h = _hours_since_file(health_json)
     alerts_ok = bool(alerts.get("ok", True))
+    raw_alerts = []
+    if isinstance(alerts, dict):
+        vals = alerts.get("alerts", [])
+        if isinstance(vals, list):
+            raw_alerts = [str(x).strip() for x in vals if str(x).strip()]
+
+    raw_soft_prefixes = str(os.getenv("Q_EXPORT_SOFT_ALERT_PREFIXES", "aion_feedback_")).strip()
+    soft_prefixes = [s.strip().lower() for s in raw_soft_prefixes.split(",") if s.strip()]
+
+    def _is_soft_non_health(alert_msg: str) -> bool:
+        msg = str(alert_msg).strip().lower()
+        if not msg:
+            return False
+        return any(msg.startswith(p) for p in soft_prefixes)
+
+    def _is_soft(alert_msg: str) -> bool:
+        msg = str(alert_msg).strip().lower()
+        if not msg:
+            return False
+        if msg.startswith("health_issues>"):
+            peers = [a for a in raw_alerts if not str(a).strip().lower().startswith("health_issues>")]
+            return bool(peers) and all(_is_soft_non_health(a) for a in peers)
+        return _is_soft_non_health(msg)
+
+    hard_alerts = [a for a in raw_alerts if not _is_soft(a)]
+    alerts_effective_ok = bool(alerts_ok or (raw_alerts and (len(hard_alerts) == 0)))
 
     if score < float(min_health_score):
         issues.append(f"health_score<{min_health_score} ({score:.1f})")
@@ -808,7 +834,7 @@ def _quality_gate(
         issues.append("system_health missing")
     elif age_h > float(max_health_age_hours):
         issues.append(f"system_health stale>{max_health_age_hours}h ({age_h:.2f}h)")
-    if not alerts_ok:
+    if not alerts_effective_ok:
         issues.append("health alerts not clear")
 
     return {
@@ -816,6 +842,9 @@ def _quality_gate(
         "score": score,
         "health_age_hours": age_h,
         "alerts_ok": alerts_ok,
+        "alerts_effective_ok": alerts_effective_ok,
+        "alerts_total": int(len(raw_alerts)),
+        "alerts_hard": int(len(hard_alerts)),
         "issues": issues,
     }
 
