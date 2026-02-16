@@ -202,6 +202,12 @@ def _runtime_risk_caps(
     elif "hive_crowding_warn" in flags:
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(4, int(max_open_positions_cap))))
         max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.82))))
+    if "hive_entropy_alert" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(3, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.70))))
+    elif "hive_entropy_warn" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(4, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.86))))
 
     # Heartbeat stress flags from Q heartbeat module.
     if "heartbeat_alert" in flags:
@@ -273,6 +279,10 @@ def _runtime_position_risk_scale(
         if "hive_crowding_alert" in flags:
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HIVE_ALERT_SCALE)))
         elif "hive_crowding_warn" in flags:
+            scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HIVE_WARN_SCALE)))
+        if "hive_entropy_alert" in flags:
+            scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HIVE_ALERT_SCALE)))
+        elif "hive_entropy_warn" in flags:
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HIVE_WARN_SCALE)))
         if "heartbeat_alert" in flags:
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_HEARTBEAT_ALERT_SCALE)))

@@ -56,6 +56,8 @@ def _canonicalize_risk_flags(flags) -> list[str]:
         ("exec_risk_hard", "exec_risk_tight"),
         ("nested_leakage_alert", "nested_leakage_warn"),
         ("hive_stress_alert", "hive_stress_warn"),
+        ("hive_crowding_alert", "hive_crowding_warn"),
+        ("hive_entropy_alert", "hive_entropy_warn"),
         ("heartbeat_alert", "heartbeat_warn"),
         ("council_divergence_alert", "council_divergence_warn"),
         ("memory_feedback_alert", "memory_feedback_warn"),
@@ -476,6 +478,11 @@ def _runtime_context(runs_dir: Path):
     ch_dis = _safe_float(ch_ad.get("mean_disagreement", np.nan), default=np.nan)
     ch_disp = _safe_float(ch_ad.get("mean_stability_dispersion", np.nan), default=np.nan)
     ch_frac = _safe_float(ch_ad.get("mean_regime_fracture", np.nan), default=np.nan)
+    ch_ent = cross_hive.get("entropy_adaptive_diagnostics", {}) if isinstance(cross_hive.get("entropy_adaptive_diagnostics"), dict) else {}
+    ent_target_mean = _safe_float(ch_ent.get("entropy_target_mean", np.nan), default=np.nan)
+    ent_target_max = _safe_float(ch_ent.get("entropy_target_max", np.nan), default=np.nan)
+    ent_strength_mean = _safe_float(ch_ent.get("entropy_strength_mean", np.nan), default=np.nan)
+    ent_strength_max = _safe_float(ch_ent.get("entropy_strength_max", np.nan), default=np.nan)
     ch_crowd = np.nan
     ch_crowd_obj = cross_hive.get("crowding_penalty_mean", {})
     if isinstance(ch_crowd_obj, dict):
@@ -499,6 +506,12 @@ def _runtime_context(runs_dir: Path):
         crowd_mod = _clamp(1.02 - 0.45 * max(0.0, ch_crowd), 0.68, 1.02)
         comps["hive_crowding_modifier"] = {"value": float(crowd_mod), "found": True}
         active_vals.append(float(crowd_mod))
+    if math.isfinite(ent_strength_mean) or math.isfinite(ent_target_mean):
+        esm = ent_strength_mean if math.isfinite(ent_strength_mean) else 0.25
+        etm = ent_target_mean if math.isfinite(ent_target_mean) else 0.60
+        ent_mod = _clamp(1.03 - 0.32 * max(0.0, esm - 0.35) - 0.20 * max(0.0, etm - 0.62), 0.72, 1.03)
+        comps["hive_entropy_pressure_modifier"] = {"value": float(ent_mod), "found": True}
+        active_vals.append(float(ent_mod))
 
     hive_evo = _load_json(runs_dir / "hive_evolution.json") or {}
     he_pressure = _safe_float(hive_evo.get("action_pressure_mean", np.nan), default=np.nan)
@@ -591,6 +604,13 @@ def _runtime_context(runs_dir: Path):
             risk_flags.append("hive_crowding_alert")
         elif ch_crowd > 0.42:
             risk_flags.append("hive_crowding_warn")
+    if math.isfinite(ent_strength_max) or math.isfinite(ent_target_max):
+        esm = ent_strength_max if math.isfinite(ent_strength_max) else 0.0
+        etm = ent_target_max if math.isfinite(ent_target_max) else 0.0
+        if (esm > 0.92) or (etm > 0.86):
+            risk_flags.append("hive_entropy_alert")
+        elif (esm > 0.78) or (etm > 0.74):
+            risk_flags.append("hive_entropy_warn")
 
     if math.isfinite(he_pressure) or math.isfinite(vit_min):
         pressure = he_pressure if math.isfinite(he_pressure) else 0.0

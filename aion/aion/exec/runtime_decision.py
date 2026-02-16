@@ -148,6 +148,20 @@ def _remediation_actions(blocked_reasons: list[str], throttle_reasons: list[str]
                 ],
             )
         )
+    if any(x in {"hive_entropy_alert", "hive_entropy_warn"} for x in tr):
+        acts.append(
+            _action(
+                "hive_entropy_regime_reset",
+                1,
+                "Re-evaluate regime diversification pressure",
+                "Adaptive entropy pressure indicates structurally unstable cross-hive regime.",
+                [
+                    "Inspect /Users/desmondpottle/Documents/New project/q/runs_plus/hive_entropy_schedule.csv",
+                    "Review /Users/desmondpottle/Documents/New project/q/runs_plus/cross_hive_summary.json entropy_adaptive_diagnostics",
+                    "Re-run q/tools/run_cross_hive.py and q/tools/run_regime_switcher.py before restoring risk",
+                ],
+            )
+        )
 
     if not acts:
         acts.append(
@@ -233,12 +247,19 @@ def runtime_decision_summary(
     elif "hive_crowding_warn" in ext_flags:
         score += 1
         throttle_reasons.append("hive_crowding_warn")
+    if "hive_entropy_alert" in ext_flags:
+        score += 2
+        throttle_reasons.append("hive_entropy_alert")
+    elif "hive_entropy_warn" in ext_flags:
+        score += 1
+        throttle_reasons.append("hive_entropy_warn")
 
     if (
         "fracture_alert" in ext_flags
         or "drift_alert" in ext_flags
         or "hive_stress_alert" in ext_flags
         or "hive_crowding_alert" in ext_flags
+        or "hive_entropy_alert" in ext_flags
     ):
         score += 1
         throttle_reasons.append("overlay_risk_flag_alert")
