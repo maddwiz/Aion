@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from qmods.novaspine_hive import build_hive_query, hive_boost, hive_resonance  # noqa: E402
+from qmods.novaspine_context import apply_turnover_dampener, turnover_pressure  # noqa: E402
 
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
@@ -43,6 +44,14 @@ def _json_request(url: str, payload: dict, token: str | None, timeout_sec: float
         raw = resp.read()
         data = json.loads(raw.decode("utf-8", errors="replace")) if raw else {}
         return code, data
+
+
+def _safe_float(x, default: float = 0.0) -> float:
+    try:
+        v = float(x)
+        return v if np.isfinite(v) else float(default)
+    except Exception:
+        return float(default)
 
 
 def _infer_length() -> int:
@@ -88,6 +97,18 @@ if __name__ == "__main__":
     token = str(os.getenv("C3AE_API_TOKEN", "")).strip() or None
     top_k = int(max(1, int(float(os.getenv("C3_MEMORY_HIVE_RECALL_TOPK", "4")))))
     min_score = float(os.getenv("C3_MEMORY_HIVE_RECALL_MIN_SCORE", "0.005"))
+    mean_turnover_limit = float(os.getenv("Q_NOVASPINE_TURNOVER_MEAN_LIMIT", "0.45"))
+    max_turnover_limit = float(os.getenv("Q_NOVASPINE_TURNOVER_MAX_LIMIT", "1.00"))
+    rolling_turnover_limit = float(os.getenv("Q_NOVASPINE_TURNOVER_ROLLING_LIMIT", "1.25"))
+    turnover_max_cut = float(os.getenv("Q_NOVASPINE_TURNOVER_MAX_CUT", "0.12"))
+    per_hive_max_cut = float(os.getenv("Q_NOVASPINE_HIVE_PER_HIVE_MAX_CUT", str(max(0.0, turnover_max_cut * 0.75))))
+    cross = {}
+    p_cross = RUNS / "cross_hive_summary.json"
+    if p_cross.exists():
+        try:
+            cross = json.loads(p_cross.read_text(encoding="utf-8"))
+        except Exception:
+            cross = {}
 
     m = RUNS / "hive_wf_metrics.csv"
     per_hive = {}
@@ -142,13 +163,14 @@ if __name__ == "__main__":
                         continue
                 cnt = int(data.get("count", len(mems)) or 0)
                 res = hive_resonance(cnt, top_k, scores)
-                bst = hive_boost(res, status_ok=True)
+                bst_raw = hive_boost(res, status_ok=True)
                 per_hive[hive] = {
                     "status": "ok",
                     "retrieved_count": cnt,
                     "avg_score": float(np.mean(scores)) if scores else 0.0,
                     "resonance": float(res),
-                    "boost": float(bst),
+                    "boost_raw": float(bst_raw),
+                    "boost": float(bst_raw),
                 }
             status = "ok"
         except Exception as e:
@@ -164,10 +186,38 @@ if __name__ == "__main__":
         for h in met["HIVE"].astype(str).str.upper().tolist():
             per_hive.setdefault(
                 h,
-                {"status": status, "retrieved_count": 0, "avg_score": 0.0, "resonance": 0.0, "boost": 1.0},
+                {
+                    "status": status,
+                    "retrieved_count": 0,
+                    "avg_score": 0.0,
+                    "resonance": 0.0,
+                    "boost_raw": 1.0,
+                    "boost": 1.0,
+                },
             )
 
+    cross_mean = _safe_float((cross or {}).get("mean_turnover", 0.0), 0.0)
+    cross_max = _safe_float((cross or {}).get("max_turnover", cross_mean), cross_mean)
+    cross_roll = _safe_float((cross or {}).get("rolling_turnover_max", cross_max), cross_max)
+    pressure = turnover_pressure(
+        cross_mean,
+        cross_max,
+        cross_roll,
+        mean_limit=mean_turnover_limit,
+        max_limit=max_turnover_limit,
+        rolling_limit=rolling_turnover_limit,
+    )
+
+    for hive_payload in per_hive.values():
+        hive_payload["boost"] = apply_turnover_dampener(
+            hive_payload.get("boost_raw", hive_payload.get("boost", 1.0)),
+            pressure=pressure,
+            max_cut=per_hive_max_cut,
+        )
+
+    boosts_raw = [float(v.get("boost_raw", 1.0)) for v in per_hive.values()] if per_hive else [1.0]
     boosts = [float(v.get("boost", 1.0)) for v in per_hive.values()] if per_hive else [1.0]
+    global_boost_raw = float(np.clip(np.mean(boosts_raw), 0.90, 1.10))
     global_boost = float(np.clip(np.mean(boosts), 0.90, 1.10))
 
     T = _infer_length()
@@ -182,7 +232,22 @@ if __name__ == "__main__":
         "novaspine_url": base,
         "top_k": int(top_k),
         "min_score": float(min_score),
+        "global_boost_raw": float(global_boost_raw),
         "global_boost": float(global_boost),
+        "turnover_pressure": float(pressure),
+        "turnover_dampener": float(global_boost_raw - global_boost),
+        "cross_hive_turnover": {
+            "mean_turnover": float(cross_mean),
+            "max_turnover": float(cross_max),
+            "rolling_turnover_max": float(cross_roll),
+            "limits": {
+                "mean": float(mean_turnover_limit),
+                "max": float(max_turnover_limit),
+                "rolling": float(rolling_turnover_limit),
+            },
+            "max_cut": float(turnover_max_cut),
+            "per_hive_max_cut": float(per_hive_max_cut),
+        },
         "per_hive": per_hive,
         "error": err,
     }
@@ -190,7 +255,7 @@ if __name__ == "__main__":
 
     _append_card(
         "NovaSpine Hive Feedback ✔",
-        f"<p>status={status}, hives={len(per_hive)}, global_boost={global_boost:.3f}</p>",
+        f"<p>status={status}, hives={len(per_hive)}, global_boost={global_boost:.3f}, pressure={pressure:.3f}</p>",
     )
     if T > 0:
         print(f"✅ Wrote {RUNS/'novaspine_hive_boost.csv'}")

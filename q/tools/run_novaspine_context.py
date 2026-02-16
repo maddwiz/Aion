@@ -21,7 +21,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from qmods.novaspine_context import build_context_query, context_boost, context_resonance  # noqa: E402
+from qmods.novaspine_context import (  # noqa: E402
+    apply_turnover_dampener,
+    build_context_query,
+    context_boost,
+    context_resonance,
+    turnover_pressure,
+)
 
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
@@ -38,6 +44,14 @@ def _load_json(path: Path):
         return json.loads(path.read_text())
     except Exception:
         return None
+
+
+def _safe_float(x, default: float = 0.0) -> float:
+    try:
+        v = float(x)
+        return v if np.isfinite(v) else float(default)
+    except Exception:
+        return float(default)
 
 
 def _infer_length() -> int:
@@ -97,6 +111,10 @@ if __name__ == "__main__":
     top_k = int(max(1, int(float(os.getenv("C3_MEMORY_RECALL_TOPK", "6")))))
     min_score = float(os.getenv("C3_MEMORY_RECALL_MIN_SCORE", "0.005"))
     include_alerts = str(os.getenv("C3_MEMORY_RECALL_INCLUDE_ALERTS", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    mean_turnover_limit = float(os.getenv("Q_NOVASPINE_TURNOVER_MEAN_LIMIT", "0.45"))
+    max_turnover_limit = float(os.getenv("Q_NOVASPINE_TURNOVER_MAX_LIMIT", "1.00"))
+    rolling_turnover_limit = float(os.getenv("Q_NOVASPINE_TURNOVER_ROLLING_LIMIT", "1.25"))
+    turnover_max_cut = float(os.getenv("Q_NOVASPINE_TURNOVER_MAX_CUT", "0.12"))
 
     quality = _load_json(RUNS / "quality_snapshot.json") or {}
     cross = _load_json(RUNS / "cross_hive_summary.json") or {}
@@ -150,7 +168,19 @@ if __name__ == "__main__":
             err = str(e)
 
     res = context_resonance(recall_count, top_k, scores=scores)
-    boost = context_boost(res, status_ok=(status == "ok"))
+    boost_raw = context_boost(res, status_ok=(status == "ok"))
+    cross_mean = _safe_float(cross.get("mean_turnover", 0.0), 0.0) if isinstance(cross, dict) else 0.0
+    cross_max = _safe_float(cross.get("max_turnover", cross_mean), cross_mean) if isinstance(cross, dict) else cross_mean
+    cross_roll = _safe_float(cross.get("rolling_turnover_max", cross_max), cross_max) if isinstance(cross, dict) else cross_max
+    pressure = turnover_pressure(
+        cross_mean,
+        cross_max,
+        cross_roll,
+        mean_limit=mean_turnover_limit,
+        max_limit=max_turnover_limit,
+        rolling_limit=rolling_turnover_limit,
+    )
+    boost = apply_turnover_dampener(boost_raw, pressure=pressure, max_cut=turnover_max_cut)
 
     T = _infer_length()
     if T > 0:
@@ -169,7 +199,21 @@ if __name__ == "__main__":
         "retrieved_count": int(recall_count),
         "avg_memory_score": float(np.mean(scores)) if scores else 0.0,
         "context_resonance": float(res),
+        "context_boost_raw": float(boost_raw),
         "context_boost": float(boost),
+        "turnover_pressure": float(pressure),
+        "turnover_dampener": float(boost_raw - boost),
+        "cross_hive_turnover": {
+            "mean_turnover": float(cross_mean),
+            "max_turnover": float(cross_max),
+            "rolling_turnover_max": float(cross_roll),
+            "limits": {
+                "mean": float(mean_turnover_limit),
+                "max": float(max_turnover_limit),
+                "rolling": float(rolling_turnover_limit),
+            },
+            "max_cut": float(turnover_max_cut),
+        },
         "length": int(T),
         "context_excerpt": context_text[:1200],
         "memories_sample": memories[:5],
@@ -180,7 +224,7 @@ if __name__ == "__main__":
     _append_card(
         "NovaSpine Recall Loop ✔",
         (
-            f"<p>status={status}, retrieved={recall_count}, resonance={res:.3f}, boost={boost:.3f}</p>"
+            f"<p>status={status}, retrieved={recall_count}, resonance={res:.3f}, boost={boost:.3f}, pressure={pressure:.3f}</p>"
             f"<p>query: {query[:180]}</p>"
         ),
     )

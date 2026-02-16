@@ -1,4 +1,10 @@
-from qmods.novaspine_context import build_context_query, context_boost, context_resonance
+from qmods.novaspine_context import (
+    apply_turnover_dampener,
+    build_context_query,
+    context_boost,
+    context_resonance,
+    turnover_pressure,
+)
 
 
 def test_context_resonance_bounds_and_order():
@@ -19,6 +25,23 @@ def test_context_boost_behavior():
     assert 0.90 <= b_low <= 1.10
     assert 0.90 <= b_high <= 1.10
     assert b_high > b_low
+
+
+def test_turnover_pressure_tracks_cross_hive_stress():
+    p_low = turnover_pressure(0.15, 0.35, 0.40)
+    p_high = turnover_pressure(0.60, 1.20, 1.70)
+    assert 0.0 <= p_low <= 1.0
+    assert 0.0 <= p_high <= 1.0
+    assert p_high > p_low
+
+
+def test_apply_turnover_dampener_only_reduces_boost_under_pressure():
+    base = 1.06
+    low = apply_turnover_dampener(base, pressure=0.10, max_cut=0.12)
+    high = apply_turnover_dampener(base, pressure=1.00, max_cut=0.12)
+    assert 0.85 <= low <= 1.10
+    assert 0.85 <= high <= 1.10
+    assert high < low < base
 
 
 def test_build_context_query_contains_signals():
