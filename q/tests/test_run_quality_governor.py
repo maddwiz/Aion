@@ -128,6 +128,27 @@ def test_aion_outcome_quality_low_on_alert_feedback():
     assert detail["status"] == "alert"
 
 
+def test_aion_outcome_quality_stale_feedback_blends_toward_neutral(monkeypatch):
+    monkeypatch.setenv("Q_AION_QUALITY_MAX_AGE_HOURS", "12")
+    monkeypatch.setenv("Q_AION_QUALITY_STALE_ROLLOFF_HOURS", "24")
+    good = {
+        "active": True,
+        "status": "ok",
+        "closed_trades": 16,
+        "risk_scale": 1.03,
+        "hit_rate": 0.58,
+        "profit_factor": 1.50,
+        "expectancy_norm": 0.35,
+        "drawdown_norm": 0.40,
+    }
+    q_fresh, _ = rqg._aion_outcome_quality({**good, "age_hours": 3.0}, min_closed_trades=8)
+    q_stale, detail = rqg._aion_outcome_quality({**good, "age_hours": 80.0}, min_closed_trades=8)
+    assert q_fresh is not None and q_stale is not None
+    assert float(q_stale) < float(q_fresh)
+    assert float(q_stale) > 0.55
+    assert float(detail["freshness_weight"]) < 0.10
+
+
 def test_load_aion_feedback_falls_back_to_shadow_trades(monkeypatch, tmp_path):
     monkeypatch.setattr(rqg, "RUNS", tmp_path)
     shadow = tmp_path / "shadow_trades.csv"
@@ -145,3 +166,4 @@ def test_load_aion_feedback_falls_back_to_shadow_trades(monkeypatch, tmp_path):
     assert fb["active"] is True
     assert int(fb["closed_trades"]) == 3
     assert "risk_scale" in fb
+    assert "age_hours" in fb

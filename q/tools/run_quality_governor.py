@@ -314,6 +314,17 @@ def _aion_feedback_from_shadow_trades():
     peak = np.maximum.accumulate(eq)
     max_dd = float(np.max(peak - eq)) if len(eq) else 0.0
     dd_norm = float(max_dd / max(1e-9, abs_mean * max(1.0, float(np.sqrt(n))))) if abs_mean > 0 else 0.0
+    last_closed_ts = None
+    age_hours = None
+    if "_ts" in closed.columns:
+        try:
+            ts = pd.to_datetime(closed["_ts"], errors="coerce").dropna()
+            if len(ts):
+                last_closed_ts = pd.Timestamp(ts.iloc[-1]).isoformat()
+                age_hours = float(max(0.0, (pd.Timestamp.utcnow() - pd.Timestamp(ts.iloc[-1])).total_seconds() / 3600.0))
+        except Exception:
+            last_closed_ts = None
+            age_hours = None
 
     risk_scale = 1.0
     reasons = []
@@ -365,6 +376,8 @@ def _aion_feedback_from_shadow_trades():
         "drawdown_norm": float(dd_norm),
         "risk_scale": float(risk_scale),
         "reasons": reasons,
+        "last_closed_ts": last_closed_ts,
+        "age_hours": age_hours,
     }
 
 
@@ -410,6 +423,7 @@ def _aion_outcome_quality(aion_feedback: dict | None, min_closed_trades: int = 8
     if expectancy_norm is None:
         expectancy_norm = _f(aion_feedback.get("expectancy"))
     drawdown_norm = _f(aion_feedback.get("drawdown_norm"))
+    age_hours = _f(aion_feedback.get("age_hours"))
 
     status_q = {
         "ok": 1.00,
@@ -438,6 +452,15 @@ def _aion_outcome_quality(aion_feedback: dict | None, min_closed_trades: int = 8
     if not mature:
         aion_q = float(np.clip(0.75 * aion_q + 0.25 * 0.60, 0.0, 1.0))
 
+    max_age_hours = float(np.clip(float(os.getenv("Q_AION_QUALITY_MAX_AGE_HOURS", "72")), 1.0, 24.0 * 90.0))
+    stale_rolloff_hours = float(np.clip(float(os.getenv("Q_AION_QUALITY_STALE_ROLLOFF_HOURS", "72")), 1.0, 24.0 * 120.0))
+    freshness_weight = 1.0
+    if age_hours is not None and np.isfinite(age_hours) and age_hours > max_age_hours:
+        freshness_weight = float(
+            np.clip(1.0 - (float(age_hours) - max_age_hours) / (stale_rolloff_hours + 1e-9), 0.0, 1.0)
+        )
+        aion_q = float(np.clip(freshness_weight * aion_q + (1.0 - freshness_weight) * 0.60, 0.0, 1.0))
+
     detail = {
         "active": active,
         "status": status,
@@ -449,6 +472,9 @@ def _aion_outcome_quality(aion_feedback: dict | None, min_closed_trades: int = 8
         "profit_factor": profit_factor,
         "expectancy_norm": expectancy_norm,
         "drawdown_norm": drawdown_norm,
+        "age_hours": age_hours,
+        "max_age_hours": max_age_hours,
+        "freshness_weight": freshness_weight,
         "quality_components": q_detail,
     }
     return aion_q, detail
