@@ -194,3 +194,50 @@ def test_overlay_aion_feedback_metrics_stale_suppresses_status_alert():
     assert metrics.get("aion_feedback_stale") is True
     assert any("aion_feedback_stale" in x for x in issues)
     assert not any("aion_feedback_status=alert" in x for x in issues)
+
+
+def test_overlay_aion_feedback_metrics_falls_back_to_shadow_feedback():
+    metrics, issues = rsh._overlay_aion_feedback_metrics_with_fallback(
+        {},
+        fallback_feedback={
+            "active": True,
+            "status": "warn",
+            "risk_scale": 0.88,
+            "closed_trades": 12,
+            "hit_rate": 0.41,
+            "profit_factor": 0.92,
+            "expectancy": -0.5,
+            "drawdown_norm": 1.8,
+            "age_hours": 6.0,
+            "max_age_hours": 72.0,
+            "stale": False,
+        },
+    )
+    assert metrics.get("aion_feedback_active") is True
+    assert metrics.get("aion_feedback_status") == "warn"
+    assert metrics.get("aion_feedback_source") == "shadow_trades"
+    assert int(metrics.get("aion_feedback_closed_trades")) == 12
+    assert all("aion_feedback_status=alert" not in x for x in issues)
+
+
+def test_overlay_aion_feedback_metrics_prefers_overlay_over_fallback():
+    metrics, _issues = rsh._overlay_aion_feedback_metrics_with_fallback(
+        {
+            "runtime_context": {
+                "aion_feedback": {
+                    "active": True,
+                    "status": "alert",
+                    "risk_scale": 0.70,
+                    "closed_trades": 20,
+                }
+            }
+        },
+        fallback_feedback={
+            "active": True,
+            "status": "ok",
+            "risk_scale": 0.99,
+            "closed_trades": 20,
+        },
+    )
+    assert metrics.get("aion_feedback_status") == "alert"
+    assert metrics.get("aion_feedback_source") == "overlay"

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +16,11 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from qmods.aion_feedback import load_outcome_feedback  # noqa: E402
+
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
 
@@ -153,14 +159,47 @@ def _analyze_execution_constraints(info: dict | None):
 
 
 def _overlay_aion_feedback_metrics(overlay: dict | None):
+    return _overlay_aion_feedback_metrics_with_fallback(overlay, fallback_feedback=None)
+
+
+def _aion_feedback_has_metrics(af: dict | None):
+    if not isinstance(af, dict):
+        return False
+    active = bool(af.get("active", False))
+    if active:
+        return True
+    status = str(af.get("status", "unknown")).strip().lower()
+    if status not in {"", "unknown", "missing"}:
+        return True
+    closed = int(max(0, _to_float(af.get("closed_trades")) or 0))
+    if closed > 0:
+        return True
+    if bool(af.get("stale", False)):
+        return True
+    risk_scale = _to_float(af.get("risk_scale"))
+    if risk_scale is not None and abs(float(risk_scale) - 1.0) > 1e-9:
+        return True
+    for key in ["hit_rate", "profit_factor", "expectancy", "drawdown_norm", "age_hours", "max_age_hours"]:
+        if _to_float(af.get(key)) is not None:
+            return True
+    return False
+
+
+def _overlay_aion_feedback_metrics_with_fallback(overlay: dict | None, fallback_feedback: dict | None = None):
     metrics = {}
     issues = []
-    if not isinstance(overlay, dict):
-        return metrics, issues
-    rt = overlay.get("runtime_context", {})
-    if not isinstance(rt, dict):
-        return metrics, issues
-    af = rt.get("aion_feedback", {})
+    source = None
+    af = None
+    if isinstance(overlay, dict):
+        rt = overlay.get("runtime_context", {})
+        if isinstance(rt, dict):
+            overlay_af = rt.get("aion_feedback", {})
+            if _aion_feedback_has_metrics(overlay_af):
+                af = overlay_af
+                source = "overlay"
+    if af is None and _aion_feedback_has_metrics(fallback_feedback):
+        af = fallback_feedback
+        source = "shadow_trades"
     if not isinstance(af, dict):
         return metrics, issues
 
@@ -194,6 +233,7 @@ def _overlay_aion_feedback_metrics(overlay: dict | None):
     metrics["aion_feedback_age_hours"] = age_hours
     metrics["aion_feedback_stale"] = stale
     metrics["aion_feedback_max_age_hours"] = max_age_hours
+    metrics["aion_feedback_source"] = source or "unknown"
 
     enough_closed = closed >= 8
     if active and stale:
@@ -462,7 +502,11 @@ if __name__ == "__main__":
     exec_shape, exec_issues = _analyze_execution_constraints(exec_info)
     if exec_shape:
         shape.update(exec_shape)
-    aion_shape, aion_issues = _overlay_aion_feedback_metrics(overlay)
+    fallback_aion_feedback = load_outcome_feedback(root=ROOT, mark_stale_reason=False)
+    aion_shape, aion_issues = _overlay_aion_feedback_metrics_with_fallback(
+        overlay,
+        fallback_feedback=fallback_aion_feedback,
+    )
     if aion_shape:
         shape.update(aion_shape)
     stale_stats, stale_issues = _staleness_issues(
