@@ -134,6 +134,20 @@ def _remediation_actions(blocked_reasons: list[str], throttle_reasons: list[str]
                 ],
             )
         )
+    if any(x in {"hive_crowding_alert", "hive_crowding_warn"} for x in tr):
+        acts.append(
+            _action(
+                "hive_crowding_rebalance",
+                1,
+                "Reduce hive crowding risk",
+                "Cross-hive crowding signals indicate correlated positioning pressure.",
+                [
+                    "Inspect /Users/desmondpottle/Documents/New project/q/runs_plus/hive_crowding_penalty.csv",
+                    "Review /Users/desmondpottle/Documents/New project/q/runs_plus/cross_hive_summary.json crowding metrics",
+                    "Rerun q/tools/run_cross_hive.py with tighter entropy/concentration settings if crowding persists",
+                ],
+            )
+        )
 
     if not acts:
         acts.append(
@@ -212,6 +226,13 @@ def runtime_decision_summary(
     elif mem_state == "warn":
         score += 1
         throttle_reasons.append("memory_feedback_warn")
+
+    if "hive_crowding_alert" in ext_flags:
+        score += 2
+        throttle_reasons.append("hive_crowding_alert")
+    elif "hive_crowding_warn" in ext_flags:
+        score += 1
+        throttle_reasons.append("hive_crowding_warn")
 
     if (
         "fracture_alert" in ext_flags
