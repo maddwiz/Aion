@@ -67,6 +67,15 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
             "aion_feedback_age_hours": 96.0,
             "aion_feedback_max_age_hours": 72.0,
             "aion_feedback_stale": False,
+            "memory_feedback_active": True,
+            "memory_feedback_status": "ok",
+            "memory_feedback_risk_scale": 0.93,
+            "memory_feedback_trades_scale": 0.79,
+            "memory_feedback_open_scale": 0.76,
+            "memory_feedback_turnover_pressure": 0.53,
+            "memory_feedback_turnover_dampener": 0.83,
+            "memory_feedback_reasons": ["turnover_guard:warn"],
+            "memory_feedback_block_new_entries": False,
             "policy_block_new_entries": False,
         },
     )
@@ -107,6 +116,15 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     assert s["aion_feedback_runtime"]["feedback_source"] == "shadow_trades"
     assert s["aion_feedback_runtime"]["feedback_source_selected"] == "shadow_trades"
     assert s["aion_feedback_runtime"]["feedback_source_preference"] == "auto"
+    assert s["memory_feedback_runtime"]["present"] is True
+    assert s["memory_feedback_runtime"]["source"] == "runtime_controls"
+    assert s["memory_feedback_runtime"]["state"] == "warn"
+    assert s["memory_feedback_runtime"]["severity"] == 2
+    assert s["memory_feedback_runtime"]["turnover_pressure"] == 0.53
+    assert s["memory_feedback_runtime"]["turnover_dampener"] == 0.83
+    assert s["memory_feedback_runtime"]["max_trades_scale"] == 0.79
+    assert s["memory_feedback_runtime"]["max_open_scale"] == 0.76
+    assert "turnover_guard:warn" in s["memory_feedback_runtime"]["reasons"]
     assert s["runtime_decision"]["entry_blocked"] is True
     assert any("external_overlay" in x for x in s["runtime_decision"]["entry_block_reasons"])
     assert s["runtime_decision"]["throttle_state"] in {"warn", "alert"}

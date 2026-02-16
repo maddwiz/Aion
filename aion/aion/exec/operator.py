@@ -7,7 +7,12 @@ from pathlib import Path
 from .. import config as cfg
 from .ops_guard import find_task_pids, start_task, status_snapshot, stop_task, task_module
 from .runtime_decision import runtime_decision_summary
-from .runtime_health import aion_feedback_runtime_info, overlay_runtime_status, runtime_controls_stale_info
+from .runtime_health import (
+    aion_feedback_runtime_info,
+    memory_feedback_runtime_info,
+    overlay_runtime_status,
+    runtime_controls_stale_info,
+)
 
 
 def _read_json(path: Path, default):
@@ -56,11 +61,16 @@ def _status() -> int:
         runtime_controls if isinstance(runtime_controls, dict) else {},
         ext_rt if isinstance(ext_rt, dict) else {},
     )
+    memory_feedback_runtime = memory_feedback_runtime_info(
+        runtime_controls if isinstance(runtime_controls, dict) else {},
+        ext_rt if isinstance(ext_rt, dict) else {},
+    )
     out = {
         "tasks": snap,
         "ops_guard_status": ops_status,
         "runtime_controls": runtime_controls if isinstance(runtime_controls, dict) else {},
         "aion_feedback_runtime": aion_feedback_runtime,
+        "memory_feedback_runtime": memory_feedback_runtime,
         "runtime_decision": decision,
         "runtime_remediation": decision.get("recommended_actions", []),
         "runtime_controls_age_sec": runtime_controls_age_sec,

@@ -8,7 +8,12 @@ from urllib.request import urlopen
 
 from .. import config as cfg
 from .runtime_decision import runtime_decision_summary
-from .runtime_health import aion_feedback_runtime_info, overlay_runtime_status, runtime_controls_stale_info
+from .runtime_health import (
+    aion_feedback_runtime_info,
+    memory_feedback_runtime_info,
+    overlay_runtime_status,
+    runtime_controls_stale_info,
+)
 
 
 def _read_json(path: Path, default):
@@ -136,6 +141,10 @@ def _status_payload():
         runtime_controls if isinstance(runtime_controls, dict) else {},
         ext_runtime if isinstance(ext_runtime, dict) else {},
     )
+    memory_feedback_runtime = memory_feedback_runtime_info(
+        runtime_controls if isinstance(runtime_controls, dict) else {},
+        ext_runtime if isinstance(ext_runtime, dict) else {},
+    )
 
     return {
         "ib": doctor.get("ib", {}),
@@ -151,6 +160,7 @@ def _status_payload():
         "ops_guard": ops_guard if isinstance(ops_guard, dict) else {},
         "runtime_controls": runtime_controls if isinstance(runtime_controls, dict) else {},
         "aion_feedback_runtime": aion_feedback_runtime,
+        "memory_feedback_runtime": memory_feedback_runtime,
         "runtime_decision": decision,
         "runtime_remediation": decision.get("recommended_actions", []),
         "runtime_controls_age_sec": rc_age,

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from aion.exec.runtime_health import (
     aion_feedback_runtime_info,
+    memory_feedback_runtime_info,
     overlay_runtime_status,
     runtime_controls_stale_info,
     runtime_controls_stale_threshold_sec,
@@ -88,6 +89,63 @@ def test_aion_feedback_runtime_info_falls_back_to_overlay_context():
     assert out["feedback_source_selected"] == "overlay"
     assert out["feedback_source_preference"] == "overlay"
     assert out["last_closed_ts"] == "2026-02-16T15:35:00Z"
+
+
+def test_memory_feedback_runtime_info_prefers_runtime_controls():
+    out = memory_feedback_runtime_info(
+        {
+            "memory_feedback_active": True,
+            "memory_feedback_status": "ok",
+            "memory_feedback_risk_scale": 0.92,
+            "memory_feedback_trades_scale": 0.75,
+            "memory_feedback_open_scale": 0.65,
+            "memory_feedback_turnover_pressure": 0.52,
+            "memory_feedback_turnover_dampener": 0.83,
+            "memory_feedback_block_new_entries": False,
+            "memory_feedback_reasons": ["turnover_guard:warn"],
+        },
+        {"runtime_context": {"memory_feedback": {"active": True, "status": "alert", "risk_scale": 0.75}}},
+    )
+    assert out["source"] == "runtime_controls"
+    assert out["present"] is True
+    assert out["state"] == "warn"
+    assert out["severity"] == 2
+    assert out["turnover_pressure"] == 0.52
+    assert out["turnover_dampener"] == 0.83
+    assert out["max_trades_scale"] == 0.75
+    assert out["max_open_scale"] == 0.65
+    assert "turnover_guard:warn" in out["reasons"]
+
+
+def test_memory_feedback_runtime_info_falls_back_to_overlay_context():
+    out = memory_feedback_runtime_info(
+        {},
+        {
+            "runtime_context": {
+                "memory_feedback": {
+                    "active": True,
+                    "status": "ok",
+                    "risk_scale": 0.99,
+                    "max_trades_scale": 0.85,
+                    "max_open_scale": 0.8,
+                    "turnover_pressure": 0.79,
+                    "turnover_dampener": 0.67,
+                    "block_new_entries": True,
+                    "reasons": ["turnover_guard:alert"],
+                }
+            }
+        },
+    )
+    assert out["source"] == "overlay_runtime_context"
+    assert out["present"] is True
+    assert out["state"] == "alert"
+    assert out["severity"] == 3
+    assert out["block_new_entries"] is True
+    assert out["max_trades_scale"] == 0.85
+    assert out["max_open_scale"] == 0.8
+    assert out["turnover_pressure"] == 0.79
+    assert out["turnover_dampener"] == 0.67
+    assert "turnover_guard:alert" in out["reasons"]
 
 
 def test_overlay_runtime_status_prefers_payload_timestamp_over_mtime(tmp_path: Path):

@@ -312,3 +312,98 @@ def aion_feedback_runtime_info(
         "source": source,
         "present": source != "none",
     }
+
+
+def memory_feedback_runtime_info(
+    runtime_controls: dict | None,
+    external_overlay_runtime: dict | None,
+) -> dict:
+    rc = runtime_controls if isinstance(runtime_controls, dict) else {}
+    ext = external_overlay_runtime if isinstance(external_overlay_runtime, dict) else {}
+    ext_ctx = ext.get("runtime_context", {}) if isinstance(ext.get("runtime_context"), dict) else {}
+    ext_mf = ext_ctx.get("memory_feedback", {}) if isinstance(ext_ctx.get("memory_feedback"), dict) else {}
+
+    rc_has = any(
+        k in rc
+        for k in [
+            "memory_feedback_active",
+            "memory_feedback_status",
+            "memory_feedback_risk_scale",
+            "memory_feedback_trades_scale",
+            "memory_feedback_open_scale",
+            "memory_feedback_block_new_entries",
+            "memory_feedback_reasons",
+        ]
+    )
+    if rc_has:
+        source = "runtime_controls"
+        data = {
+            "active": bool(rc.get("memory_feedback_active", False)),
+            "status": str(rc.get("memory_feedback_status", "unknown")).strip().lower() or "unknown",
+            "risk_scale": _safe_float(rc.get("memory_feedback_risk_scale"), None),
+            "max_trades_scale": _safe_float(rc.get("memory_feedback_trades_scale"), None),
+            "max_open_scale": _safe_float(rc.get("memory_feedback_open_scale"), None),
+            "turnover_pressure": _safe_float(rc.get("memory_feedback_turnover_pressure"), None),
+            "turnover_dampener": _safe_float(rc.get("memory_feedback_turnover_dampener"), None),
+            "block_new_entries": bool(rc.get("memory_feedback_block_new_entries", False)),
+            "reasons": _safe_list(rc.get("memory_feedback_reasons", [])),
+        }
+    elif ext_mf:
+        source = "overlay_runtime_context"
+        data = {
+            "active": bool(ext_mf.get("active", False)),
+            "status": str(ext_mf.get("status", "unknown")).strip().lower() or "unknown",
+            "risk_scale": _safe_float(ext_mf.get("risk_scale"), None),
+            "max_trades_scale": _safe_float(ext_mf.get("max_trades_scale"), None),
+            "max_open_scale": _safe_float(ext_mf.get("max_open_scale"), None),
+            "turnover_pressure": _safe_float(ext_mf.get("turnover_pressure"), None),
+            "turnover_dampener": _safe_float(ext_mf.get("turnover_dampener"), None),
+            "block_new_entries": bool(ext_mf.get("block_new_entries", False)),
+            "reasons": _safe_list(ext_mf.get("reasons", [])),
+        }
+    else:
+        source = "none"
+        data = {
+            "active": False,
+            "status": "unknown",
+            "risk_scale": None,
+            "max_trades_scale": None,
+            "max_open_scale": None,
+            "turnover_pressure": None,
+            "turnover_dampener": None,
+            "block_new_entries": False,
+            "reasons": [],
+        }
+
+    status = str(data.get("status", "unknown")).strip().lower() or "unknown"
+    active = bool(data.get("active", False))
+    risk_scale = data.get("risk_scale")
+    pressure = data.get("turnover_pressure")
+
+    if not active:
+        state = "inactive"
+    elif status in {"alert", "hard"}:
+        state = "alert"
+    elif status == "warn":
+        state = "warn"
+    elif risk_scale is not None and risk_scale <= 0.84:
+        state = "alert"
+    elif risk_scale is not None and risk_scale <= 0.95:
+        state = "warn"
+    elif pressure is not None and pressure >= 0.72:
+        state = "alert"
+    elif pressure is not None and pressure >= 0.45:
+        state = "warn"
+    elif status == "ok":
+        state = "ok"
+    else:
+        state = "unknown"
+
+    severity = {"inactive": 0, "unknown": 1, "ok": 1, "warn": 2, "alert": 3}.get(state, 1)
+    return {
+        **data,
+        "state": state,
+        "severity": int(severity),
+        "source": source,
+        "present": source != "none",
+    }

@@ -45,7 +45,13 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
             '"aion_feedback_source_preference": "auto", '
             '"aion_feedback_risk_scale": 0.88, "aion_feedback_closed_trades": 12, '
             '"aion_feedback_age_hours": 80.0, "aion_feedback_max_age_hours": 72.0, '
-            '"aion_feedback_stale": false}'
+            '"aion_feedback_stale": false, '
+            '"memory_feedback_active": true, "memory_feedback_status": "ok", '
+            '"memory_feedback_risk_scale": 0.93, "memory_feedback_trades_scale": 0.8, '
+            '"memory_feedback_open_scale": 0.75, '
+            '"memory_feedback_turnover_pressure": 0.51, "memory_feedback_turnover_dampener": 0.84, '
+            '"memory_feedback_reasons": ["turnover_guard:warn"], '
+            '"memory_feedback_block_new_entries": false}'
         ),
         encoding="utf-8",
     )
@@ -81,6 +87,15 @@ def test_operator_status_includes_runtime_controls_and_overlay(tmp_path, monkeyp
     assert payload["aion_feedback_runtime"]["feedback_source"] == "shadow_trades"
     assert payload["aion_feedback_runtime"]["feedback_source_selected"] == "shadow_trades"
     assert payload["aion_feedback_runtime"]["feedback_source_preference"] == "auto"
+    assert payload["memory_feedback_runtime"]["present"] is True
+    assert payload["memory_feedback_runtime"]["source"] == "runtime_controls"
+    assert payload["memory_feedback_runtime"]["state"] == "warn"
+    assert payload["memory_feedback_runtime"]["severity"] == 2
+    assert payload["memory_feedback_runtime"]["turnover_pressure"] == 0.51
+    assert payload["memory_feedback_runtime"]["turnover_dampener"] == 0.84
+    assert payload["memory_feedback_runtime"]["max_trades_scale"] == 0.8
+    assert payload["memory_feedback_runtime"]["max_open_scale"] == 0.75
+    assert "turnover_guard:warn" in payload["memory_feedback_runtime"]["reasons"]
     assert payload["runtime_decision"]["entry_blocked"] is True
     assert any("external_overlay" in x for x in payload["runtime_decision"]["entry_block_reasons"])
     assert isinstance(payload["runtime_remediation"], list)
