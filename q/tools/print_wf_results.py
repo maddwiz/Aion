@@ -3,7 +3,7 @@
 WF Terminal Summary (prints a clean table).
 """
 
-import json, sys
+import json, os, sys
 from pathlib import Path
 import numpy as np
 
@@ -21,6 +21,44 @@ def maybe_load_series(path: Path):
             except Exception:
                 return None
     return None
+
+def pick_returns_series(runs_dir: Path, source_pref: str = "auto"):
+    pref = str(source_pref or "auto").strip().lower()
+    candidates = {
+        "wf_oos_returns": runs_dir / "wf_oos_returns.csv",
+        "daily_returns": runs_dir / "daily_returns.csv",
+    }
+
+    def _load(label: str):
+        p = candidates[label]
+        if not p.exists():
+            return None, None
+        arr = maybe_load_series(p)
+        if arr is None or np.asarray(arr, float).size == 0:
+            return None, None
+        return np.asarray(arr, float).ravel(), p
+
+    if pref in {"wf", "wf_oos", "wf_oos_returns"}:
+        arr, _ = _load("wf_oos_returns")
+        return arr, "wf_oos_returns"
+    if pref in {"daily", "daily_returns"}:
+        arr, _ = _load("daily_returns")
+        return arr, "daily_returns"
+
+    loaded = []
+    for label in ["wf_oos_returns", "daily_returns"]:
+        arr, path = _load(label)
+        if arr is not None and path is not None:
+            try:
+                mtime = float(path.stat().st_mtime)
+            except Exception:
+                mtime = -1.0
+            loaded.append((mtime, label, arr))
+    if not loaded:
+        return None, None
+    loaded.sort(key=lambda x: x[0], reverse=True)
+    _, label, arr = loaded[0]
+    return arr, label
 
 def maybe_load_matrix(path: Path):
     if path.exists():
@@ -63,7 +101,8 @@ def row(cols,widths): return "│ " + " │ ".join(f"{c:<{w}}" for c,w in zip(co
 
 if __name__=="__main__":
     # returns
-    r = maybe_load_series(RUNS/"wf_oos_returns.csv") or maybe_load_series(RUNS/"daily_returns.csv")
+    source_pref = str(os.getenv("Q_PRINT_RESULTS_SOURCE", "auto")).strip().lower()
+    r, returns_source = pick_returns_series(RUNS, source_pref=source_pref)
     if r is None:
         print("(!) No returns found in runs_plus/. Run WF first."); sys.exit(0)
 
@@ -71,7 +110,7 @@ if __name__=="__main__":
 
     # weights
     W=None
-    for path in [ROOT/"portfolio_weights.csv", RUNS/"portfolio_weights.csv"]:
+    for path in [RUNS/"portfolio_weights_final.csv", ROOT/"portfolio_weights.csv", RUNS/"portfolio_weights.csv"]:
         mat=maybe_load_matrix(path)
         if mat is not None: W=mat; break
     N=int(W.shape[1]) if W is not None else None
@@ -83,6 +122,7 @@ if __name__=="__main__":
     print(row(["Metric","Value"],widths))
     print(line())
     print(row(["Assets (N)", str(N) if N else "—"],widths))
+    print(row(["Returns source", str(returns_source or "—")],widths))
     print(row(["Sharpe (annualized)", fmt(s,3)],widths))
     print(row(["Hit rate", fmt(hr,3)],widths))
     print(row(["Max drawdown", fmt(mdd,3)],widths))
