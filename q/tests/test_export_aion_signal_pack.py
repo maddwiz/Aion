@@ -186,6 +186,21 @@ def test_runtime_context_includes_hive_ecosystem_stress(tmp_path: Path):
     assert "hive_stress_warn" not in ctx["risk_flags"]
 
 
+def test_runtime_context_flags_hive_turnover_stress(tmp_path: Path):
+    (tmp_path / "cross_hive_summary.json").write_text(
+        (
+            '{"mean_turnover":0.46,'
+            '"max_turnover":1.18,'
+            '"rolling_turnover_max":1.62}'
+        ),
+        encoding="utf-8",
+    )
+    ctx = ex._runtime_context(tmp_path)
+    assert ctx["components"]["hive_turnover_modifier"]["found"] is True
+    assert "hive_turnover_alert" in ctx["risk_flags"]
+    assert "hive_turnover_warn" not in ctx["risk_flags"]
+
+
 def test_runtime_context_includes_heartbeat_stress_flags(tmp_path: Path):
     _write_series(tmp_path / "heartbeat_stress.csv", [0.55, 0.86])
     _write_series(tmp_path / "heartbeat_bpm.csv", [88, 89, 91, 93, 96, 99])

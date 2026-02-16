@@ -69,6 +69,7 @@ def _canonicalize_risk_flags(flags) -> list[str]:
         ("hive_stress_alert", "hive_stress_warn"),
         ("hive_crowding_alert", "hive_crowding_warn"),
         ("hive_entropy_alert", "hive_entropy_warn"),
+        ("hive_turnover_alert", "hive_turnover_warn"),
         ("aion_outcome_alert", "aion_outcome_warn"),
         ("heartbeat_alert", "heartbeat_warn"),
         ("council_divergence_alert", "council_divergence_warn"),
@@ -515,6 +516,9 @@ def _runtime_context(runs_dir: Path):
     ent_target_max = _safe_float(ch_ent.get("entropy_target_max", np.nan), default=np.nan)
     ent_strength_mean = _safe_float(ch_ent.get("entropy_strength_mean", np.nan), default=np.nan)
     ent_strength_max = _safe_float(ch_ent.get("entropy_strength_max", np.nan), default=np.nan)
+    ch_turn_mean = _safe_float(cross_hive.get("mean_turnover", np.nan), default=np.nan)
+    ch_turn_max = _safe_float(cross_hive.get("max_turnover", np.nan), default=np.nan)
+    ch_turn_roll = _safe_float(cross_hive.get("rolling_turnover_max", np.nan), default=np.nan)
     ch_crowd = np.nan
     ch_crowd_obj = cross_hive.get("crowding_penalty_mean", {})
     if isinstance(ch_crowd_obj, dict):
@@ -544,6 +548,20 @@ def _runtime_context(runs_dir: Path):
         ent_mod = _clamp(1.03 - 0.32 * max(0.0, esm - 0.35) - 0.20 * max(0.0, etm - 0.62), 0.72, 1.03)
         comps["hive_entropy_pressure_modifier"] = {"value": float(ent_mod), "found": True}
         active_vals.append(float(ent_mod))
+    if math.isfinite(ch_turn_mean) or math.isfinite(ch_turn_max) or math.isfinite(ch_turn_roll):
+        tm = ch_turn_mean if math.isfinite(ch_turn_mean) else 0.20
+        tx = ch_turn_max if math.isfinite(ch_turn_max) else 0.70
+        tr = ch_turn_roll if math.isfinite(ch_turn_roll) else 1.00
+        turn_mod = _clamp(
+            1.03
+            - 0.38 * max(0.0, tm - 0.20)
+            - 0.18 * max(0.0, tx - 0.70)
+            - 0.12 * max(0.0, tr - 1.00),
+            0.68,
+            1.03,
+        )
+        comps["hive_turnover_modifier"] = {"value": float(turn_mod), "found": True}
+        active_vals.append(float(turn_mod))
 
     hive_evo = _load_json(runs_dir / "hive_evolution.json") or {}
     he_pressure = _safe_float(hive_evo.get("action_pressure_mean", np.nan), default=np.nan)
@@ -643,6 +661,14 @@ def _runtime_context(runs_dir: Path):
             risk_flags.append("hive_entropy_alert")
         elif (esm > 0.78) or (etm > 0.74):
             risk_flags.append("hive_entropy_warn")
+    if math.isfinite(ch_turn_mean) or math.isfinite(ch_turn_max) or math.isfinite(ch_turn_roll):
+        tm = ch_turn_mean if math.isfinite(ch_turn_mean) else 0.0
+        tx = ch_turn_max if math.isfinite(ch_turn_max) else 0.0
+        tr = ch_turn_roll if math.isfinite(ch_turn_roll) else 0.0
+        if (tx > 1.05) or (tr > 1.35):
+            risk_flags.append("hive_turnover_alert")
+        elif (tm > 0.38) or (tx > 0.85) or (tr > 1.15):
+            risk_flags.append("hive_turnover_warn")
 
     if math.isfinite(he_pressure) or math.isfinite(vit_min):
         pressure = he_pressure if math.isfinite(he_pressure) else 0.0
