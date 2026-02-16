@@ -144,6 +144,7 @@ def build_alert_payload(
     aion_feedback_age_hours = None
     aion_feedback_stale = False
     aion_feedback_max_age_hours = max_aion_feedback_age_hours
+    aion_feedback_source = "none"
     shape = {}
     if isinstance(health, dict):
         shape = health.get("shape", {})
@@ -232,6 +233,7 @@ def build_alert_payload(
         if isinstance(rt, dict):
             af = rt.get("aion_feedback", {})
             if _has_aion_feedback_metrics(af):
+                aion_feedback_source = "overlay"
                 aion_feedback_active = bool(af.get("active", False))
                 aion_feedback_status = str(af.get("status", "unknown")).strip().lower() or "unknown"
                 try:
@@ -265,6 +267,7 @@ def build_alert_payload(
 
     if (not aion_feedback_active) and _has_aion_feedback_metrics(aion_feedback_fallback):
         af = aion_feedback_fallback
+        aion_feedback_source = "shadow_trades"
         aion_feedback_active = bool(af.get("active", False))
         aion_feedback_status = str(af.get("status", "unknown")).strip().lower() or "unknown"
         try:
@@ -302,6 +305,7 @@ def build_alert_payload(
         except Exception:
             aion_feedback_active = False
         if aion_feedback_active:
+            aion_feedback_source = "system_health_shape"
             aion_feedback_status = str(shape.get("aion_feedback_status", "unknown")).strip().lower() or "unknown"
             try:
                 aion_feedback_risk_scale = float(shape.get("aion_feedback_risk_scale", np.nan))
@@ -550,6 +554,7 @@ def build_alert_payload(
             "hive_entropy_strength_mean": hive_entropy_strength_mean,
             "hive_entropy_target_mean": hive_entropy_target_mean,
             "aion_feedback_active": aion_feedback_active,
+            "aion_feedback_source": aion_feedback_source,
             "aion_feedback_status": aion_feedback_status,
             "aion_feedback_risk_scale": aion_feedback_risk_scale,
             "aion_feedback_closed_trades": aion_feedback_closed_trades,

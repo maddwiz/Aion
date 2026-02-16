@@ -422,6 +422,7 @@ def test_build_alert_payload_uses_system_health_shape_for_aion_feedback_when_ove
     )
     assert any("aion_feedback_status=alert" in a for a in payload["alerts"])
     assert any("aion_feedback_risk_scale<" in a for a in payload["alerts"])
+    assert payload["observed"]["aion_feedback_source"] == "system_health_shape"
 
 
 def test_build_alert_payload_uses_shadow_fallback_when_overlay_and_shape_missing():
@@ -467,6 +468,7 @@ def test_build_alert_payload_uses_shadow_fallback_when_overlay_and_shape_missing
     assert any("aion_feedback_status=alert" in a for a in payload["alerts"])
     assert any("aion_feedback_risk_scale<" in a for a in payload["alerts"])
     assert payload["observed"]["aion_feedback_status"] == "alert"
+    assert payload["observed"]["aion_feedback_source"] == "shadow_trades"
 
 
 def test_build_alert_payload_prefers_overlay_over_shadow_fallback():
@@ -520,6 +522,7 @@ def test_build_alert_payload_prefers_overlay_over_shadow_fallback():
     )
     assert not any("aion_feedback_status=alert" in a for a in payload["alerts"])
     assert payload["observed"]["aion_feedback_status"] == "ok"
+    assert payload["observed"]["aion_feedback_source"] == "overlay"
 
 
 def test_build_alert_payload_prefers_overlay_aion_feedback_over_shape():
@@ -579,6 +582,7 @@ def test_build_alert_payload_prefers_overlay_aion_feedback_over_shape():
     assert not any("aion_feedback_status=alert" in a for a in payload["alerts"])
     assert not any("aion_feedback_risk_scale<" in a for a in payload["alerts"])
     assert payload["observed"]["aion_feedback_status"] == "ok"
+    assert payload["observed"]["aion_feedback_source"] == "overlay"
 
 
 def test_build_alert_payload_triggers_aion_feedback_stale_alert_and_skips_metric_alerts():
