@@ -78,6 +78,68 @@ def _safe_float(x, default=0.0):
         return default
 
 
+def _compact_memory_runtime_context(
+    *,
+    ext_runtime_scale: float,
+    ext_position_risk_scale: float,
+    ext_runtime_diag: dict | None,
+    ext_overlay_age_hours: float | None,
+    ext_overlay_age_source: str,
+    memory_feedback_status: str,
+    memory_feedback_risk_scale: float,
+    memory_feedback_block_new_entries: bool,
+    aion_feedback_status: str,
+    aion_feedback_source: str,
+    aion_feedback_source_selected: str,
+    aion_feedback_source_preference: str,
+    aion_feedback_risk_scale: float,
+    aion_feedback_stale: bool,
+    aion_feedback_block_new_entries: bool,
+    policy_block_new_entries: bool,
+    killswitch_block_new_entries: bool,
+    exec_governor_state: str,
+    exec_governor_block_new_entries: bool,
+) -> dict:
+    diag = ext_runtime_diag if isinstance(ext_runtime_diag, dict) else {}
+    flags_raw = diag.get("flags", [])
+    flags = []
+    if isinstance(flags_raw, list):
+        for raw in flags_raw:
+            key = str(raw).strip().lower()
+            if key and key not in flags:
+                flags.append(key)
+
+    return {
+        "external_runtime_scale": float(_safe_float(ext_runtime_scale, 1.0)),
+        "external_position_risk_scale": float(_safe_float(ext_position_risk_scale, 1.0)),
+        "external_regime": str(diag.get("regime", "unknown")).strip().lower() or "unknown",
+        "external_overlay_stale": bool(diag.get("overlay_stale", False)),
+        "external_overlay_age_hours": (
+            None if ext_overlay_age_hours is None else float(_safe_float(ext_overlay_age_hours, 0.0))
+        ),
+        "external_overlay_age_source": str(ext_overlay_age_source or "unknown").strip().lower() or "unknown",
+        "external_risk_flags": flags,
+        "memory_feedback_status": str(memory_feedback_status or "unknown").strip().lower() or "unknown",
+        "memory_feedback_risk_scale": float(_safe_float(memory_feedback_risk_scale, 1.0)),
+        "memory_feedback_block_new_entries": bool(memory_feedback_block_new_entries),
+        "aion_feedback_status": str(aion_feedback_status or "unknown").strip().lower() or "unknown",
+        "aion_feedback_source": str(aion_feedback_source or "unknown").strip().lower() or "unknown",
+        "aion_feedback_source_selected": (
+            str(aion_feedback_source_selected or aion_feedback_source or "unknown").strip().lower() or "unknown"
+        ),
+        "aion_feedback_source_preference": (
+            str(aion_feedback_source_preference or "auto").strip().lower() or "auto"
+        ),
+        "aion_feedback_risk_scale": float(_safe_float(aion_feedback_risk_scale, 1.0)),
+        "aion_feedback_stale": bool(aion_feedback_stale),
+        "aion_feedback_block_new_entries": bool(aion_feedback_block_new_entries),
+        "policy_block_new_entries": bool(policy_block_new_entries),
+        "killswitch_block_new_entries": bool(killswitch_block_new_entries),
+        "exec_governor_state": str(exec_governor_state or "off").strip().lower() or "off",
+        "exec_governor_block_new_entries": bool(exec_governor_block_new_entries),
+    }
+
+
 def _emit_trade_memory_event(
     event_type: str,
     symbol: str,
@@ -786,6 +848,7 @@ def _close_position(
     fill_ratio: float = 1.0,
     slippage_bps: float = 0.0,
     monitor: RuntimeMonitor | None = None,
+    memory_runtime_context: dict | None = None,
 ):
     pos = open_positions[symbol]
     qty = int(pos["qty"])
@@ -819,6 +882,17 @@ def _close_position(
         fill_ratio=fill_ratio,
         slippage_bps=slippage_bps,
     )
+    event_extra = {
+        "fill_ratio": float(fill_ratio),
+        "slippage_bps": float(slippage_bps),
+        "stop": float(pos.get("stop", 0.0)),
+        "target": float(pos.get("target", 0.0)),
+        "trail": float(pos.get("trail_stop", 0.0)),
+        "bars_held": int(pos.get("bars_held", 0)),
+    }
+    if isinstance(memory_runtime_context, dict) and memory_runtime_context:
+        event_extra["runtime_context"] = dict(memory_runtime_context)
+
     _emit_trade_memory_event(
         event_type="trade.exit",
         symbol=symbol,
@@ -831,14 +905,7 @@ def _close_position(
         confidence=float(pos.get("confidence", 0.0)),
         regime=str(pos.get("regime", "")),
         monitor=monitor,
-        extra={
-            "fill_ratio": float(fill_ratio),
-            "slippage_bps": float(slippage_bps),
-            "stop": float(pos.get("stop", 0.0)),
-            "target": float(pos.get("target", 0.0)),
-            "trail": float(pos.get("trail_stop", 0.0)),
-            "bars_held": int(pos.get("bars_held", 0)),
-        },
+        extra=event_extra,
     )
     del open_positions[symbol]
     return cash, closed_pnl
@@ -854,6 +921,7 @@ def _partial_close(
     ks: KillSwitch,
     today: str,
     monitor: RuntimeMonitor | None = None,
+    memory_runtime_context: dict | None = None,
 ):
     qty = int(pos["qty"])
     close_qty = max(1, int(math.floor(qty * cfg.PARTIAL_CLOSE_FRACTION)))
@@ -896,6 +964,18 @@ def _partial_close(
         fill_ratio=fill.fill_ratio,
         slippage_bps=fill.est_slippage_bps,
     )
+    event_extra = {
+        "fill_ratio": float(fill.fill_ratio),
+        "slippage_bps": float(fill.est_slippage_bps),
+        "stop": float(pos.get("stop", 0.0)),
+        "target": float(pos.get("target", 0.0)),
+        "trail": float(pos.get("trail_stop", 0.0)),
+        "bars_held": int(pos.get("bars_held", 0)),
+        "remaining_qty": int(pos.get("qty", 0)),
+    }
+    if isinstance(memory_runtime_context, dict) and memory_runtime_context:
+        event_extra["runtime_context"] = dict(memory_runtime_context)
+
     _emit_trade_memory_event(
         event_type="trade.partial_exit",
         symbol=symbol,
@@ -908,15 +988,7 @@ def _partial_close(
         confidence=float(pos.get("confidence", 0.0)),
         regime=str(pos.get("regime", "")),
         monitor=monitor,
-        extra={
-            "fill_ratio": float(fill.fill_ratio),
-            "slippage_bps": float(fill.est_slippage_bps),
-            "stop": float(pos.get("stop", 0.0)),
-            "target": float(pos.get("target", 0.0)),
-            "trail": float(pos.get("trail_stop", 0.0)),
-            "bars_held": int(pos.get("bars_held", 0)),
-            "remaining_qty": int(pos.get("qty", 0)),
-        },
+        extra=event_extra,
     )
 
     fully_closed = pos["qty"] <= 0
@@ -1534,6 +1606,28 @@ def main() -> int:
                 }
             )
 
+            memory_runtime_context = _compact_memory_runtime_context(
+                ext_runtime_scale=float(ext_runtime_scale),
+                ext_position_risk_scale=float(ext_position_risk_scale),
+                ext_runtime_diag=ext_runtime_diag,
+                ext_overlay_age_hours=ext_overlay_age_hours,
+                ext_overlay_age_source=str(ext_overlay_age_source),
+                memory_feedback_status=str(memory_feedback_status),
+                memory_feedback_risk_scale=float(memory_feedback_risk_scale),
+                memory_feedback_block_new_entries=bool(memory_feedback_block_new_entries),
+                aion_feedback_status=str(aion_feedback_status),
+                aion_feedback_source=str(aion_feedback_source),
+                aion_feedback_source_selected=str(aion_feedback_source_selected),
+                aion_feedback_source_preference=str(aion_feedback_source_preference),
+                aion_feedback_risk_scale=float(aion_feedback_risk_scale),
+                aion_feedback_stale=bool(aion_feedback_stale),
+                aion_feedback_block_new_entries=bool(aion_feedback_block_new_entries),
+                policy_block_new_entries=bool(policy_block_new_entries),
+                killswitch_block_new_entries=bool(killswitch_block_new_entries),
+                exec_governor_state=str(exec_governor_state),
+                exec_governor_block_new_entries=bool(exec_governor_block_new_entries),
+            )
+
             for sym in wl:
                 try:
                     df = hist_bars_cached(
@@ -1646,7 +1740,16 @@ def main() -> int:
 
                             if (not pos["partial_taken"]) and price >= (pos["entry"] + pos["init_risk"] * cfg.PARTIAL_TAKE_R):
                                 cash, closed_pnl, fully_closed = _partial_close(
-                                    pos, sym, price, exe, cash, closed_pnl, ks, today, monitor=monitor
+                                    pos,
+                                    sym,
+                                    price,
+                                    exe,
+                                    cash,
+                                    closed_pnl,
+                                    ks,
+                                    today,
+                                    monitor=monitor,
+                                    memory_runtime_context=memory_runtime_context,
                                 )
                                 monitor.record_execution(cfg.SLIPPAGE_BPS)
                                 if fully_closed:
@@ -1664,7 +1767,16 @@ def main() -> int:
 
                             if (not pos["partial_taken"]) and price <= (pos["entry"] - pos["init_risk"] * cfg.PARTIAL_TAKE_R):
                                 cash, closed_pnl, fully_closed = _partial_close(
-                                    pos, sym, price, exe, cash, closed_pnl, ks, today, monitor=monitor
+                                    pos,
+                                    sym,
+                                    price,
+                                    exe,
+                                    cash,
+                                    closed_pnl,
+                                    ks,
+                                    today,
+                                    monitor=monitor,
+                                    memory_runtime_context=memory_runtime_context,
                                 )
                                 monitor.record_execution(cfg.SLIPPAGE_BPS)
                                 if fully_closed:
@@ -1704,6 +1816,7 @@ def main() -> int:
                                 fill_ratio=fill.fill_ratio,
                                 slippage_bps=fill.est_slippage_bps,
                                 monitor=monitor,
+                                memory_runtime_context=memory_runtime_context,
                             )
                             cooldown[sym] = cfg.REENTRY_COOLDOWN_CYCLES
                             continue
@@ -1899,6 +2012,7 @@ def main() -> int:
                         "fill_ratio": float(fill.fill_ratio),
                         "slippage_bps": float(fill.est_slippage_bps),
                         "atr_pct": float(c["atr_pct"]),
+                        "runtime_context": dict(memory_runtime_context),
                     },
                 )
 

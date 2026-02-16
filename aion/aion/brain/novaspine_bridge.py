@@ -105,18 +105,60 @@ def _event_to_novaspine_ingest(ev: dict, namespace: str, source_prefix: str = "a
     event_id = str(ev.get("event_id", _stable_event_id(ev)))
     compact = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
     text = f"[{event_type}] payload={compact}"[:16000]
+    rc_summary = _runtime_context_summary(payload if isinstance(payload, dict) else {})
+    metadata = {
+        "namespace": namespace,
+        "event_id": event_id,
+        "event_type": event_type,
+        "ts_utc": ev.get("ts_utc", _utc_now_iso()),
+        "origin": "aion",
+        "payload": payload,
+    }
+    if rc_summary:
+        metadata["runtime_context_summary"] = rc_summary
     return {
         "text": text,
         "source_id": f"{source_prefix}:{event_type}:{event_id[:16]}",
         "event_id": event_id,
-        "metadata": {
-            "namespace": namespace,
-            "event_id": event_id,
-            "event_type": event_type,
-            "ts_utc": ev.get("ts_utc", _utc_now_iso()),
-            "origin": "aion",
-            "payload": payload,
-        },
+        "metadata": metadata,
+    }
+
+
+def _runtime_context_summary(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    rc = payload.get("runtime_context")
+    if not isinstance(rc, dict):
+        return {}
+
+    flags = []
+    raw_flags = rc.get("external_risk_flags", [])
+    if isinstance(raw_flags, list):
+        seen = set()
+        for raw in raw_flags:
+            key = str(raw).strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            flags.append(key)
+
+    src = str(rc.get("aion_feedback_source", rc.get("aion_feedback_source_selected", ""))).strip().lower() or "unknown"
+    selected = str(rc.get("aion_feedback_source_selected", src)).strip().lower() or src
+    pref = str(rc.get("aion_feedback_source_preference", "auto")).strip().lower() or "auto"
+
+    return {
+        "external_regime": str(rc.get("external_regime", "unknown")).strip().lower() or "unknown",
+        "external_overlay_stale": bool(rc.get("external_overlay_stale", False)),
+        "external_risk_flags": flags,
+        "aion_feedback_status": str(rc.get("aion_feedback_status", "unknown")).strip().lower() or "unknown",
+        "aion_feedback_source": src,
+        "aion_feedback_source_selected": selected,
+        "aion_feedback_source_preference": pref,
+        "aion_feedback_stale": bool(rc.get("aion_feedback_stale", False)),
+        "policy_block_new_entries": bool(rc.get("policy_block_new_entries", False)),
+        "killswitch_block_new_entries": bool(rc.get("killswitch_block_new_entries", False)),
+        "exec_governor_state": str(rc.get("exec_governor_state", "off")).strip().lower() or "off",
+        "exec_governor_block_new_entries": bool(rc.get("exec_governor_block_new_entries", False)),
     }
 
 

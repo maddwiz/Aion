@@ -116,6 +116,41 @@ def test_emit_trade_event_novaspine_api_success(monkeypatch):
     assert str(ingest[2].get("source_id", "")).startswith("aion:trade.exit:")
 
 
+def test_event_to_novaspine_ingest_promotes_runtime_context_summary():
+    ev = {
+        "event_type": "trade.entry",
+        "event_id": "abcd1234efgh5678abcd1234efgh5678abcd1234",
+        "ts_utc": "2026-02-16T04:45:00Z",
+        "payload": {
+            "symbol": "AAPL",
+            "runtime_context": {
+                "external_regime": "balanced",
+                "external_overlay_stale": False,
+                "external_risk_flags": ["drift_warn", "aion_outcome_warn"],
+                "aion_feedback_status": "warn",
+                "aion_feedback_source": "overlay",
+                "aion_feedback_source_selected": "shadow_trades",
+                "aion_feedback_source_preference": "shadow",
+                "aion_feedback_stale": False,
+                "policy_block_new_entries": False,
+                "killswitch_block_new_entries": False,
+                "exec_governor_state": "warn",
+                "exec_governor_block_new_entries": False,
+            },
+        },
+    }
+    out = nsb._event_to_novaspine_ingest(ev, namespace="private/nova/actions", source_prefix="aion")
+    md = out.get("metadata", {})
+    rc = md.get("runtime_context_summary", {})
+    assert rc.get("external_regime") == "balanced"
+    assert rc.get("aion_feedback_status") == "warn"
+    assert rc.get("aion_feedback_source") == "overlay"
+    assert rc.get("aion_feedback_source_selected") == "shadow_trades"
+    assert rc.get("aion_feedback_source_preference") == "shadow"
+    assert rc.get("exec_governor_state") == "warn"
+    assert rc.get("policy_block_new_entries") is False
+
+
 def test_emit_trade_event_novaspine_api_unreachable_fallback(tmp_path: Path, monkeypatch):
     def _fake_json_request(*_args, **_kwargs):
         raise RuntimeError("offline")
