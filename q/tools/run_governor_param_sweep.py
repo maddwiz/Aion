@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""
+Governor parameter sweep.
+
+Tunes key governor knobs (floor, shock alpha, concentration caps) and writes:
+  - runs_plus/governor_param_sweep.csv
+  - runs_plus/governor_params_profile.json
+
+The chosen profile is then applied by build_final_portfolio.py automatically.
+"""
+
+from __future__ import annotations
+
+import csv
+import itertools
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+RUNS = ROOT / "runs_plus"
+RUNS.mkdir(exist_ok=True)
+PYTHON = str(Path(sys.executable))
+
+
+def _run(cmd: list[str], env: dict[str, str]) -> None:
+    p = subprocess.run(
+        cmd,
+        cwd=str(ROOT),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if p.returncode != 0:
+        raise RuntimeError(
+            f"Command failed ({p.returncode}): {' '.join(cmd)}\n"
+            f"stdout:\n{p.stdout}\n"
+            f"stderr:\n{p.stderr}"
+        )
+
+
+def _build_make_daily(env_overrides: dict[str, str] | None = None) -> None:
+    env = os.environ.copy()
+    if env_overrides:
+        env.update({k: str(v) for k, v in env_overrides.items()})
+    _run([PYTHON, str(ROOT / "tools" / "build_final_portfolio.py")], env)
+    _run([PYTHON, str(ROOT / "tools" / "make_daily_from_weights.py")], env)
+
+
+def _metrics() -> dict:
+    rp = RUNS / "daily_returns.csv"
+    wp = RUNS / "portfolio_weights_final.csv"
+    if not rp.exists():
+        raise RuntimeError("Missing runs_plus/daily_returns.csv")
+    if not wp.exists():
+        raise RuntimeError("Missing runs_plus/portfolio_weights_final.csv")
+    r = np.asarray(np.loadtxt(rp, delimiter=","), float).ravel()
+    w = np.asarray(np.loadtxt(wp, delimiter=","), float)
+    if w.ndim == 1:
+        w = w.reshape(-1, 1)
+    mu = float(np.nanmean(r))
+    sd = float(np.nanstd(r) + 1e-12)
+    sh = float((mu / sd) * np.sqrt(252.0))
+    hit = float(np.sum(r > 0.0) / max(1, r.size))
+    eq = np.cumsum(r)
+    peak = np.maximum.accumulate(eq)
+    mdd = float(np.min(eq - peak))
+    turnover = float(np.mean(np.sum(np.abs(np.diff(w, axis=0)), axis=1))) if w.shape[0] > 1 else 0.0
+    gross = float(np.mean(np.sum(np.abs(w), axis=1))) if w.size else 0.0
+    return {
+        "sharpe": sh,
+        "hit_rate": hit,
+        "max_drawdown": mdd,
+        "turnover_mean": turnover,
+        "gross_mean": gross,
+        "n": int(r.size),
+    }
+
+
+def _objective(cur: dict, base: dict) -> tuple[float, dict]:
+    base_dd = max(1e-9, abs(float(base["max_drawdown"])))
+    cur_dd = abs(float(cur["max_drawdown"]))
+    dd_ratio = cur_dd / base_dd
+    hit_delta = float(cur["hit_rate"]) - float(base["hit_rate"])
+    turn_ratio = float(cur["turnover_mean"]) / max(1e-9, float(base["turnover_mean"]))
+
+    # Soft penalties, then hard veto for clearly riskier candidates.
+    penalty = 0.04 * max(0.0, dd_ratio - 1.0)
+    penalty += 0.01 * max(0.0, -hit_delta)
+    penalty += 0.01 * max(0.0, turn_ratio - 1.8)
+    score = float(cur["sharpe"]) - penalty
+
+    veto = dd_ratio > 1.6 or hit_delta < -0.02
+    if veto:
+        score -= 1.0
+    detail = {
+        "dd_ratio": float(dd_ratio),
+        "hit_delta": float(hit_delta),
+        "turnover_ratio": float(turn_ratio),
+        "penalty": float(penalty),
+        "veto": bool(veto),
+    }
+    return score, detail
+
+
+def _profile_from_row(row: dict) -> dict:
+    return {
+        "runtime_total_floor": float(row["runtime_total_floor"]),
+        "shock_alpha": float(row["shock_alpha"]),
+        "use_concentration_governor": bool(int(row["use_concentration_governor"])),
+        "concentration_top1_cap": float(row["concentration_top1_cap"]),
+        "concentration_top3_cap": float(row["concentration_top3_cap"]),
+        "concentration_max_hhi": float(row["concentration_max_hhi"]),
+    }
+
+
+def _row_from_params(params: dict, metrics: dict, score: float, score_detail: dict) -> dict:
+    out = {**params, **metrics}
+    out["score"] = float(score)
+    out.update(score_detail)
+    return out
+
+
+def _csv_write(rows: list[dict], outp: Path) -> None:
+    cols = [
+        "runtime_total_floor",
+        "shock_alpha",
+        "use_concentration_governor",
+        "concentration_top1_cap",
+        "concentration_top3_cap",
+        "concentration_max_hhi",
+        "sharpe",
+        "hit_rate",
+        "max_drawdown",
+        "turnover_mean",
+        "gross_mean",
+        "score",
+        "dd_ratio",
+        "hit_delta",
+        "turnover_ratio",
+        "penalty",
+        "veto",
+    ]
+    with outp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow({k: r.get(k, "") for k in cols})
+
+
+def main() -> int:
+    if not (RUNS / "asset_returns.csv").exists():
+        print("(!) Missing runs_plus/asset_returns.csv. Run tools/rebuild_asset_matrix.py first.")
+        return 0
+
+    # Compact grid: enough breadth for improvement without huge runtime.
+    floors = [0.00, 0.05, 0.10, 0.15]
+    shocks = [0.20, 0.35, 0.50]
+    conc_presets = [
+        {"use_concentration_governor": 1, "concentration_top1_cap": 0.16, "concentration_top3_cap": 0.38, "concentration_max_hhi": 0.12},
+        {"use_concentration_governor": 1, "concentration_top1_cap": 0.18, "concentration_top3_cap": 0.42, "concentration_max_hhi": 0.14},
+        {"use_concentration_governor": 1, "concentration_top1_cap": 0.20, "concentration_top3_cap": 0.46, "concentration_max_hhi": 0.16},
+        {"use_concentration_governor": 1, "concentration_top1_cap": 0.22, "concentration_top3_cap": 0.50, "concentration_max_hhi": 0.18},
+        {"use_concentration_governor": 0, "concentration_top1_cap": 0.18, "concentration_top3_cap": 0.42, "concentration_max_hhi": 0.14},
+    ]
+
+    rows: list[dict] = []
+    try:
+        # Baseline under current profile.
+        _build_make_daily()
+        base = _metrics()
+
+        best_score = -1e9
+        best_row = None
+        for floor, shock, conc in itertools.product(floors, shocks, conc_presets):
+            params = {
+                "runtime_total_floor": float(floor),
+                "shock_alpha": float(shock),
+                "use_concentration_governor": int(conc["use_concentration_governor"]),
+                "concentration_top1_cap": float(conc["concentration_top1_cap"]),
+                "concentration_top3_cap": float(conc["concentration_top3_cap"]),
+                "concentration_max_hhi": float(conc["concentration_max_hhi"]),
+            }
+            env = {
+                "Q_RUNTIME_TOTAL_FLOOR": params["runtime_total_floor"],
+                "Q_SHOCK_ALPHA": params["shock_alpha"],
+                "Q_USE_CONCENTRATION_GOV": params["use_concentration_governor"],
+                "Q_CONCENTRATION_TOP1_CAP": params["concentration_top1_cap"],
+                "Q_CONCENTRATION_TOP3_CAP": params["concentration_top3_cap"],
+                "Q_CONCENTRATION_MAX_HHI": params["concentration_max_hhi"],
+            }
+            _build_make_daily(env)
+            m = _metrics()
+            score, detail = _objective(m, base)
+            row = _row_from_params(params, m, score, detail)
+            rows.append(row)
+            if score > best_score:
+                best_score = score
+                best_row = row
+
+        if best_row is None:
+            print("(!) No sweep candidates evaluated.")
+            return 1
+
+        sweep_csv = RUNS / "governor_param_sweep.csv"
+        _csv_write(rows, sweep_csv)
+
+        profile = {
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "baseline": base,
+            "best": best_row,
+            "parameters": _profile_from_row(best_row),
+            "search": {
+                "runtime_total_floor": floors,
+                "shock_alpha": shocks,
+                "concentration_presets": conc_presets,
+                "num_candidates": len(rows),
+            },
+        }
+        out_json = RUNS / "governor_params_profile.json"
+        out_json.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+
+        # Apply chosen profile for downstream runs.
+        _build_make_daily()
+        applied = _metrics()
+
+        print(f"✅ Wrote {sweep_csv}")
+        print(f"✅ Wrote {out_json}")
+        print(
+            "Baseline:",
+            f"Sharpe={base['sharpe']:.3f}",
+            f"Hit={base['hit_rate']:.3f}",
+            f"MaxDD={base['max_drawdown']:.3f}",
+        )
+        print(
+            "Best:",
+            f"Sharpe={best_row['sharpe']:.3f}",
+            f"Hit={best_row['hit_rate']:.3f}",
+            f"MaxDD={best_row['max_drawdown']:.3f}",
+            f"Score={best_row['score']:.3f}",
+        )
+        print(
+            "Applied profile:",
+            f"Sharpe={applied['sharpe']:.3f}",
+            f"Hit={applied['hit_rate']:.3f}",
+            f"MaxDD={applied['max_drawdown']:.3f}",
+        )
+        return 0
+    finally:
+        # Keep baseline/current profile output coherent even on sweep errors.
+        try:
+            _build_make_daily()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

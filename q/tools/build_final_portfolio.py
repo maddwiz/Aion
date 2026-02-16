@@ -58,6 +58,71 @@ def _load_governor_profile() -> dict:
 _GOV_PROFILE = _load_governor_profile()
 
 
+def _load_governor_param_profile() -> dict:
+    p = RUNS / "governor_params_profile.json"
+    if not p.exists():
+        return {}
+    try:
+        obj = json.loads(p.read_text())
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+_GOV_PARAM_PROFILE = _load_governor_param_profile()
+
+
+def _governor_params() -> dict:
+    obj = _GOV_PARAM_PROFILE if isinstance(_GOV_PARAM_PROFILE, dict) else {}
+    params = obj.get("parameters", obj)
+    return params if isinstance(params, dict) else {}
+
+
+def _env_or_profile_float(env_key: str, profile_key: str, default: float, lo: float, hi: float) -> float:
+    env_raw = str(os.getenv(env_key, "")).strip()
+    if env_raw:
+        try:
+            return float(np.clip(float(env_raw), lo, hi))
+        except Exception:
+            pass
+    params = _governor_params()
+    if profile_key in params:
+        try:
+            return float(np.clip(float(params.get(profile_key)), lo, hi))
+        except Exception:
+            pass
+    return float(np.clip(float(default), lo, hi))
+
+
+def _env_or_profile_int(env_key: str, profile_key: str, default: int, lo: int, hi: int) -> int:
+    env_raw = str(os.getenv(env_key, "")).strip()
+    if env_raw:
+        try:
+            return int(np.clip(int(float(env_raw)), lo, hi))
+        except Exception:
+            pass
+    params = _governor_params()
+    if profile_key in params:
+        try:
+            return int(np.clip(int(float(params.get(profile_key))), lo, hi))
+        except Exception:
+            pass
+    return int(np.clip(int(default), lo, hi))
+
+
+def _env_or_profile_bool(env_key: str, profile_key: str, default: bool) -> bool:
+    env_raw = str(os.getenv(env_key, "")).strip()
+    if env_raw:
+        return env_raw.lower() in {"1", "true", "yes", "on"}
+    params = _governor_params()
+    if profile_key in params:
+        raw = params.get(profile_key)
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return bool(default)
+
+
 def _disabled_governors() -> set[str]:
     raw = str(os.getenv("Q_DISABLE_GOVERNORS", "")).strip()
     out = set()
@@ -83,12 +148,15 @@ def _gov_enabled(name: str) -> bool:
     return str(name).strip().lower() not in _DISABLED_GOVS
 
 def _runtime_total_floor_default() -> float:
-    env_raw = str(os.getenv("Q_RUNTIME_TOTAL_FLOOR", "")).strip()
-    if env_raw:
-        try:
-            return float(np.clip(float(env_raw), 0.0, 1.0))
-        except Exception:
-            pass
+    env_or_param = _env_or_profile_float(
+        "Q_RUNTIME_TOTAL_FLOOR",
+        "runtime_total_floor",
+        np.nan,
+        0.0,
+        1.0,
+    )
+    if np.isfinite(env_or_param):
+        return float(env_or_param)
     try:
         prof_v = float(_GOV_PROFILE.get("runtime_total_floor", 0.10))
     except Exception:
@@ -109,9 +177,9 @@ def _auto_turnover_govern(w: np.ndarray):
     if arr.ndim != 2 or arr.shape[0] < 2:
         return None, None, None
 
-    max_step = float(np.clip(float(os.getenv("Q_AUTO_TURNOVER_MAX_STEP", "0.30")), 0.01, 5.0))
-    budget_window = int(max(1, int(float(os.getenv("Q_AUTO_TURNOVER_BUDGET_WINDOW", "5")))))
-    budget_limit = float(np.clip(float(os.getenv("Q_AUTO_TURNOVER_BUDGET_LIMIT", "1.00")), 0.01, 20.0))
+    max_step = _env_or_profile_float("Q_AUTO_TURNOVER_MAX_STEP", "auto_turnover_max_step", 0.30, 0.01, 5.0)
+    budget_window = _env_or_profile_int("Q_AUTO_TURNOVER_BUDGET_WINDOW", "auto_turnover_budget_window", 5, 1, 120)
+    budget_limit = _env_or_profile_float("Q_AUTO_TURNOVER_BUDGET_LIMIT", "auto_turnover_budget_limit", 1.00, 0.01, 20.0)
 
     res = apply_turnover_budget_governor(
         arr,
@@ -417,11 +485,11 @@ if __name__ == "__main__":
         _trace_put("novaspine_hive_boost", hb.ravel())
 
     # 22) Shock/news mask exposure cut.
+    shock_alpha = _env_or_profile_float("Q_SHOCK_ALPHA", "shock_alpha", 0.35, 0.0, 1.0)
     sm = load_series("runs_plus/shock_mask.csv")
     if _gov_enabled("shock_mask_guard") and sm is not None:
         L = min(len(sm), W.shape[0])
-        alpha = float(np.clip(float(os.getenv("Q_SHOCK_ALPHA", "0.35")), 0.0, 1.0))
-        sc = (1.0 - alpha * np.clip(sm[:L], 0.0, 1.0)).reshape(-1, 1)
+        sc = (1.0 - shock_alpha * np.clip(sm[:L], 0.0, 1.0)).reshape(-1, 1)
         W[:L] = W[:L] * sc
         steps.append("shock_mask_guard")
         _trace_put("shock_mask_guard", sc.ravel())
@@ -442,11 +510,14 @@ if __name__ == "__main__":
             _trace_put("runtime_floor", adj)
 
     # 24) Concentration governor (top1/top3 + HHI caps).
-    use_conc = str(os.getenv("Q_USE_CONCENTRATION_GOV", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    use_conc = _env_or_profile_bool("Q_USE_CONCENTRATION_GOV", "use_concentration_governor", True)
+    conc_top1 = _env_or_profile_float("Q_CONCENTRATION_TOP1_CAP", "concentration_top1_cap", 0.18, 0.01, 1.0)
+    conc_top3 = _env_or_profile_float("Q_CONCENTRATION_TOP3_CAP", "concentration_top3_cap", 0.42, 0.01, 1.0)
+    conc_hhi = _env_or_profile_float("Q_CONCENTRATION_MAX_HHI", "concentration_max_hhi", 0.14, 0.01, 1.0)
     if use_conc:
-        top1 = float(np.clip(float(os.getenv("Q_CONCENTRATION_TOP1_CAP", "0.18")), 0.01, 1.0))
-        top3 = float(np.clip(float(os.getenv("Q_CONCENTRATION_TOP3_CAP", "0.42")), 0.01, 1.0))
-        hhi = float(np.clip(float(os.getenv("Q_CONCENTRATION_MAX_HHI", "0.14")), 0.01, 1.0))
+        top1 = conc_top1
+        top3 = conc_top3
+        hhi = conc_hhi
         W, cstats = govern_matrix(W, top1_cap=top1, top3_cap=top3, max_hhi=hhi)
         steps.append("concentration_governor")
         (RUNS / "concentration_governor_info.json").write_text(
@@ -491,6 +562,36 @@ if __name__ == "__main__":
                 "N": int(N),
                 "disabled_governors": sorted(list(_DISABLED_GOVS)),
                 "runtime_total_floor_target": _runtime_total_floor_default(),
+                "governor_params_profile_file": str(RUNS / "governor_params_profile.json"),
+                "governor_params_applied": {
+                    "runtime_total_floor": _runtime_total_floor_default(),
+                    "shock_alpha": shock_alpha,
+                    "use_concentration_governor": bool(use_conc),
+                    "concentration_top1_cap": conc_top1,
+                    "concentration_top3_cap": conc_top3,
+                    "concentration_max_hhi": conc_hhi,
+                    "auto_turnover_max_step": _env_or_profile_float(
+                        "Q_AUTO_TURNOVER_MAX_STEP",
+                        "auto_turnover_max_step",
+                        0.30,
+                        0.01,
+                        5.0,
+                    ),
+                    "auto_turnover_budget_window": _env_or_profile_int(
+                        "Q_AUTO_TURNOVER_BUDGET_WINDOW",
+                        "auto_turnover_budget_window",
+                        5,
+                        1,
+                        120,
+                    ),
+                    "auto_turnover_budget_limit": _env_or_profile_float(
+                        "Q_AUTO_TURNOVER_BUDGET_LIMIT",
+                        "auto_turnover_budget_limit",
+                        1.00,
+                        0.01,
+                        20.0,
+                    ),
+                },
                 "governor_trace_file": str(RUNS / "final_governor_trace.csv"),
                 "runtime_total_scalar_mean": float(np.mean(trace_total)),
                 "runtime_total_scalar_min": float(np.min(trace_total)),

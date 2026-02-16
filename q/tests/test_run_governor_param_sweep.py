@@ -1,0 +1,36 @@
+import tools.run_governor_param_sweep as rps
+
+
+def test_objective_penalizes_drawdown_and_can_veto():
+    base = {
+        "sharpe": 0.75,
+        "hit_rate": 0.52,
+        "max_drawdown": -0.05,
+        "turnover_mean": 0.01,
+    }
+    bad = {
+        "sharpe": 0.90,
+        "hit_rate": 0.48,
+        "max_drawdown": -0.12,
+        "turnover_mean": 0.03,
+    }
+    score, detail = rps._objective(bad, base)
+    assert detail["dd_ratio"] > 2.0
+    assert detail["veto"] is True
+    assert score < 0.5
+
+
+def test_profile_from_row_casts_types():
+    row = {
+        "runtime_total_floor": 0.1,
+        "shock_alpha": 0.35,
+        "use_concentration_governor": 1,
+        "concentration_top1_cap": 0.18,
+        "concentration_top3_cap": 0.42,
+        "concentration_max_hhi": 0.14,
+    }
+    out = rps._profile_from_row(row)
+    assert out["runtime_total_floor"] == 0.1
+    assert out["shock_alpha"] == 0.35
+    assert out["use_concentration_governor"] is True
+    assert out["concentration_top1_cap"] == 0.18
