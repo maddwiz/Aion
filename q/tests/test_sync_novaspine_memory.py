@@ -41,8 +41,21 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     _write_json(tmp_path / "dna_stress_info.json", {"status": "ok", "mean_stress": 0.41, "max_stress": 0.77})
     _write_json(tmp_path / "reflex_health_info.json", {"health_mean": 0.9, "health_max": 1.8, "governor_mean": 0.94})
     _write_json(tmp_path / "symbolic_governor_info.json", {"status": "ok", "mean_stress": 0.37, "max_stress": 0.72})
-    _write_json(tmp_path / "cross_hive_summary.json", {"hives": ["EQ", "FX"], "mean_turnover": 0.2, "latest_weights": {"EQ": 0.6}})
-    _write_json(tmp_path / "hive_evolution.json", {"events": [{"event": "split_applied"}]})
+    _write_json(
+        tmp_path / "cross_hive_summary.json",
+        {
+            "hives": ["EQ", "FX"],
+            "mean_turnover": 0.2,
+            "latest_weights": {"EQ": 0.6},
+            "crowding_penalty_mean": {"EQ": 0.62, "FX": 0.48},
+            "adaptive_diagnostics": {
+                "mean_disagreement": 0.41,
+                "mean_stability_dispersion": 0.37,
+                "mean_regime_fracture": 0.19,
+            },
+        },
+    )
+    _write_json(tmp_path / "hive_evolution.json", {"events": [{"event": "split_applied"}], "action_pressure_mean": 0.17})
     _write_json(tmp_path / "execution_constraints_info.json", {"gross_after_mean": 0.9})
     _write_json(tmp_path / "immune_drill.json", {"pass": True, "ok": True})
     _write_json(tmp_path / "guardrails_summary.json", {"turnover_cost": {"turnover_budget": {"enabled": True, "limit": 1.0}}})
@@ -103,9 +116,18 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     assert float(sym.get("mean_stress")) > 0.0
     hp = rc.get("payload", {}).get("hive_persistence", {})
     assert float(hp.get("mean_governor")) > 0.0
+    hc = rc.get("payload", {}).get("hive_crowding", {})
+    assert hc.get("top_hive") == "EQ"
+    assert float(hc.get("mean_penalty")) > 0.0
+    chs = rc.get("payload", {}).get("cross_hive_stability", {})
+    assert float(chs.get("mean_turnover")) > 0.0
+    assert float(chs.get("mean_disagreement")) > 0.0
     drc = [e for e in events if e.get("event_type") == "decision.runtime_context"][0]
     dfrac = drc.get("payload", {}).get("regime_fracture", {})
     assert dfrac.get("state") == "fracture_warn"
+    dch = drc.get("payload", {}).get("cross_hive", {})
+    assert dch.get("crowding", {}).get("top_hive") == "EQ"
+    assert float(dch.get("stability", {}).get("mean_turnover")) > 0.0
     trusts = [float(e.get("trust", 0.0)) for e in events]
     assert all(0.0 <= t <= 1.0 for t in trusts)
 

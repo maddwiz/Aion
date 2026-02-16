@@ -178,6 +178,23 @@ def build_events():
     latest_weights = cross.get("latest_weights", {}) if isinstance(cross, dict) else {}
     eco_events = eco.get("events", []) if isinstance(eco, dict) else []
     runtime_ctx = overlay.get("runtime_context", {}) if isinstance(overlay, dict) else {}
+    cross_ad = cross.get("adaptive_diagnostics", {}) if isinstance(cross, dict) and isinstance(cross.get("adaptive_diagnostics"), dict) else {}
+    cross_dis = _safe_float(cross_ad.get("mean_disagreement", 0.0))
+    cross_disp = _safe_float(cross_ad.get("mean_stability_dispersion", 0.0))
+    cross_frac = _safe_float(cross_ad.get("mean_regime_fracture", 0.0))
+    eco_action_pressure = _safe_float((eco or {}).get("action_pressure_mean", 0.0))
+    crowd_obj = cross.get("crowding_penalty_mean", {}) if isinstance(cross, dict) else {}
+    crowd_rows = []
+    if isinstance(crowd_obj, dict):
+        for k, v in crowd_obj.items():
+            crowd_rows.append((str(k), _safe_float(v)))
+    elif np.isfinite(_safe_float(crowd_obj, np.nan)):
+        crowd_rows.append(("all", _safe_float(crowd_obj)))
+    crowd_vals = np.asarray([x[1] for x in crowd_rows], float) if crowd_rows else np.asarray([], float)
+    crowd_mean = float(np.mean(crowd_vals)) if len(crowd_vals) else 0.0
+    crowd_max = float(np.max(crowd_vals)) if len(crowd_vals) else 0.0
+    crowd_top_hive = str(max(crowd_rows, key=lambda x: x[1])[0]) if crowd_rows else "na"
+    crowd_top_penalty = float(max(crowd_rows, key=lambda x: x[1])[1]) if crowd_rows else 0.0
     turnover_budget = {}
     if isinstance(guardrails, dict):
         tc = guardrails.get("turnover_cost", {})
@@ -309,6 +326,19 @@ def build_events():
                     "min_governor": float(np.min(hive_pg)) if hive_pg is not None and len(hive_pg) else None,
                     "max_governor": float(np.max(hive_pg)) if hive_pg is not None and len(hive_pg) else None,
                 },
+                "hive_crowding": {
+                    "mean_penalty": crowd_mean,
+                    "max_penalty": crowd_max,
+                    "top_hive": crowd_top_hive,
+                    "top_hive_penalty": crowd_top_penalty,
+                },
+                "cross_hive_stability": {
+                    "mean_turnover": _safe_float((cross or {}).get("mean_turnover", 0.0)),
+                    "mean_disagreement": cross_dis,
+                    "mean_stability_dispersion": cross_disp,
+                    "mean_regime_fracture": cross_frac,
+                    "ecosystem_action_pressure": eco_action_pressure,
+                },
                 "final_steps": list((final_info or {}).get("steps", []) or []),
                 "pipeline_failed_count": int((pipeline or {}).get("failed_count", 0)),
                 "runtime_total_scalar": {
@@ -346,6 +376,23 @@ def build_events():
             "payload": {
                 "runtime_context": runtime_ctx if isinstance(runtime_ctx, dict) else {},
                 "hive_transparency_summary": (htx or {}).get("summary", {}) if isinstance(htx, dict) else {},
+                "cross_hive": {
+                    "hives": list((cross or {}).get("hives", []) or []),
+                    "latest_hive_weights": latest_weights if isinstance(latest_weights, dict) else {},
+                    "crowding": {
+                        "mean_penalty": crowd_mean,
+                        "max_penalty": crowd_max,
+                        "top_hive": crowd_top_hive,
+                        "top_hive_penalty": crowd_top_penalty,
+                    },
+                    "stability": {
+                        "mean_turnover": _safe_float((cross or {}).get("mean_turnover", 0.0)),
+                        "mean_disagreement": cross_dis,
+                        "mean_stability_dispersion": cross_disp,
+                        "mean_regime_fracture": cross_frac,
+                        "ecosystem_action_pressure": eco_action_pressure,
+                    },
+                },
                 "regime_fracture": {
                     "state": str((fracture or {}).get("state", "na")) if isinstance(fracture, dict) else "na",
                     "latest_score": _safe_float((fracture or {}).get("latest_score", 0.0)),
