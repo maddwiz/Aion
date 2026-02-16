@@ -576,6 +576,34 @@ def test_runtime_overlay_scale_uses_stronger_aion_outcome_flag_when_warn_and_ale
     assert scale_both == scale_alert
 
 
+def test_runtime_overlay_scale_applies_aion_outcome_stale_penalty():
+    clean, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": [],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.96,
+        aion_outcome_stale_scale=0.88,
+    )
+    stale, _ = runtime_overlay_scale(
+        {
+            "runtime_multiplier": 1.0,
+            "risk_flags": ["aion_outcome_stale"],
+            "degraded_safe_mode": False,
+            "quality_gate_ok": True,
+        },
+        min_scale=0.30,
+        max_scale=1.10,
+        flag_scale=0.96,
+        aion_outcome_stale_scale=0.88,
+    )
+    assert stale < clean
+
+
 def test_load_external_signal_bundle_marks_stale_overlay_and_drops_signals(tmp_path: Path):
     p = tmp_path / "overlay.json"
     p.write_text(

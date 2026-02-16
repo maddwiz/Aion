@@ -327,6 +327,7 @@ def runtime_overlay_scale(
     council_divergence_alert_scale: float = 0.74,
     aion_outcome_warn_scale: float = 0.90,
     aion_outcome_alert_scale: float = 0.74,
+    aion_outcome_stale_scale: float = 0.88,
     overlay_stale_scale: float = 0.82,
 ):
     """
@@ -395,6 +396,8 @@ def runtime_overlay_scale(
             scale *= float(_clamp(aion_outcome_alert_scale, 0.20, 1.20))
         elif "aion_outcome_warn" in flags:
             scale *= float(_clamp(aion_outcome_warn_scale, 0.20, 1.20))
+        if "aion_outcome_stale" in flags:
+            scale *= float(_clamp(aion_outcome_stale_scale, 0.20, 1.20))
     scale = _clamp(scale, float(min_scale), float(max_scale))
     diag = {
         "active": bool((degraded or (not q_ok) or bool(flags) or abs(scale - 1.0) > 1e-6)),

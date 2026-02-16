@@ -230,6 +230,9 @@ def _runtime_risk_caps(
     elif "aion_outcome_warn" in flags:
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(4, int(max_open_positions_cap))))
         max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.78))))
+    if "aion_outcome_stale" in flags:
+        max_open_positions_runtime = min(max_open_positions_runtime, max(1, min(3, int(max_open_positions_cap))))
+        max_trades_cap_runtime = min(max_trades_cap_runtime, max(1, int(round(int(max_trades_cap) * 0.72))))
 
     if degraded or (not quality_ok) or regime == "defensive":
         max_open_positions_runtime = min(max_open_positions_runtime, max(1, int(round(int(max_open_positions_cap) * 0.75))))
@@ -302,6 +305,8 @@ def _runtime_position_risk_scale(
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_AION_OUTCOME_ALERT_SCALE)))
         elif "aion_outcome_warn" in flags:
             scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_AION_OUTCOME_WARN_SCALE)))
+        if "aion_outcome_stale" in flags:
+            scale *= float(max(0.20, min(1.20, cfg.EXT_SIGNAL_RUNTIME_RISK_AION_OUTCOME_STALE_SCALE)))
     if regime == "defensive":
         scale *= 0.90
     return float(max(0.20, min(1.00, scale)))
@@ -1123,6 +1128,7 @@ def main() -> int:
                     council_divergence_alert_scale=cfg.EXT_SIGNAL_RUNTIME_COUNCIL_ALERT_SCALE,
                     aion_outcome_warn_scale=cfg.EXT_SIGNAL_RUNTIME_AION_OUTCOME_WARN_SCALE,
                     aion_outcome_alert_scale=cfg.EXT_SIGNAL_RUNTIME_AION_OUTCOME_ALERT_SCALE,
+                    aion_outcome_stale_scale=cfg.EXT_SIGNAL_RUNTIME_AION_OUTCOME_STALE_SCALE,
                     overlay_stale_scale=cfg.EXT_SIGNAL_RUNTIME_STALE_SCALE,
                 )
                 max_trades_cap_runtime, max_open_positions_runtime = _runtime_risk_caps(
