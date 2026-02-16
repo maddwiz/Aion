@@ -65,6 +65,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
         {
             "hives": ["EQ", "FX"],
             "mean_turnover": 0.2,
+            "max_turnover": 0.39,
+            "rolling_turnover_max": 0.44,
             "latest_weights": {"EQ": 0.6},
             "crowding_penalty_mean": {"EQ": 0.62, "FX": 0.48},
             "adaptive_diagnostics": {
@@ -110,6 +112,11 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     assert "decision.runtime_context" in types
     assert "memory.feedback_state" in types
     assert "governance.immune_drill" in types
+    hs = [e for e in events if e.get("event_type") == "ecosystem.hive_state"][0]
+    hsp = hs.get("payload", {})
+    assert float(hsp.get("mean_hive_turnover")) > 0.0
+    assert float(hsp.get("max_hive_turnover")) >= float(hsp.get("mean_hive_turnover"))
+    assert float(hsp.get("rolling_hive_turnover_max")) >= float(hsp.get("max_hive_turnover"))
     rc = [e for e in events if e.get("event_type") == "governance.risk_controls"][0]
     rts = rc.get("payload", {}).get("runtime_total_scalar", {})
     assert float(rts.get("latest")) > 0.0
@@ -160,6 +167,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     assert float(he.get("entropy_strength_max")) > 0.0
     chs = rc.get("payload", {}).get("cross_hive_stability", {})
     assert float(chs.get("mean_turnover")) > 0.0
+    assert float(chs.get("max_turnover")) >= float(chs.get("mean_turnover"))
+    assert float(chs.get("rolling_turnover_max")) >= float(chs.get("max_turnover"))
     assert float(chs.get("mean_disagreement")) > 0.0
     drc = [e for e in events if e.get("event_type") == "decision.runtime_context"][0]
     dfrac = drc.get("payload", {}).get("regime_fracture", {})
@@ -168,6 +177,8 @@ def test_build_events_includes_governance_audit_events(tmp_path, monkeypatch):
     assert dch.get("crowding", {}).get("top_hive") == "EQ"
     assert float(dch.get("entropy", {}).get("entropy_strength_mean")) > 0.0
     assert float(dch.get("stability", {}).get("mean_turnover")) > 0.0
+    assert float(dch.get("stability", {}).get("max_turnover")) >= float(dch.get("stability", {}).get("mean_turnover"))
+    assert float(dch.get("stability", {}).get("rolling_turnover_max")) >= float(dch.get("stability", {}).get("max_turnover"))
     mfb = [e for e in events if e.get("event_type") == "memory.feedback_state"][0]
     af2 = mfb.get("payload", {}).get("aion_feedback", {})
     assert af2.get("status") == "warn"

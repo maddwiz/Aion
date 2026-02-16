@@ -235,6 +235,9 @@ def build_events():
     cross_dis = _safe_float(cross_ad.get("mean_disagreement", 0.0))
     cross_disp = _safe_float(cross_ad.get("mean_stability_dispersion", 0.0))
     cross_frac = _safe_float(cross_ad.get("mean_regime_fracture", 0.0))
+    cross_turn_mean = _safe_float((cross or {}).get("mean_turnover", 0.0))
+    cross_turn_max = _safe_float((cross or {}).get("max_turnover", cross_turn_mean), cross_turn_mean)
+    cross_turn_roll_max = _safe_float((cross or {}).get("rolling_turnover_max", cross_turn_max), cross_turn_max)
     cross_ent = cross.get("entropy_adaptive_diagnostics", {}) if isinstance(cross, dict) and isinstance(cross.get("entropy_adaptive_diagnostics"), dict) else {}
     ent_target_mean = _safe_float(cross_ent.get("entropy_target_mean", 0.0))
     ent_target_max = _safe_float(cross_ent.get("entropy_target_max", 0.0))
@@ -298,11 +301,13 @@ def build_events():
             "payload": {
                 "hives": list(cross.get("hives", []) or []),
                 "latest_hive_weights": latest_weights,
-                "mean_hive_turnover": float(cross.get("mean_turnover", 0.0)),
+                "mean_hive_turnover": cross_turn_mean,
+                "max_hive_turnover": cross_turn_max,
+                "rolling_hive_turnover_max": cross_turn_roll_max,
                 "ecosystem_events_count": int(len(eco_events)),
                 "ecosystem_events_sample": eco_events[:10],
             },
-            "trust": float(np.clip(1.0 - min(1.0, float(cross.get("mean_turnover", 0.0))), 0.0, 1.0)),
+            "trust": float(np.clip(1.0 - min(1.0, cross_turn_mean), 0.0, 1.0)),
         },
         {
             "event_type": "portfolio.runtime_state",
@@ -397,7 +402,9 @@ def build_events():
                     "entropy_strength_max": ent_strength_max,
                 },
                 "cross_hive_stability": {
-                    "mean_turnover": _safe_float((cross or {}).get("mean_turnover", 0.0)),
+                    "mean_turnover": cross_turn_mean,
+                    "max_turnover": cross_turn_max,
+                    "rolling_turnover_max": cross_turn_roll_max,
                     "mean_disagreement": cross_dis,
                     "mean_stability_dispersion": cross_disp,
                     "mean_regime_fracture": cross_frac,
@@ -457,7 +464,9 @@ def build_events():
                         "entropy_strength_max": ent_strength_max,
                     },
                     "stability": {
-                        "mean_turnover": _safe_float((cross or {}).get("mean_turnover", 0.0)),
+                        "mean_turnover": cross_turn_mean,
+                        "max_turnover": cross_turn_max,
+                        "rolling_turnover_max": cross_turn_roll_max,
                         "mean_disagreement": cross_dis,
                         "mean_stability_dispersion": cross_disp,
                         "mean_regime_fracture": cross_frac,
