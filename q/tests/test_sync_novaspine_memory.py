@@ -210,3 +210,45 @@ def test_build_events_falls_back_to_shadow_trades_aion_feedback(tmp_path, monkey
     assert af.get("active") is True
     assert int(af.get("closed_trades")) == 4
     assert float(af.get("risk_scale")) < 1.0
+
+
+def test_build_events_prefers_fresh_shadow_when_overlay_feedback_is_stale(tmp_path, monkeypatch):
+    monkeypatch.setattr(sm, "RUNS", tmp_path)
+    shadow = tmp_path / "shadow_trades.csv"
+    shadow.write_text(
+        "\n".join(
+            [
+                "timestamp,symbol,side,pnl",
+                "2026-02-16 10:00:00,AAPL,EXIT_BUY,4.0",
+                "2026-02-16 10:05:00,MSFT,EXIT_SELL,-1.0",
+                "2026-02-16 10:10:00,NVDA,PARTIAL_BUY,2.0",
+                "2026-02-16 10:15:00,TSLA,EXIT_SELL,-0.5",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("Q_AION_SHADOW_TRADES", str(shadow))
+    monkeypatch.setenv("Q_AION_FEEDBACK_MIN_TRADES", "3")
+    monkeypatch.setenv("Q_AION_FEEDBACK_MAX_AGE_HOURS", "24")
+    _write_json(
+        tmp_path / "q_signal_overlay.json",
+        {
+            "runtime_context": {
+                "aion_feedback": {
+                    "active": True,
+                    "status": "alert",
+                    "risk_scale": 0.70,
+                    "closed_trades": 20,
+                    "age_hours": 96.0,
+                    "max_age_hours": 24.0,
+                    "stale": True,
+                }
+            }
+        },
+    )
+
+    events = sm.build_events()
+    rc = [e for e in events if e.get("event_type") == "governance.risk_controls"][0]
+    af = rc.get("payload", {}).get("aion_feedback", {})
+    assert af.get("source") == "shadow_trades"
+    assert int(af.get("closed_trades")) == 4

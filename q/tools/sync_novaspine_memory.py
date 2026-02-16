@@ -146,6 +146,29 @@ def _aion_feedback_has_metrics(payload: dict | None) -> bool:
     return False
 
 
+def _aion_feedback_is_stale(payload: dict | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    stale_flag = bool(payload.get("stale", False))
+    try:
+        age_hours = float(payload.get("age_hours", np.nan))
+        if not np.isfinite(age_hours):
+            age_hours = None
+    except Exception:
+        age_hours = None
+    try:
+        max_age_hours = float(payload.get("max_age_hours", np.nan))
+        if not np.isfinite(max_age_hours):
+            max_age_hours = None
+    except Exception:
+        max_age_hours = None
+    if max_age_hours is None:
+        max_age_hours = _safe_float(os.getenv("Q_AION_FEEDBACK_MAX_AGE_HOURS", 72.0), 72.0)
+    max_age_hours = float(np.clip(float(max_age_hours), 1.0, 24.0 * 90.0))
+    age_stale = bool(age_hours is not None and age_hours > max_age_hours)
+    return bool(stale_flag or age_stale)
+
+
 def build_events():
     ts = _now_iso()
     overlay = _load_json(RUNS / "q_signal_overlay.json") or {}
@@ -216,14 +239,22 @@ def build_events():
     eco_events = eco.get("events", []) if isinstance(eco, dict) else []
     runtime_ctx = overlay.get("runtime_context", {}) if isinstance(overlay, dict) else {}
     overlay_feedback = runtime_ctx.get("aion_feedback", {}) if isinstance(runtime_ctx, dict) else {}
-    overlay_summary = _summarize_aion_feedback(overlay_feedback)
-    if _aion_feedback_has_metrics(overlay_feedback):
-        aion_feedback_summary = overlay_summary
+    shadow_feedback = load_outcome_feedback(root=ROOT, mark_stale_reason=False)
+    overlay_has = _aion_feedback_has_metrics(overlay_feedback)
+    shadow_has = _aion_feedback_has_metrics(shadow_feedback)
+    overlay_stale = _aion_feedback_is_stale(overlay_feedback)
+    shadow_stale = _aion_feedback_is_stale(shadow_feedback)
+    prefer_shadow = bool(overlay_has and overlay_stale and shadow_has and (not shadow_stale))
+
+    if overlay_has and (not prefer_shadow):
+        aion_feedback_summary = _summarize_aion_feedback(overlay_feedback)
         aion_feedback_summary["source"] = "overlay"
-    else:
-        shadow_feedback = load_outcome_feedback(root=ROOT, mark_stale_reason=False)
+    elif shadow_has:
         aion_feedback_summary = _summarize_aion_feedback(shadow_feedback)
         aion_feedback_summary["source"] = "shadow_trades"
+    else:
+        aion_feedback_summary = _summarize_aion_feedback(overlay_feedback)
+        aion_feedback_summary["source"] = "overlay"
     cross_ad = cross.get("adaptive_diagnostics", {}) if isinstance(cross, dict) and isinstance(cross.get("adaptive_diagnostics"), dict) else {}
     cross_dis = _safe_float(cross_ad.get("mean_disagreement", 0.0))
     cross_disp = _safe_float(cross_ad.get("mean_stability_dispersion", 0.0))
