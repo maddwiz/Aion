@@ -396,3 +396,51 @@ def test_canary_skips_latest_checks_when_latest_missing(monkeypatch):
     ok, reasons = rcs._canary_qualifies(stable, candidate)
     assert ok is True
     assert reasons == []
+
+
+def test_runtime_combo_search_writes_relaxed_candidate_when_no_promotable(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(rcs, "ROOT", tmp_path)
+    monkeypatch.setattr(rcs, "RUNS", runs)
+    monkeypatch.setattr(rcs, "_base_runtime_env", lambda: {})
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_FLOORS", "0.18")
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_FLAGS", "a")
+
+    stable = {
+        "runtime_total_floor": 0.14,
+        "disable_governors": [],
+        "robust_sharpe": 1.20,
+        "robust_hit_rate": 0.50,
+        "robust_max_drawdown": -0.04,
+        "score": 1.20,
+        "promotion_ok": True,
+        "cost_stress_ok": True,
+        "health_ok": True,
+    }
+    (runs / "runtime_profile_stable.json").write_text(json.dumps(stable), encoding="utf-8")
+    (runs / "runtime_profile_active.json").write_text(json.dumps(stable), encoding="utf-8")
+
+    def _fake_eval(_env):
+        return {
+            "robust_sharpe": 1.30,
+            "robust_hit_rate": 0.50,
+            "robust_max_drawdown": -0.04,
+            "promotion_ok": False,
+            "cost_stress_ok": True,
+            "health_ok": True,
+            "health_alerts_hard": 0,
+            "rc": [{"step": "x", "code": 0}],
+        }
+
+    monkeypatch.setattr(rcs, "_eval_combo", _fake_eval)
+    assert rcs.main() == 0
+
+    out = json.loads((runs / "runtime_combo_search.json").read_text(encoding="utf-8"))
+    assert int(out["rows_valid"]) == 0
+    assert int(out["rows_relaxed_valid"]) > 0
+    assert out["selected"] is None
+    assert isinstance(out["selected_relaxed"], dict)
+    assert (runs / "runtime_profile_selected_relaxed.json").exists()
+    status = json.loads((runs / "runtime_profile_promotion_status.json").read_text(encoding="utf-8"))
+    assert status["action"] == "no_promotable_profile"

@@ -564,7 +564,17 @@ def main() -> int:
             and int(r.get("health_alerts_hard", 999)) == 0
         )
 
+    def _relaxed_valid(r: dict) -> bool:
+        rc_ok = all(int(x.get("code", 1)) == 0 for x in (r.get("rc") or []))
+        return (
+            rc_ok
+            and bool(r.get("cost_stress_ok", False))
+            and bool(r.get("health_ok", False))
+            and int(r.get("health_alerts_hard", 999)) == 0
+        )
+
     valid = [r for r in rows if _valid(r)]
+    relaxed_valid = [r for r in rows if _relaxed_valid(r)]
     valid_sorted = sorted(
         valid,
         key=lambda r: (
@@ -574,8 +584,18 @@ def main() -> int:
         ),
         reverse=True,
     )
+    relaxed_valid_sorted = sorted(
+        relaxed_valid,
+        key=lambda r: (
+            float(r.get("score", -1e9)),
+            float(r.get("robust_sharpe", 0.0)),
+            float(r.get("robust_hit_rate", 0.0)),
+        ),
+        reverse=True,
+    )
 
     selected = valid_sorted[0] if valid_sorted else None
+    selected_relaxed = relaxed_valid_sorted[0] if relaxed_valid_sorted else None
     out = {
         "floors": floors,
         "flags": flags,
@@ -587,6 +607,7 @@ def main() -> int:
         "max_combos": int(max_combos),
         "rows_total": len(rows),
         "rows_valid": len(valid_sorted),
+        "rows_relaxed_valid": len(relaxed_valid_sorted),
         "score_formula": {
             "score": "sharpe + hit_weight*(hit-target_hit) - mdd_penalty*max(0, abs(max_drawdown)-mdd_ref) - cost_penalty*max(0, ann_cost_estimate-cost_ref_annual) - turnover_penalty*max(0, mean_turnover-turnover_ref_daily)",
             "target_hit": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TARGET_HIT", "0.49")), 0.0, 1.0)),
@@ -599,7 +620,9 @@ def main() -> int:
             "turnover_penalty": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TURNOVER_PENALTY", "1.5")), 0.0, 100.0)),
         },
         "top_valid": valid_sorted[:20],
+        "top_relaxed": relaxed_valid_sorted[:20],
         "selected": selected,
+        "selected_relaxed": selected_relaxed,
     }
     (RUNS / "runtime_combo_search.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
 
@@ -676,10 +699,22 @@ def main() -> int:
                     else:
                         state = {"challenger_signature": sel_sig, "passes": passes, "fails": fails}
     else:
-        print("(!) No valid runtime profile found in search grid.")
-        if stable:
-            _write_profile("runtime_profile_active.json", stable)
-        status["action"] = "no_valid_profile"
+        if selected_relaxed:
+            sel_relaxed = _profile_payload(selected_relaxed)
+            (RUNS / "runtime_profile_selected_relaxed.json").write_text(
+                json.dumps(sel_relaxed, indent=2),
+                encoding="utf-8",
+            )
+            print("(!) No promotable runtime profile found; wrote relaxed best candidate for tuning.")
+            if stable:
+                _write_profile("runtime_profile_active.json", stable)
+            status["action"] = "no_promotable_profile"
+            status["reasons"] = ["all_candidates_failed_promotion_gate"]
+        else:
+            print("(!) No valid runtime profile found in search grid.")
+            if stable:
+                _write_profile("runtime_profile_active.json", stable)
+            status["action"] = "no_valid_profile"
 
     state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     status["state"] = state
