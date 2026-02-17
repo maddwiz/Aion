@@ -102,6 +102,8 @@ def apply_profile_env_defaults():
         "meta_exec_min_prob": "Q_META_EXEC_MIN_PROB",
         "meta_exec_floor": "Q_META_EXEC_FLOOR",
         "meta_exec_slope": "Q_META_EXEC_SLOPE",
+        "cash_yield_annual": "Q_CASH_YIELD_ANNUAL",
+        "cash_exposure_target": "Q_CASH_EXPOSURE_TARGET",
     }
     applied = {}
     for k, envk in mapping.items():

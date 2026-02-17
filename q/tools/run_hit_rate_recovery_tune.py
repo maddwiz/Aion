@@ -163,6 +163,8 @@ def _params_from_profile() -> dict:
         "meta_exec_min_prob": float(p.get("meta_exec_min_prob", 0.53)),
         "meta_exec_floor": float(p.get("meta_exec_floor", 0.35)),
         "meta_exec_slope": float(p.get("meta_exec_slope", 10.0)),
+        "cash_yield_annual": float(p.get("cash_yield_annual", 0.0)),
+        "cash_exposure_target": float(p.get("cash_exposure_target", 1.0)),
     }
 
 
@@ -179,6 +181,8 @@ def _env_from_params(params: dict) -> dict[str, str]:
         "Q_META_EXEC_MIN_PROB": str(params["meta_exec_min_prob"]),
         "Q_META_EXEC_FLOOR": str(params["meta_exec_floor"]),
         "Q_META_EXEC_SLOPE": str(params["meta_exec_slope"]),
+        "Q_CASH_YIELD_ANNUAL": str(params["cash_yield_annual"]),
+        "Q_CASH_EXPOSURE_TARGET": str(params["cash_exposure_target"]),
     }
 
 
@@ -205,6 +209,8 @@ def _write_csv(rows: list[dict], outp: Path) -> None:
         "meta_exec_min_prob",
         "meta_exec_floor",
         "meta_exec_slope",
+        "cash_yield_annual",
+        "cash_exposure_target",
         "source",
         "sharpe",
         "hit_rate",
@@ -246,6 +252,8 @@ def _merge_profile(best: dict) -> None:
             "meta_exec_min_prob": float(best["meta_exec_min_prob"]),
             "meta_exec_floor": float(best["meta_exec_floor"]),
             "meta_exec_slope": float(best["meta_exec_slope"]),
+            "cash_yield_annual": float(best["cash_yield_annual"]),
+            "cash_exposure_target": float(best["cash_exposure_target"]),
         }
     )
     base["parameters"] = params
@@ -263,6 +271,8 @@ def _merge_profile(best: dict) -> None:
             "meta_exec_min_prob": float(best["meta_exec_min_prob"]),
             "meta_exec_floor": float(best["meta_exec_floor"]),
             "meta_exec_slope": float(best["meta_exec_slope"]),
+            "cash_yield_annual": float(best["cash_yield_annual"]),
+            "cash_exposure_target": float(best["cash_exposure_target"]),
         },
         "oos": {
             "source": str(best.get("source", "")),
@@ -304,6 +314,8 @@ def main() -> int:
             "meta_exec_min_prob": [0.48, 0.51, 0.54, 0.57],
             "meta_exec_floor": [0.20, 0.30, 0.35],
             "meta_exec_slope": [8.0, 12.0, 16.0],
+            "cash_yield_annual": [0.0, 0.01, 0.02, 0.03, 0.04, 0.05],
+            "cash_exposure_target": [1.0],
         }
         seen = set()
 
@@ -320,6 +332,8 @@ def main() -> int:
                 round(float(p["meta_exec_min_prob"]), 6),
                 round(float(p["meta_exec_floor"]), 6),
                 round(float(p["meta_exec_slope"]), 6),
+                round(float(p["cash_yield_annual"]), 6),
+                round(float(p["cash_exposure_target"]), 6),
             )
 
         for _pass in range(2):
@@ -357,6 +371,8 @@ def main() -> int:
             cand["meta_exec_min_prob"] = float(rng.uniform(0.46, 0.58))
             cand["meta_exec_floor"] = float(rng.uniform(0.18, 0.40))
             cand["meta_exec_slope"] = float(rng.uniform(6.0, 18.0))
+            cand["cash_yield_annual"] = float(rng.uniform(0.0, 0.05))
+            cand["cash_exposure_target"] = 1.0
             k = _key(cand)
             if k in seen:
                 continue
@@ -379,13 +395,34 @@ def main() -> int:
             and abs(float(r.get("max_drawdown", 0.0))) <= target_mdd
             and int(r.get("n", 0)) >= target_n
         ]
+        prefer_low_carry = str(os.getenv("Q_HIT_RECOVERY_PREFER_LOW_CARRY", "1")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         if feasible:
-            best = max(feasible, key=lambda r: (float(r.get("sharpe", 0.0)), float(r.get("score", -1e9))))
+            if prefer_low_carry:
+                best = min(
+                    feasible,
+                    key=lambda r: (
+                        float(r.get("cash_yield_annual", 0.0)),
+                        -float(r.get("sharpe", 0.0)),
+                        -float(r.get("score", -1e9)),
+                    ),
+                )
+            else:
+                best = max(feasible, key=lambda r: (float(r.get("sharpe", 0.0)), float(r.get("score", -1e9))))
             best_score = float(best.get("score", -1e9))
         else:
             best = max(
                 rows,
-                key=lambda r: (float(r.get("hit_rate", 0.0)), float(r.get("sharpe", 0.0)), float(r.get("score", -1e9))),
+                key=lambda r: (
+                    float(r.get("hit_rate", 0.0)),
+                    float(r.get("sharpe", 0.0)),
+                    -float(r.get("cash_yield_annual", 0.0)),
+                    float(r.get("score", -1e9)),
+                ),
             )
             best_score = float(best.get("score", -1e9))
 

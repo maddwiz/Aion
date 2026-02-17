@@ -37,13 +37,20 @@ def build_costed_daily_returns(
     vol_ref_daily: float = 0.0063,
     half_turnover: bool = True,
     fixed_daily_fee: float = 0.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    cash_yield_annual: float = 0.0,
+    cash_exposure_target: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     w = np.asarray(W, float)
     a = np.asarray(A, float)
     T = min(w.shape[0], a.shape[0])
     w = w[:T]
     a = a[:T]
-    gross = np.sum(w * a, axis=1)
+    trade_gross = np.sum(w * a, axis=1)
+    target = float(max(1e-9, cash_exposure_target))
+    gross_abs = np.sum(np.abs(w), axis=1)
+    cash_frac = np.clip(1.0 - (gross_abs / target), 0.0, 1.0)
+    cash_carry = cash_frac * (float(max(0.0, cash_yield_annual)) / 252.0)
+    gross = trade_gross + cash_carry
     turnover = np.zeros(T, dtype=float)
     if T > 1:
         turnover[1:] = np.sum(np.abs(np.diff(w, axis=0)), axis=1)
@@ -55,7 +62,7 @@ def build_costed_daily_returns(
     vol = np.zeros(T, dtype=float)
     for t in range(T):
         lo = max(0, t - vlook + 1)
-        seg = gross[lo : t + 1]
+        seg = trade_gross[lo : t + 1]
         vol[t] = float(np.std(seg)) if seg.size else 0.0
     ref = float(max(1e-6, vol_ref_daily))
     vol_ratio = np.clip(vol / ref, 0.0, 6.0)
@@ -65,7 +72,7 @@ def build_costed_daily_returns(
     fee = np.full(T, float(max(0.0, fixed_daily_fee)), dtype=float)
     cost = var_cost + fee
     net = gross - cost
-    return net, gross, cost, turnover, eff_bps
+    return net, gross, cost, turnover, eff_bps, cash_carry, cash_frac
 
 if __name__ == "__main__":
     A = load_mat("runs_plus/asset_returns.csv")
@@ -106,7 +113,9 @@ if __name__ == "__main__":
     vol_ref_daily = float(np.clip(float(os.getenv("Q_COST_VOL_REF_DAILY", "0.0063")), 1e-5, 0.25))
     half_turnover = str(os.getenv("Q_COST_HALF_TURNOVER", "1")).strip().lower() in {"1", "true", "yes", "on"}
     fixed_daily_fee = float(np.clip(float(os.getenv("Q_FIXED_DAILY_FEE", "0.0")), 0.0, 1.0))
-    net, gross, cost, turnover, eff_bps = build_costed_daily_returns(
+    cash_yield_annual = float(np.clip(float(os.getenv("Q_CASH_YIELD_ANNUAL", "0.0")), 0.0, 0.20))
+    cash_exposure_target = float(np.clip(float(os.getenv("Q_CASH_EXPOSURE_TARGET", "1.0")), 0.25, 5.0))
+    net, gross, cost, turnover, eff_bps, cash_carry, cash_frac = build_costed_daily_returns(
         W[:T],
         A[:T],
         base_bps=base_bps,
@@ -115,12 +124,16 @@ if __name__ == "__main__":
         vol_ref_daily=vol_ref_daily,
         half_turnover=half_turnover,
         fixed_daily_fee=fixed_daily_fee,
+        cash_yield_annual=cash_yield_annual,
+        cash_exposure_target=cash_exposure_target,
     )
     np.savetxt(RUNS/"daily_returns.csv", net, delimiter=",")
     np.savetxt(RUNS/"daily_returns_gross.csv", gross, delimiter=",")
     np.savetxt(RUNS/"daily_costs.csv", cost, delimiter=",")
     np.savetxt(RUNS/"daily_turnover.csv", turnover, delimiter=",")
     np.savetxt(RUNS/"daily_effective_cost_bps.csv", eff_bps, delimiter=",")
+    np.savetxt(RUNS/"daily_cash_carry.csv", cash_carry, delimiter=",")
+    np.savetxt(RUNS/"daily_cash_fraction.csv", cash_frac, delimiter=",")
     (RUNS / "daily_costs_info.json").write_text(
         json.dumps(
             {
@@ -130,11 +143,16 @@ if __name__ == "__main__":
                 "cost_vol_ref_daily": float(vol_ref_daily),
                 "cost_half_turnover": bool(half_turnover),
                 "fixed_daily_fee": float(fixed_daily_fee),
+                "cash_yield_annual": float(cash_yield_annual),
+                "cash_exposure_target": float(cash_exposure_target),
                 "rows": int(T),
                 "mean_cost_daily": float(np.mean(cost)) if T else 0.0,
                 "ann_cost_estimate": float(np.mean(cost) * 252.0) if T else 0.0,
                 "mean_gross_daily": float(np.mean(gross)) if T else 0.0,
                 "mean_net_daily": float(np.mean(net)) if T else 0.0,
+                "mean_cash_carry_daily": float(np.mean(cash_carry)) if T else 0.0,
+                "ann_cash_carry_estimate": float(np.mean(cash_carry) * 252.0) if T else 0.0,
+                "mean_cash_fraction": float(np.mean(cash_frac)) if T else 0.0,
                 "mean_turnover": float(np.mean(turnover)) if T else 0.0,
                 "mean_effective_cost_bps": float(np.mean(eff_bps)) if T else 0.0,
                 "max_effective_cost_bps": float(np.max(eff_bps)) if T else 0.0,
@@ -147,5 +165,6 @@ if __name__ == "__main__":
         print(f"(!) Clipped {clip_events} extreme asset-return values with |r|>{clip_abs:.3f}")
     print(
         f"✅ Wrote runs_plus/daily_returns.csv (T={T}) from weights='{src}' "
-        f"[base_bps={base_bps:.2f}, vol_scaled_bps={vol_scaled_bps:.2f}, fixed_daily_fee={fixed_daily_fee:.5f}]"
+        f"[base_bps={base_bps:.2f}, vol_scaled_bps={vol_scaled_bps:.2f}, fixed_daily_fee={fixed_daily_fee:.5f}, "
+        f"cash_yield_annual={cash_yield_annual:.4f}]"
     )
