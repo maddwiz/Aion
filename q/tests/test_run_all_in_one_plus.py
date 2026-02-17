@@ -156,6 +156,35 @@ def test_apply_performance_defaults_prefers_active_profile(monkeypatch, tmp_path
     assert "sel" not in got
 
 
+def test_apply_performance_defaults_applies_selected_runtime_knobs(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "runtime_profile_selected.json").write_text(
+        (
+            '{"runtime_total_floor":0.18,"disable_governors":["x"],'
+            '"enable_asset_class_diversification":true,'
+            '"macro_proxy_strength":0.25,'
+            '"capacity_impact_strength":0.15,'
+            '"uncertainty_macro_shock_blend":0.1}'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(raip, "RUNS", runs)
+    monkeypatch.delenv("Q_RUNTIME_TOTAL_FLOOR", raising=False)
+    monkeypatch.delenv("Q_DISABLE_GOVERNORS", raising=False)
+    monkeypatch.delenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", raising=False)
+    monkeypatch.delenv("Q_DEFAULT_DISABLE_GOVERNORS", raising=False)
+    monkeypatch.delenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", raising=False)
+    monkeypatch.delenv("Q_MACRO_PROXY_STRENGTH", raising=False)
+    monkeypatch.delenv("Q_CAPACITY_IMPACT_STRENGTH", raising=False)
+    monkeypatch.delenv("Q_UNCERTAINTY_MACRO_SHOCK_BLEND", raising=False)
+    raip.apply_performance_defaults()
+    assert os.environ.get("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION") == "1"
+    assert os.environ.get("Q_MACRO_PROXY_STRENGTH") == "0.25"
+    assert os.environ.get("Q_CAPACITY_IMPACT_STRENGTH") == "0.15"
+    assert os.environ.get("Q_UNCERTAINTY_MACRO_SHOCK_BLEND") == "0.1"
+
+
 def test_should_run_runtime_combo_search_when_missing_profile(monkeypatch, tmp_path: Path):
     runs = tmp_path / "runs_plus"
     runs.mkdir(parents=True, exist_ok=True)

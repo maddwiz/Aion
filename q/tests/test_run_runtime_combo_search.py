@@ -171,6 +171,26 @@ def test_profile_payload_carries_cost_fields():
     assert abs(float(out["mean_effective_cost_bps"]) - 10.3) < 1e-12
 
 
+def test_default_class_enable_grid_detects_diversified_universe(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "asset_names.csv").write_text("symbol\nSPY\nTLT\nGLD\nEURUSD\n", encoding="utf-8")
+    monkeypatch.setattr(rcs, "ROOT", tmp_path)
+    monkeypatch.setattr(rcs, "RUNS", runs)
+    monkeypatch.delenv("Q_RUNTIME_SEARCH_CLASS_ENABLES", raising=False)
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_MIN_CLASSES_FOR_DIVERSIFICATION", "3")
+    assert rcs._default_class_enable_grid() == [0, 1]
+
+
+def test_default_class_enable_grid_respects_env_override(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(rcs, "ROOT", tmp_path)
+    monkeypatch.setattr(rcs, "RUNS", runs)
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_CLASS_ENABLES", "1")
+    assert rcs._default_class_enable_grid() == [1]
+
+
 def test_canary_qualifies_on_score_delta_when_sharpe_delta_small(monkeypatch):
     monkeypatch.setenv("Q_RUNTIME_CANARY_MIN_SHARPE_DELTA", "0.02")
     monkeypatch.setenv("Q_RUNTIME_CANARY_MIN_SCORE_DELTA", "0.01")

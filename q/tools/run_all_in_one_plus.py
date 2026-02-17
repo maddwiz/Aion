@@ -170,6 +170,10 @@ def apply_performance_defaults():
     selected = _load_default_runtime_profile()
     sel_floor = selected.get("runtime_total_floor")
     sel_disable = selected.get("disable_governors", [])
+    sel_asset_class = bool(selected.get("enable_asset_class_diversification", False))
+    sel_macro = selected.get("macro_proxy_strength", None)
+    sel_capacity = selected.get("capacity_impact_strength", None)
+    sel_macro_blend = selected.get("uncertainty_macro_shock_blend", None)
     if not isinstance(sel_disable, list):
         sel_disable = []
 
@@ -196,6 +200,25 @@ def apply_performance_defaults():
     if default_tokens:
         cur = os.getenv("Q_DISABLE_GOVERNORS", "")
         os.environ["Q_DISABLE_GOVERNORS"] = _merge_csv_tokens(cur, default_tokens)
+
+    # Carry forward selected runtime knobs unless user explicitly overrides.
+    if "Q_ENABLE_ASSET_CLASS_DIVERSIFICATION" not in os.environ:
+        os.environ["Q_ENABLE_ASSET_CLASS_DIVERSIFICATION"] = "1" if sel_asset_class else "0"
+    if (sel_macro is not None) and ("Q_MACRO_PROXY_STRENGTH" not in os.environ):
+        try:
+            os.environ["Q_MACRO_PROXY_STRENGTH"] = str(float(sel_macro))
+        except Exception:
+            pass
+    if (sel_capacity is not None) and ("Q_CAPACITY_IMPACT_STRENGTH" not in os.environ):
+        try:
+            os.environ["Q_CAPACITY_IMPACT_STRENGTH"] = str(float(sel_capacity))
+        except Exception:
+            pass
+    if (sel_macro_blend is not None) and ("Q_UNCERTAINTY_MACRO_SHOCK_BLEND" not in os.environ):
+        try:
+            os.environ["Q_UNCERTAINTY_MACRO_SHOCK_BLEND"] = str(float(sel_macro_blend))
+        except Exception:
+            pass
 
 
 def default_aion_overlay_mirror() -> str:
