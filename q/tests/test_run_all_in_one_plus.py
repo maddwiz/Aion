@@ -216,3 +216,20 @@ def test_should_run_asset_class_diversification_only_with_env(monkeypatch):
     assert raip.should_run_asset_class_diversification() is False
     monkeypatch.setenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", "1")
     assert raip.should_run_asset_class_diversification() is True
+
+
+def test_should_auto_ingest_new_assets_detects_csv(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(raip, "ROOT", tmp_path)
+    dnew = tmp_path / "data_new"
+    dnew.mkdir(parents=True, exist_ok=True)
+    (dnew / "TEST.csv").write_text("Date,Close\n2024-01-01,1\n", encoding="utf-8")
+    monkeypatch.delenv("Q_AUTO_INGEST_NEW_ASSETS", raising=False)
+    assert raip.should_auto_ingest_new_assets() is True
+
+
+def test_should_auto_ingest_new_assets_env_override(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(raip, "ROOT", tmp_path)
+    monkeypatch.setenv("Q_AUTO_INGEST_NEW_ASSETS", "0")
+    assert raip.should_auto_ingest_new_assets() is False
+    monkeypatch.setenv("Q_AUTO_INGEST_NEW_ASSETS", "1")
+    assert raip.should_auto_ingest_new_assets() is True

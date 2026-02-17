@@ -306,6 +306,16 @@ def should_run_asset_class_diversification() -> bool:
         "on",
     }
 
+
+def should_auto_ingest_new_assets() -> bool:
+    raw = str(os.getenv("Q_AUTO_INGEST_NEW_ASSETS", "")).strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    dnew = ROOT / "data_new"
+    if not dnew.exists():
+        return False
+    return any(dnew.glob("*.csv"))
+
 if __name__ == "__main__":
     strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if not ensure_env():
@@ -318,6 +328,20 @@ if __name__ == "__main__":
     write_pipeline_status([], strict_mode=strict)
 
     # ---------- PHASE 0: Primers / basics ----------
+    if should_auto_ingest_new_assets():
+        # Normalize/clean incoming CSVs before building returns matrices.
+        for tool in [
+            "tools/fix_dates_in_data.py",
+            "tools/fix_close_in_data.py",
+            "tools/normalize_new_csvs.py",
+            "tools/clean_data_folder.py",
+        ]:
+            ok, rc = run_script(tool)
+            if not ok and rc is not None:
+                failures.append({"step": tool, "code": rc})
+    else:
+        print("… skip (no new asset CSVs): auto ingest")
+
     # (A) Lightweight nested WF summary (scaffold)
     ok, rc = run_script("tools/nested_wf_lite.py")
     if not ok and rc is not None: failures.append({"step": "tools/nested_wf_lite.py", "code": rc})

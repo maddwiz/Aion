@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data"
+DATA_DIRS = [ROOT / "data", ROOT / "data_new"]
 RUNS = ROOT / "runs_plus"; RUNS.mkdir(exist_ok=True)
 
 
@@ -25,10 +25,30 @@ def sanitize_returns(r: np.ndarray, clip_abs: float) -> tuple[np.ndarray, int]:
     n_clipped = int(np.sum(np.abs(clipped - arr) > 1e-12))
     return clipped, n_clipped
 
+
+def _collect_data_files() -> list[tuple[str, Path]]:
+    """
+    Collect CSVs across data dirs with dedupe by symbol stem.
+    Later dirs override earlier ones (data_new can supersede data).
+    """
+    by_sym: dict[str, Path] = {}
+    for d in DATA_DIRS:
+        if not d.exists():
+            continue
+        for fp in sorted(d.glob("*.csv")):
+            if not fp.is_file():
+                continue
+            sym = fp.stem.replace("_prices", "").upper().strip()
+            if not sym:
+                continue
+            by_sym[sym] = fp
+    return [(k, by_sym[k]) for k in sorted(by_sym)]
+
+
 def read_close_series(fp):
     dates, close = [], []
     date_keys = ("Date", "DATE", "date", "timestamp", "Timestamp", "datetime", "Datetime")
-    close_keys = ("Adj Close", "adj_close", "AdjClose", "Close", "close", "price", "Price")
+    close_keys = ("Adj Close", "adj_close", "AdjClose", "Close", "close", "price", "Price", "VALUE", "value")
     with open(fp) as f:
         r = csv.DictReader(f)
         for row in r:
@@ -55,23 +75,23 @@ def read_close_series(fp):
     return np.array(dates), np.array(close, float)
 
 if __name__ == "__main__":
-    files = sorted(DATA.glob("*.csv"))
+    files = _collect_data_files()
     if not files:
-        print("(!) No data/*.csv found — cannot build returns."); raise SystemExit(0)
+        print("(!) No data/*.csv or data_new/*.csv found — cannot build returns."); raise SystemExit(0)
 
     # Load all assets, align to shortest length
     series = []
     names = []
     clip_abs = float(np.clip(float(os.getenv("Q_ASSET_RET_CLIP", "0.35")), 0.01, 5.0))
     clip_events = 0
-    for fp in files:
+    for sym, fp in files:
         try:
             d,c = read_close_series(fp)
             r = np.diff(c) / (c[:-1] + 1e-12)
             r, n_clip = sanitize_returns(r, clip_abs)
             clip_events += int(n_clip)
             series.append(r)
-            names.append(fp.stem)
+            names.append(sym)
         except Exception as e:
             print(f"skip {fp.name}: {e}")
     if not series:

@@ -21,7 +21,7 @@ import pandas as pd
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data"
+DATA_DIRS = [ROOT / "data", ROOT / "data_new"]
 
 # Heuristics
 DATE_CANDIDATES = {"date","DATE","Date","timestamp","Timestamp"}
@@ -80,72 +80,75 @@ def is_timeseries(df):
     return False
 
 def main():
-    if not DATA.exists():
-        print("data/ not found")
+    if not any(d.exists() for d in DATA_DIRS):
+        print("data/ and data_new/ not found")
         return
     changed = 0
-    for p in sorted(DATA.glob("*.csv")):
-        if p.name in NON_TS_FILES:
-            print(f"left {p.name} unchanged (non timeseries)")
+    for d in DATA_DIRS:
+        if not d.exists():
             continue
+        for p in sorted(d.glob("*.csv")):
+            if p.name in NON_TS_FILES:
+                print(f"left {p} unchanged (non timeseries)")
+                continue
 
-        df = safe_read(p)
-        if df is None:
-            print(f"skip {p.name}: unreadable even with fallback")
-            continue
+            df = safe_read(p)
+            if df is None:
+                print(f"skip {p}: unreadable even with fallback")
+                continue
 
-        # Already perfect FRED?
-        up = [c.upper() for c in df.columns]
-        if "DATE" in up and "VALUE" in up and len(df.columns) == 2:
-            # small cleanup: ensure parseable & numeric
-            dcol = df.columns[up.index("DATE")]
-            vcol = df.columns[up.index("VALUE")]
+            # Already perfect FRED?
+            up = [c.upper() for c in df.columns]
+            if "DATE" in up and "VALUE" in up and len(df.columns) == 2:
+                # small cleanup: ensure parseable & numeric
+                dcol = df.columns[up.index("DATE")]
+                vcol = df.columns[up.index("VALUE")]
+                out = pd.DataFrame({
+                    "DATE": pd.to_datetime(df[dcol], errors="coerce"),
+                    "VALUE": pd.to_numeric(df[vcol], errors="coerce"),
+                }).dropna(subset=["DATE","VALUE"]).sort_values("DATE")
+                out.to_csv(p, index=False)
+                continue
+
+            if not is_timeseries(df):
+                print(f"left {p} unchanged (no clear dates)")
+                continue
+
+            # Pick date + value columns
+            dcol = choose_date_col(list(df.columns))
+            if dcol is None:
+                print(f"left {p} unchanged (no date column)")
+                continue
+
+            # Normalize column names for easier matching
+            # (Handle Stooq casing: Date, Open, High, Low, Close)
+            df.columns = [str(c) for c in df.columns]
+
+            vcol = None
+            # If this looks like Stooq OHLCV, prefer Close
+            stooq_like = set(c.lower() for c in df.columns) >= {"date","open","high","low","close"}
+            if stooq_like:
+                vcol = "Close" if "Close" in df.columns else "close"
+
+            if vcol is None:
+                vcol = choose_value_col(df)
+
+            if vcol is None:
+                print(f"left {p} unchanged (no numeric value column)")
+                continue
+
             out = pd.DataFrame({
                 "DATE": pd.to_datetime(df[dcol], errors="coerce"),
                 "VALUE": pd.to_numeric(df[vcol], errors="coerce"),
             }).dropna(subset=["DATE","VALUE"]).sort_values("DATE")
+
+            if out.empty:
+                print(f"left {p} unchanged (no valid rows after cleaning)")
+                continue
+
             out.to_csv(p, index=False)
-            continue
-
-        if not is_timeseries(df):
-            print(f"left {p.name} unchanged (no clear dates)")
-            continue
-
-        # Pick date + value columns
-        dcol = choose_date_col(list(df.columns))
-        if dcol is None:
-            print(f"left {p.name} unchanged (no date column)")
-            continue
-
-        # Normalize column names for easier matching
-        # (Handle Stooq casing: Date, Open, High, Low, Close)
-        df.columns = [str(c) for c in df.columns]
-
-        vcol = None
-        # If this looks like Stooq OHLCV, prefer Close
-        stooq_like = set(c.lower() for c in df.columns) >= {"date","open","high","low","close"}
-        if stooq_like:
-            vcol = "Close" if "Close" in df.columns else "close"
-
-        if vcol is None:
-            vcol = choose_value_col(df)
-
-        if vcol is None:
-            print(f"left {p.name} unchanged (no numeric value column)")
-            continue
-
-        out = pd.DataFrame({
-            "DATE": pd.to_datetime(df[dcol], errors="coerce"),
-            "VALUE": pd.to_numeric(df[vcol], errors="coerce"),
-        }).dropna(subset=["DATE","VALUE"]).sort_values("DATE")
-
-        if out.empty:
-            print(f"left {p.name} unchanged (no valid rows after cleaning)")
-            continue
-
-        out.to_csv(p, index=False)
-        print(f"converted {p.name} -> DATE,VALUE (from {dcol}, {vcol})")
-        changed += 1
+            print(f"converted {p} -> DATE,VALUE (from {dcol}, {vcol})")
+            changed += 1
 
     print(f"\n✅ normalization done. files changed: {changed}")
 
