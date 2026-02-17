@@ -274,6 +274,15 @@ def should_run_runtime_combo_search() -> bool:
     # Bootstrap safety: if profile artifacts are missing, allow one search pass.
     return not (RUNS / "runtime_profile_active.json").exists()
 
+
+def should_run_asset_class_diversification() -> bool:
+    return str(os.getenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 if __name__ == "__main__":
     strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if not ensure_env():
@@ -376,6 +385,12 @@ if __name__ == "__main__":
     # Feature neutralization between two feature sets
     ok, rc = run_script("tools/run_feature_neutralizer.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_feature_neutralizer.py", "code": rc})
+    # Optional cross-asset class diversification overlay (risk budget by class).
+    if should_run_asset_class_diversification():
+        ok, rc = run_script("tools/run_asset_class_diversification.py")
+        if not ok and rc is not None: failures.append({"step": "tools/run_asset_class_diversification.py", "code": rc})
+    else:
+        print("… skip (stable mode): tools/run_asset_class_diversification.py [set Q_ENABLE_ASSET_CLASS_DIVERSIFICATION=1 to run]")
     # Legacy smooth scaler from DNA/heartbeat/symbolic/reflexive layers.
     # Run only when bootstrapping or explicitly requested to avoid drift.
     if should_run_legacy_tune():

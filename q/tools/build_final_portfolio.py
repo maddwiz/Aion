@@ -22,6 +22,7 @@ from qmods.concentration_governor import govern_matrix
 from qmods.guardrails_bundle import apply_turnover_budget_governor
 
 TRACE_STEPS = [
+    "asset_class_diversification",
     "rank_sleeve_blend",
     "low_vol_sleeve_blend",
     "turnover_governor",
@@ -180,6 +181,25 @@ def _runtime_total_floor_default() -> float:
     except Exception:
         prof_v = 0.10
     return float(np.clip(prof_v, 0.0, 1.0))
+
+
+def _base_weight_candidates() -> list[str]:
+    cands = ["runs_plus/weights_regime.csv"]
+    use_asset_class = _env_or_profile_bool(
+        "Q_ENABLE_ASSET_CLASS_DIVERSIFICATION",
+        "enable_asset_class_diversification",
+        False,
+    )
+    if use_asset_class:
+        cands.append("runs_plus/weights_asset_class_diversified.csv")
+    cands.extend(
+        [
+            "runs_plus/weights_tail_blend.csv",
+            "runs_plus/portfolio_weights.csv",
+            "portfolio_weights.csv",
+        ]
+    )
+    return cands
 
 
 def _auto_turnover_govern(w: np.ndarray):
@@ -412,12 +432,7 @@ def append_card(title, html):
 
 if __name__ == "__main__":
     # 1) Base weights preference
-    W, source = first_mat([
-        "runs_plus/weights_regime.csv",
-        "runs_plus/weights_tail_blend.csv",
-        "runs_plus/portfolio_weights.csv",
-        "portfolio_weights.csv",
-    ])
+    W, source = first_mat(_base_weight_candidates())
     if W is None:
         print("(!) No base weights found; run your pipeline first."); raise SystemExit(0)
     steps = [f"base={source}"]
@@ -433,6 +448,10 @@ if __name__ == "__main__":
             if L > 0:
                 x[:L] = v[:L]
         trace[name] = x
+
+    if str(source or "").endswith("weights_asset_class_diversified.csv"):
+        steps.append("asset_class_diversification")
+        _trace_put("asset_class_diversification", np.ones(T, dtype=float))
 
     council_gate_strength = _env_or_profile_float(
         "Q_COUNCIL_GATE_STRENGTH",

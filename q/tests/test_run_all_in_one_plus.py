@@ -180,3 +180,10 @@ def test_should_force_runtime_combo_search_with_env(monkeypatch, tmp_path: Path)
     monkeypatch.setattr(raip, "RUNS", runs)
     monkeypatch.setenv("Q_ENABLE_RUNTIME_COMBO_SEARCH", "1")
     assert raip.should_run_runtime_combo_search() is True
+
+
+def test_should_run_asset_class_diversification_only_with_env(monkeypatch):
+    monkeypatch.delenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", raising=False)
+    assert raip.should_run_asset_class_diversification() is False
+    monkeypatch.setenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", "1")
+    assert raip.should_run_asset_class_diversification() is True
