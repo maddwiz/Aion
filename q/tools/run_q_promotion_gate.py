@@ -58,6 +58,15 @@ def _select_metrics(val: dict, mode: str) -> tuple[str, dict]:
     return "metrics_oos_net", net
 
 
+def _metric_triplet(obj: dict | None) -> tuple[float, float, float, int]:
+    d = obj if isinstance(obj, dict) else {}
+    sh = float(d.get("sharpe", 0.0))
+    hit = float(d.get("hit_rate", 0.0))
+    mdd = float(d.get("max_drawdown", 0.0))
+    n = int(d.get("n", 0))
+    return sh, hit, mdd, n
+
+
 def main() -> int:
     src = RUNS / "strict_oos_validation.json"
     val = _load_json(src)
@@ -79,6 +88,8 @@ def main() -> int:
     hit = float(m.get("hit_rate", 0.0))
     mdd = float(m.get("max_drawdown", 0.0))
     n = int(m.get("n", 0))
+    latest = val.get("metrics_oos_latest", {}) if isinstance(val.get("metrics_oos_latest"), dict) else {}
+    latest_sh, latest_hit, latest_mdd, latest_n = _metric_triplet(latest)
 
     min_sharpe = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_OOS_SHARPE", "1.00")), -2.0, 10.0))
     min_hit = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_OOS_HIT", "0.49")), 0.0, 1.0))
@@ -90,6 +101,16 @@ def main() -> int:
         "yes",
         "on",
     }
+    require_latest_holdout = str(os.getenv("Q_PROMOTION_REQUIRE_LATEST_HOLDOUT", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    min_latest_sh = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_LATEST_OOS_SHARPE", "0.90")), -2.0, 10.0))
+    min_latest_hit = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_LATEST_OOS_HIT", "0.48")), 0.0, 1.0))
+    max_latest_abs_mdd = float(np.clip(float(os.getenv("Q_PROMOTION_MAX_LATEST_ABS_MDD", "0.12")), 0.001, 2.0))
+    min_latest_n = int(np.clip(int(float(os.getenv("Q_PROMOTION_MIN_LATEST_OOS_SAMPLES", "126"))), 1, 1000000))
 
     reasons = []
     if n < min_n:
@@ -100,6 +121,15 @@ def main() -> int:
         reasons.append(f"oos_hit<{min_hit:.2f} ({hit:.3f})")
     if abs(mdd) > max_abs_mdd:
         reasons.append(f"oos_abs_mdd>{max_abs_mdd:.3f} ({abs(mdd):.3f})")
+    if require_latest_holdout:
+        if latest_n < min_latest_n:
+            reasons.append(f"latest_oos_samples<{min_latest_n} ({latest_n})")
+        if latest_sh < min_latest_sh:
+            reasons.append(f"latest_oos_sharpe<{min_latest_sh:.2f} ({latest_sh:.3f})")
+        if latest_hit < min_latest_hit:
+            reasons.append(f"latest_oos_hit<{min_latest_hit:.2f} ({latest_hit:.3f})")
+        if abs(latest_mdd) > max_latest_abs_mdd:
+            reasons.append(f"latest_oos_abs_mdd>{max_latest_abs_mdd:.3f} ({abs(latest_mdd):.3f})")
 
     cost_stress_path = RUNS / "cost_stress_validation.json"
     cost_stress = _load_json(cost_stress_path)
@@ -134,12 +164,23 @@ def main() -> int:
             "min_oos_hit": float(min_hit),
             "max_abs_mdd": float(max_abs_mdd),
             "min_oos_samples": int(min_n),
+            "require_latest_holdout": bool(require_latest_holdout),
+            "min_latest_oos_sharpe": float(min_latest_sh),
+            "min_latest_oos_hit": float(min_latest_hit),
+            "max_latest_abs_mdd": float(max_latest_abs_mdd),
+            "min_latest_oos_samples": int(min_latest_n),
         },
         "metrics_oos_net": {
             "sharpe": float(sharpe),
             "hit_rate": float(hit),
             "max_drawdown": float(mdd),
             "n": int(n),
+        },
+        "metrics_oos_latest": {
+            "sharpe": float(latest_sh),
+            "hit_rate": float(latest_hit),
+            "max_drawdown": float(latest_mdd),
+            "n": int(latest_n),
         },
         "require_cost_stress": bool(require_cost_stress),
         "cost_stress": cost_stress_summary,
@@ -153,6 +194,10 @@ def main() -> int:
         f"<p><b style='color:{color}'>Promotion {badge}</b> "
         f"(OOS Sharpe={sharpe:.3f}, Hit={hit:.3f}, MaxDD={mdd:.3f}, N={n}, "
         f"source={metric_source}).</p>"
+    )
+    html += (
+        f"<p>Latest OOS window: Sharpe={latest_sh:.3f}, Hit={latest_hit:.3f}, "
+        f"MaxDD={latest_mdd:.3f}, N={latest_n}, required={bool(require_latest_holdout)}.</p>"
     )
     if cost_stress_summary:
         wc = cost_stress_summary["worst_case_robust"]

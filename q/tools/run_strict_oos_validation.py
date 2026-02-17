@@ -106,6 +106,14 @@ def _robust_splits(T: int, min_train: int, min_test: int, n_splits: int) -> list
     return out if out else [int(np.clip(hi, 1, max(1, T - 1)))]
 
 
+def _latest_holdout_window(T: int, requested: int, min_window: int) -> int:
+    if T <= 1:
+        return 0
+    lo = int(np.clip(int(min_window), 10, max(10, T - 1)))
+    req = int(np.clip(int(requested), lo, max(lo, T - 1)))
+    return int(np.clip(req, lo, max(lo, T - 1)))
+
+
 def _aggregate_robust(metrics: list[dict]) -> dict:
     if not metrics:
         return _metrics(np.asarray([], float))
@@ -174,6 +182,12 @@ def main() -> int:
         encoding="utf-8",
     )
 
+    latest_holdout_req = int(np.clip(int(float(os.getenv("Q_STRICT_OOS_LATEST_HOLDOUT_DAYS", "252"))), 20, 20000))
+    latest_holdout_min = int(np.clip(int(float(os.getenv("Q_STRICT_OOS_LATEST_HOLDOUT_MIN", "126"))), 20, 20000))
+    latest_n = _latest_holdout_window(T, requested=latest_holdout_req, min_window=latest_holdout_min)
+    latest = r[-latest_n:] if latest_n > 0 else np.asarray([], float)
+    latest_metrics = _metrics(latest)
+
     gross = _load_series(RUNS / "daily_returns_gross.csv")
     costs = _load_series(RUNS / "daily_costs.csv")
     cost_info = {}
@@ -200,6 +214,9 @@ def main() -> int:
         "metrics_train_net": _metrics(train),
         "metrics_oos_net": _metrics(oos),
         "metrics_oos_robust": robust,
+        "metrics_oos_latest": latest_metrics,
+        "latest_holdout_days_requested": int(latest_holdout_req),
+        "latest_holdout_days_used": int(latest_n),
         "robust_oos_splits_file": str(RUNS / "strict_oos_splits.json"),
         "cost_context": cost_info,
     }
@@ -207,12 +224,15 @@ def main() -> int:
 
     m = out["metrics_oos_net"]
     mr = out["metrics_oos_robust"]
+    ml = out["metrics_oos_latest"]
     html = (
         f"<p>Strict OOS net validation: rows={out['oos_rows']}, "
         f"Sharpe={m['sharpe']:.3f}, Hit={m['hit_rate']:.3f}, MaxDD={m['max_drawdown']:.3f}.</p>"
         f"<p>Split: train={out['train_rows']} / oos={out['oos_rows']}.</p>"
         f"<p>Robust OOS ({mr['num_splits']} splits): Sharpe={mr['sharpe']:.3f}, "
         f"Hit={mr['hit_rate']:.3f}, MaxDD={mr['max_drawdown']:.3f}.</p>"
+        f"<p>Latest holdout ({latest_n} rows): Sharpe={ml['sharpe']:.3f}, "
+        f"Hit={ml['hit_rate']:.3f}, MaxDD={ml['max_drawdown']:.3f}.</p>"
     )
     _append_card("Strict OOS Validation ✔", html)
 
@@ -225,6 +245,10 @@ def main() -> int:
     print(
         f"OOS robust: Sharpe={mr['sharpe']:.3f} Hit={mr['hit_rate']:.3f} "
         f"MaxDD={mr['max_drawdown']:.3f} Splits={mr['num_splits']}"
+    )
+    print(
+        f"OOS latest: Sharpe={ml['sharpe']:.3f} Hit={ml['hit_rate']:.3f} "
+        f"MaxDD={ml['max_drawdown']:.3f} N={ml['n']}"
     )
     return 0
 
