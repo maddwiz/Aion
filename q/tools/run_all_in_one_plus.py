@@ -151,14 +151,15 @@ def apply_performance_defaults():
     # Keep runtime floor below over-throttling zone unless explicitly overridden.
     if "Q_RUNTIME_TOTAL_FLOOR" not in os.environ:
         os.environ["Q_RUNTIME_TOTAL_FLOOR"] = str(
-            float(np.clip(float(os.getenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", "0.20")), 0.0, 1.0))
+            float(np.clip(float(os.getenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", "0.18")), 0.0, 1.0))
         )
-    # Uncertainty governor improved robustness less than it reduced Sharpe in
-    # current regime; disable by default, but allow explicit opt-in.
-    enable_unc = str(os.getenv("Q_ENABLE_UNCERTAINTY_GOV", "0")).strip().lower() in {"1", "true", "yes", "on"}
-    if not enable_unc:
+    # Performance defaults discovered from constrained search; users can
+    # override by setting Q_DEFAULT_DISABLE_GOVERNORS or Q_DISABLE_GOVERNORS.
+    defaults = str(os.getenv("Q_DEFAULT_DISABLE_GOVERNORS", "global_governor,heartbeat_scaler")).strip()
+    default_tokens = [t for t in defaults.split(",") if str(t).strip()]
+    if default_tokens:
         cur = os.getenv("Q_DISABLE_GOVERNORS", "")
-        os.environ["Q_DISABLE_GOVERNORS"] = _merge_csv_tokens(cur, ["uncertainty_sizing"])
+        os.environ["Q_DISABLE_GOVERNORS"] = _merge_csv_tokens(cur, default_tokens)
 
 
 def default_aion_overlay_mirror() -> str:

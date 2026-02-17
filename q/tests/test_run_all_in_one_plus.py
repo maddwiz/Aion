@@ -88,16 +88,20 @@ def test_should_force_legacy_tune_with_env(monkeypatch, tmp_path: Path):
 
 def test_apply_performance_defaults_sets_runtime_floor(monkeypatch):
     monkeypatch.delenv("Q_RUNTIME_TOTAL_FLOOR", raising=False)
-    monkeypatch.setenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", "0.20")
+    monkeypatch.setenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", "0.18")
     monkeypatch.delenv("Q_DISABLE_GOVERNORS", raising=False)
-    monkeypatch.delenv("Q_ENABLE_UNCERTAINTY_GOV", raising=False)
+    monkeypatch.delenv("Q_DEFAULT_DISABLE_GOVERNORS", raising=False)
     raip.apply_performance_defaults()
-    assert os.environ.get("Q_RUNTIME_TOTAL_FLOOR") == "0.2"
-    assert "uncertainty_sizing" in os.environ.get("Q_DISABLE_GOVERNORS", "")
+    assert os.environ.get("Q_RUNTIME_TOTAL_FLOOR") == "0.18"
+    got = os.environ.get("Q_DISABLE_GOVERNORS", "")
+    assert "global_governor" in got
+    assert "heartbeat_scaler" in got
 
 
-def test_apply_performance_defaults_respects_uncertainty_opt_in(monkeypatch):
-    monkeypatch.setenv("Q_ENABLE_UNCERTAINTY_GOV", "1")
+def test_apply_performance_defaults_merges_user_disables(monkeypatch):
     monkeypatch.setenv("Q_DISABLE_GOVERNORS", "quality_governor")
+    monkeypatch.setenv("Q_DEFAULT_DISABLE_GOVERNORS", "global_governor")
     raip.apply_performance_defaults()
-    assert os.environ.get("Q_DISABLE_GOVERNORS") == "quality_governor"
+    got = os.environ.get("Q_DISABLE_GOVERNORS", "")
+    assert "quality_governor" in got
+    assert "global_governor" in got
