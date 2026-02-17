@@ -175,6 +175,9 @@ def _profile_payload(row: dict) -> dict:
         "robust_sharpe": float(row.get("robust_sharpe", 0.0)),
         "robust_hit_rate": float(row.get("robust_hit_rate", 0.0)),
         "robust_max_drawdown": float(row.get("robust_max_drawdown", 0.0)),
+        "ann_cost_estimate": float(row.get("ann_cost_estimate", 0.0)),
+        "mean_turnover": float(row.get("mean_turnover", 0.0)),
+        "mean_effective_cost_bps": float(row.get("mean_effective_cost_bps", 0.0)),
         "score": float(row.get("score", 0.0)),
         "promotion_ok": bool(row.get("promotion_ok", False)),
         "cost_stress_ok": bool(row.get("cost_stress_ok", False)),
@@ -198,15 +201,21 @@ def _canary_qualifies(stable: dict, candidate: dict) -> tuple[bool, list[str]]:
     min_score_delta = float(np.clip(float(os.getenv("Q_RUNTIME_CANARY_MIN_SCORE_DELTA", "0.015")), 0.0, 2.0))
     max_hit_drop = float(np.clip(float(os.getenv("Q_RUNTIME_CANARY_MAX_HIT_DROP", "0.0025")), 0.0, 0.10))
     max_mdd_worsen = float(np.clip(float(os.getenv("Q_RUNTIME_CANARY_MAX_ABS_MDD_WORSEN", "0.005")), 0.0, 0.50))
+    max_ann_cost_worsen = float(np.clip(float(os.getenv("Q_RUNTIME_CANARY_MAX_ANN_COST_WORSEN", "0.004")), 0.0, 1.0))
+    max_turnover_worsen = float(np.clip(float(os.getenv("Q_RUNTIME_CANARY_MAX_TURNOVER_WORSEN", "0.010")), 0.0, 5.0))
 
     st_sh = float(stable.get("robust_sharpe", 0.0))
     st_hit = float(stable.get("robust_hit_rate", 0.0))
     st_mdd = abs(float(stable.get("robust_max_drawdown", 0.0)))
     st_score = float(stable.get("score", st_sh))
+    st_ann_cost = max(0.0, float(stable.get("ann_cost_estimate", 0.0)))
+    st_turn = max(0.0, float(stable.get("mean_turnover", 0.0)))
     ca_sh = float(candidate.get("robust_sharpe", 0.0))
     ca_hit = float(candidate.get("robust_hit_rate", 0.0))
     ca_mdd = abs(float(candidate.get("robust_max_drawdown", 0.0)))
     ca_score = float(candidate.get("score", ca_sh))
+    ca_ann_cost = max(0.0, float(candidate.get("ann_cost_estimate", 0.0)))
+    ca_turn = max(0.0, float(candidate.get("mean_turnover", 0.0)))
     sh_delta = float(ca_sh - st_sh)
     score_delta = float(ca_score - st_score)
 
@@ -218,6 +227,10 @@ def _canary_qualifies(stable: dict, candidate: dict) -> tuple[bool, list[str]]:
         reasons.append(f"hit_drop>{max_hit_drop:.4f} ({st_hit - ca_hit:.4f})")
     if ca_mdd > (st_mdd + max_mdd_worsen):
         reasons.append(f"mdd_worsen>{max_mdd_worsen:.3f} ({ca_mdd - st_mdd:.3f})")
+    if ca_ann_cost > (st_ann_cost + max_ann_cost_worsen):
+        reasons.append(f"ann_cost_worsen>{max_ann_cost_worsen:.4f} ({ca_ann_cost - st_ann_cost:.4f})")
+    if ca_turn > (st_turn + max_turnover_worsen):
+        reasons.append(f"turnover_worsen>{max_turnover_worsen:.4f} ({ca_turn - st_turn:.4f})")
     if not bool(candidate.get("promotion_ok", False)):
         reasons.append("promotion_not_ok")
     if not bool(candidate.get("cost_stress_ok", False)):

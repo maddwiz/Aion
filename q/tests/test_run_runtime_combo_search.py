@@ -150,6 +150,27 @@ def test_base_runtime_env_uses_friction_calibration(monkeypatch, tmp_path: Path)
     assert env.get("Q_COST_VOL_SCALED_BPS") == "1.7"
 
 
+def test_profile_payload_carries_cost_fields():
+    row = {
+        "runtime_total_floor": 0.16,
+        "disable_governors": ["x"],
+        "robust_sharpe": 1.2,
+        "robust_hit_rate": 0.5,
+        "robust_max_drawdown": -0.03,
+        "ann_cost_estimate": 0.011,
+        "mean_turnover": 0.04,
+        "mean_effective_cost_bps": 10.3,
+        "score": 1.3,
+        "promotion_ok": True,
+        "cost_stress_ok": True,
+        "health_ok": True,
+    }
+    out = rcs._profile_payload(row)
+    assert abs(float(out["ann_cost_estimate"]) - 0.011) < 1e-12
+    assert abs(float(out["mean_turnover"]) - 0.04) < 1e-12
+    assert abs(float(out["mean_effective_cost_bps"]) - 10.3) < 1e-12
+
+
 def test_canary_qualifies_on_score_delta_when_sharpe_delta_small(monkeypatch):
     monkeypatch.setenv("Q_RUNTIME_CANARY_MIN_SHARPE_DELTA", "0.02")
     monkeypatch.setenv("Q_RUNTIME_CANARY_MIN_SCORE_DELTA", "0.01")
@@ -194,3 +215,32 @@ def test_canary_rejects_when_both_sharpe_and_score_deltas_low(monkeypatch):
     ok, reasons = rcs._canary_qualifies(stable, candidate)
     assert ok is False
     assert any("delta_below_thresholds" in str(r) for r in reasons)
+
+
+def test_canary_rejects_large_cost_worsening(monkeypatch):
+    monkeypatch.setenv("Q_RUNTIME_CANARY_MIN_SHARPE_DELTA", "0.0")
+    monkeypatch.setenv("Q_RUNTIME_CANARY_MIN_SCORE_DELTA", "0.0")
+    monkeypatch.setenv("Q_RUNTIME_CANARY_MAX_ANN_COST_WORSEN", "0.001")
+    monkeypatch.setenv("Q_RUNTIME_CANARY_MAX_TURNOVER_WORSEN", "0.02")
+    stable = {
+        "robust_sharpe": 1.40,
+        "robust_hit_rate": 0.49,
+        "robust_max_drawdown": -0.04,
+        "score": 1.41,
+        "ann_cost_estimate": 0.010,
+        "mean_turnover": 0.05,
+    }
+    candidate = {
+        "robust_sharpe": 1.45,
+        "robust_hit_rate": 0.49,
+        "robust_max_drawdown": -0.04,
+        "score": 1.46,
+        "ann_cost_estimate": 0.015,  # +0.005 > max 0.001
+        "mean_turnover": 0.055,
+        "promotion_ok": True,
+        "cost_stress_ok": True,
+        "health_ok": True,
+    }
+    ok, reasons = rcs._canary_qualifies(stable, candidate)
+    assert ok is False
+    assert any("ann_cost_worsen" in str(r) for r in reasons)
