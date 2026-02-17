@@ -332,6 +332,7 @@ if __name__ == "__main__":
     ok, rc = run_script("tools/run_cost_stress_validation.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_cost_stress_validation.py", "code": rc})
     # Promotion gate artifact for AION overlay safety.
+    os.environ.setdefault("Q_PROMOTION_REQUIRE_COST_STRESS", "1")
     ok, rc = run_script("tools/run_q_promotion_gate.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_q_promotion_gate.py", "code": rc})
     # Optional hit-rate recovery tuner (heavier search; disabled by default).
