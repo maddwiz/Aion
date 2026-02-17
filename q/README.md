@@ -71,6 +71,8 @@ This now includes:
 - cross-sectional momentum overlay (breadth + top/bottom spread across the universe)
 - microstructure proxy overlay (Amihud illiquidity + close-location pressure)
 - calendar/event overlay (turn-of-month + weekday drift + optional event file)
+- external untouched holdout validator (`data_holdout/` or explicit returns file)
+- class-aware execution friction (per-asset-class cost multipliers in `make_daily_from_weights.py`)
 - NovaSpine recall feedback loop (augment -> context boost -> final risk scaling)
 - immune drill governance check (synthetic stress scenarios)
 - final portfolio assembly + system health + alert gate
@@ -149,6 +151,9 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/calendar_event_signal.csv`
 - `runs_plus/calendar_event_overlay.csv`
 - `runs_plus/calendar_event_info.json`
+- `runs_plus/external_holdout_returns.csv`
+- `runs_plus/external_holdout_validation.json`
+- `runs_plus/multi_asset_ingest_report.json`
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/hive_crowding_penalty.csv`
@@ -156,6 +161,36 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/final_governor_trace.csv`
 - `runs_plus/execution_constraints_info.json`
 - `runs_plus/novaspine_sync_status.json`
+
+### External Holdout Protocol
+Use a separate untouched dataset for promotion-grade validation.
+
+Option A: Put CSVs under `q/data_holdout/` matching symbols in `runs_plus/asset_names.csv`.
+Option B: Set `Q_EXTERNAL_HOLDOUT_RETURNS_FILE=/abs/path/to/returns.csv`.
+
+Then run:
+```bash
+python tools/run_external_holdout_validation.py
+```
+
+To enforce this at promotion time:
+```bash
+export Q_PROMOTION_REQUIRE_EXTERNAL_HOLDOUT=1
+python tools/run_q_promotion_gate.py
+```
+
+### Multi-Asset Bundle Ingestion
+If you have a directory of historical CSVs:
+```bash
+export Q_MULTI_ASSET_SOURCE_DIR=/abs/path/to/csv_bundle
+python tools/ingest_multi_asset_csv_bundle.py
+```
+This copies usable files into `q/data_new/` and updates `runs_plus/cluster_map.csv`.
+
+### Sweep Complexity Safeguards
+Runtime/profile search now penalizes over-complex configurations by default:
+- `tools/run_runtime_combo_search.py` uses `Q_RUNTIME_SEARCH_COMPLEXITY_PENALTY` and `Q_RUNTIME_SEARCH_COMPLEXITY_STRENGTH_PENALTY`.
+- `tools/run_governor_param_sweep.py` uses `Q_SWEEP_COMPLEXITY_PENALTY`.
 - `runs_plus/novaspine_last_batch.json`
 - `runs_plus/novaspine_context.json`
 - `runs_plus/novaspine_context_boost.csv`

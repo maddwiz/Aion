@@ -190,6 +190,7 @@ def _eval_combo(env_overrides: dict[str, str]) -> dict:
         [PY, str(ROOT / "tools" / "make_daily_from_weights.py")],
         [PY, str(ROOT / "tools" / "run_strict_oos_validation.py")],
         [PY, str(ROOT / "tools" / "run_cost_stress_validation.py")],
+        [PY, str(ROOT / "tools" / "run_external_holdout_validation.py")],
         [PY, str(ROOT / "tools" / "run_q_promotion_gate.py")],
         [PY, str(ROOT / "tools" / "run_system_health.py")],
         [PY, str(ROOT / "tools" / "run_health_alerts.py")],
@@ -209,6 +210,8 @@ def _eval_combo(env_overrides: dict[str, str]) -> dict:
     stress = _load_json(RUNS / "cost_stress_validation.json")
     health = _load_json(RUNS / "health_alerts.json")
     cinfo = _load_json(RUNS / "daily_costs_info.json")
+    ext = _load_json(RUNS / "external_holdout_validation.json")
+    extm = ext.get("metrics_external_holdout_net", {}) if isinstance(ext.get("metrics_external_holdout_net"), dict) else {}
 
     return {
         "robust_sharpe": float(robust.get("sharpe", 0.0)),
@@ -221,6 +224,11 @@ def _eval_combo(env_overrides: dict[str, str]) -> dict:
         "ann_cost_estimate": float(cinfo.get("ann_cost_estimate", 0.0)),
         "mean_turnover": float(cinfo.get("mean_turnover", 0.0)),
         "mean_effective_cost_bps": float(cinfo.get("mean_effective_cost_bps", 0.0)),
+        "external_holdout_ok": bool(ext.get("ok", False)),
+        "external_holdout_sharpe": float(extm.get("sharpe", 0.0)),
+        "external_holdout_hit_rate": float(extm.get("hit_rate", 0.0)),
+        "external_holdout_max_drawdown": float(extm.get("max_drawdown", 0.0)),
+        "external_holdout_n": int(extm.get("n", ext.get("rows", 0))),
         "promotion_ok": bool(promo.get("ok", False)),
         "cost_stress_ok": bool(stress.get("ok", False)),
         "health_ok": bool(health.get("ok", False)),
@@ -260,7 +268,7 @@ def _score_row(row: dict) -> float:
     latest_n_pen = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_N_PENALTY", "0.50")), 0.0, 25.0))
     latest_over_mdd = max(0.0, latest_mdd - latest_mdd_ref)
     latest_n_shortfall = max(0.0, (latest_min_n - latest_n) / max(1.0, float(latest_min_n)))
-    return float(
+    base_score = float(
         sh
         + hit_w * (hit - target_hit)
         + latest_sh_w * (latest_sh - latest_sh_ref)
@@ -271,6 +279,40 @@ def _score_row(row: dict) -> float:
         - cost_w * over_cost
         - turn_w * over_turn
     )
+    complexity_penalty, _ = _runtime_complexity_penalty(row)
+    return float(base_score - complexity_penalty)
+
+
+def _runtime_complexity_penalty(row: dict) -> tuple[float, dict]:
+    base_w = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_COMPLEXITY_PENALTY", "0.08")), 0.0, 2.0))
+    strength_w = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_COMPLEXITY_STRENGTH_PENALTY", "0.04")), 0.0, 2.0))
+    flags_total = int(max(0, int(row.get("search_flag_count", 0))))
+    disabled = row.get("disable_governors", [])
+    if not isinstance(disabled, list):
+        disabled = []
+    disabled_n = len([x for x in disabled if str(x).strip()])
+    enabled_n = max(0, flags_total - disabled_n)
+
+    optional_n = 0
+    optional_n += 1 if bool(row.get("enable_asset_class_diversification", False)) else 0
+    macro_strength = abs(float(row.get("macro_proxy_strength", 0.0)))
+    capacity_strength = abs(float(row.get("capacity_impact_strength", 0.0)))
+    blend_strength = abs(float(row.get("uncertainty_macro_shock_blend", 0.0)))
+    optional_n += 1 if macro_strength > 1e-9 else 0
+    optional_n += 1 if capacity_strength > 1e-9 else 0
+    optional_n += 1 if blend_strength > 1e-9 else 0
+    denom = max(1, flags_total + 4)
+    active_frac = float((enabled_n + optional_n) / float(denom))
+    strength_sum = float(macro_strength + capacity_strength + blend_strength)
+    penalty = float(base_w * active_frac + strength_w * strength_sum)
+    return penalty, {
+        "complexity_penalty": float(penalty),
+        "complexity_active_fraction": float(active_frac),
+        "complexity_strength_sum": float(strength_sum),
+        "complexity_enabled_flags": int(enabled_n),
+        "complexity_optional_active": int(optional_n),
+        "search_flag_count": int(flags_total),
+    }
 
 
 def _write_progress(*, evaluated: int, total: int, best: dict | None) -> None:
@@ -317,6 +359,14 @@ def _profile_payload(row: dict) -> dict:
         "ann_cost_estimate": float(row.get("ann_cost_estimate", 0.0)),
         "mean_turnover": float(row.get("mean_turnover", 0.0)),
         "mean_effective_cost_bps": float(row.get("mean_effective_cost_bps", 0.0)),
+        "external_holdout_ok": bool(row.get("external_holdout_ok", False)),
+        "external_holdout_sharpe": float(row.get("external_holdout_sharpe", 0.0)),
+        "external_holdout_hit_rate": float(row.get("external_holdout_hit_rate", 0.0)),
+        "external_holdout_max_drawdown": float(row.get("external_holdout_max_drawdown", 0.0)),
+        "external_holdout_n": int(row.get("external_holdout_n", 0)),
+        "complexity_penalty": float(row.get("complexity_penalty", 0.0)),
+        "complexity_active_fraction": float(row.get("complexity_active_fraction", 0.0)),
+        "complexity_strength_sum": float(row.get("complexity_strength_sum", 0.0)),
         "score": float(row.get("score", 0.0)),
         "promotion_ok": bool(row.get("promotion_ok", False)),
         "cost_stress_ok": bool(row.get("cost_stress_ok", False)),
@@ -532,6 +582,7 @@ def main() -> int:
         row = {
             "runtime_total_floor": float(floor),
             "disable_governors": disabled,
+            "search_flag_count": int(len(flags)),
             "enable_asset_class_diversification": bool(int(use_asset_class) == 1),
             "macro_proxy_strength": float(macro_strength),
             "capacity_impact_strength": float(capacity_strength),
@@ -539,6 +590,8 @@ def main() -> int:
             **out,
         }
         row["score"] = _score_row(row)
+        _, cdetail = _runtime_complexity_penalty(row)
+        row.update(cdetail)
         rows.append(row)
         if (
             bool(row.get("promotion_ok", False))
@@ -609,7 +662,7 @@ def main() -> int:
         "rows_valid": len(valid_sorted),
         "rows_relaxed_valid": len(relaxed_valid_sorted),
         "score_formula": {
-            "score": "sharpe + hit_weight*(hit-target_hit) - mdd_penalty*max(0, abs(max_drawdown)-mdd_ref) - cost_penalty*max(0, ann_cost_estimate-cost_ref_annual) - turnover_penalty*max(0, mean_turnover-turnover_ref_daily)",
+            "score": "sharpe + hit_weight*(hit-target_hit) + latest_terms - risk/cost penalties - complexity_penalty*(active_fraction) - complexity_strength_penalty*(macro+capacity+blend)",
             "target_hit": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TARGET_HIT", "0.49")), 0.0, 1.0)),
             "hit_weight": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_HIT_WEIGHT", "0.75")), 0.0, 10.0)),
             "mdd_ref": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_MDD_REF", "0.04")), 0.001, 1.0)),
@@ -618,6 +671,10 @@ def main() -> int:
             "cost_penalty": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_COST_PENALTY", "3.0")), 0.0, 100.0)),
             "turnover_ref_daily": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TURNOVER_REF_DAILY", "0.06")), 0.0, 5.0)),
             "turnover_penalty": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TURNOVER_PENALTY", "1.5")), 0.0, 100.0)),
+            "complexity_penalty": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_COMPLEXITY_PENALTY", "0.08")), 0.0, 2.0)),
+            "complexity_strength_penalty": float(
+                np.clip(float(os.getenv("Q_RUNTIME_SEARCH_COMPLEXITY_STRENGTH_PENALTY", "0.04")), 0.0, 2.0)
+            ),
         },
         "top_valid": valid_sorted[:20],
         "top_relaxed": relaxed_valid_sorted[:20],

@@ -65,6 +65,13 @@ Published artifacts live under:
 
 This gives a clear walk-forward equity/drawdown record plus SPY/QQQ benchmark context and governor-stack diagnostics.
 
+## Master Handoff
+
+Canonical build handoff: `docs/NOVAFINTEC_MASTER_HANDOFF.md`
+
+Mirror copy for chat-window resets/context recovery:
+- `/Users/desmondpottle/Desktop/novafintec.md/NOVAFINTEC_MASTER_HANDOFF.md`
+
 ## Preset Profiles
 
 Tiered profile presets are in `config/`:

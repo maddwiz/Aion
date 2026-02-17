@@ -121,12 +121,15 @@ def _strict_oos_metrics() -> dict:
 
 
 def _objective(cur: dict, base: dict) -> tuple[float, dict]:
-    cur_sh = float(cur.get("oos_sharpe", cur["sharpe"]))
-    base_sh = float(base.get("oos_sharpe", base["sharpe"]))
-    cur_hit = float(cur.get("oos_hit_rate", cur["hit_rate"]))
-    base_hit = float(base.get("oos_hit_rate", base["hit_rate"]))
-    cur_dd = abs(float(cur.get("oos_max_drawdown", cur["max_drawdown"])))
-    base_dd = max(1e-9, abs(float(base.get("oos_max_drawdown", base["max_drawdown"]))))
+    cur_sh = float(cur["oos_sharpe"]) if "oos_sharpe" in cur else float(cur.get("sharpe", 0.0))
+    base_sh = float(base["oos_sharpe"]) if "oos_sharpe" in base else float(base.get("sharpe", 0.0))
+    cur_hit = float(cur["oos_hit_rate"]) if "oos_hit_rate" in cur else float(cur.get("hit_rate", 0.0))
+    base_hit = float(base["oos_hit_rate"]) if "oos_hit_rate" in base else float(base.get("hit_rate", 0.0))
+    cur_dd = abs(float(cur["oos_max_drawdown"])) if "oos_max_drawdown" in cur else abs(float(cur.get("max_drawdown", 0.0)))
+    base_dd = max(
+        1e-9,
+        abs(float(base["oos_max_drawdown"])) if "oos_max_drawdown" in base else abs(float(base.get("max_drawdown", 0.0))),
+    )
     dd_ratio = cur_dd / base_dd
     hit_delta = cur_hit - base_hit
     sharpe_delta = cur_sh - base_sh
@@ -157,6 +160,8 @@ def _objective(cur: dict, base: dict) -> tuple[float, dict]:
     )
     if veto:
         score -= 1.0
+    complexity_penalty, complexity_detail = _complexity_penalty(cur, base)
+    score -= complexity_penalty
     detail = {
         "objective_sharpe": float(cur_sh),
         "objective_hit_rate": float(cur_hit),
@@ -170,9 +175,54 @@ def _objective(cur: dict, base: dict) -> tuple[float, dict]:
         "target_min_oos_n": int(min_oos_n),
         "oos_n": int(oos_n),
         "penalty": float(penalty),
+        "complexity_penalty": float(complexity_penalty),
         "veto": bool(veto),
     }
+    detail.update(complexity_detail)
     return score, detail
+
+
+def _complexity_penalty(cur: dict, base: dict) -> tuple[float, dict]:
+    lam = float(np.clip(float(os.getenv("Q_SWEEP_COMPLEXITY_PENALTY", "0.08")), 0.0, 5.0))
+    strength_keys = [
+        "meta_execution_gate_strength",
+        "council_gate_strength",
+        "meta_mix_leverage_strength",
+        "meta_reliability_strength",
+        "global_governor_strength",
+        "heartbeat_scaler_strength",
+        "quality_governor_strength",
+        "regime_moe_strength",
+        "uncertainty_sizing_strength",
+        "vol_target_strength",
+        "hit_gate_strength",
+    ]
+    strength_raw = 0.0
+    strength_n = 0
+    for k in strength_keys:
+        if k in cur:
+            try:
+                strength_raw += abs(float(cur.get(k, 1.0)) - 1.0)
+                strength_n += 1
+            except Exception:
+                continue
+    strength_raw = float(strength_raw / max(1, strength_n))
+
+    struct_raw = 0.0
+    struct_raw += abs(float(cur.get("runtime_total_floor", base.get("runtime_total_floor", 0.18))) - float(base.get("runtime_total_floor", 0.18))) / 0.10
+    struct_raw += abs(float(cur.get("shock_alpha", base.get("shock_alpha", 0.35))) - float(base.get("shock_alpha", 0.35))) / 0.20
+    struct_raw += abs(float(cur.get("rank_sleeve_blend", 0.0))) / 0.15
+    struct_raw += abs(float(cur.get("low_vol_sleeve_blend", 0.0))) / 0.15
+    struct_raw += abs(float(cur.get("signal_deadzone", 0.0))) / 0.01
+    struct_raw = float(struct_raw / 5.0)
+
+    raw = float(strength_raw + 0.50 * struct_raw)
+    penalty = float(lam * raw)
+    return penalty, {
+        "complexity_raw_strength": float(strength_raw),
+        "complexity_raw_structure": float(struct_raw),
+        "complexity_raw_total": float(raw),
+    }
 
 
 def _profile_from_row(row: dict) -> dict:
@@ -254,6 +304,10 @@ def _csv_write(rows: list[dict], outp: Path) -> None:
         "target_max_abs_mdd",
         "target_min_oos_n",
         "penalty",
+        "complexity_penalty",
+        "complexity_raw_strength",
+        "complexity_raw_structure",
+        "complexity_raw_total",
         "veto",
     ]
     with outp.open("w", newline="", encoding="utf-8") as f:

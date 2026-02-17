@@ -129,6 +129,34 @@ def test_score_row_penalizes_cost_and_turnover(monkeypatch):
     assert float(rcs._score_row(base)) > float(rcs._score_row(stressed))
 
 
+def test_score_row_penalizes_complexity(monkeypatch):
+    simple = {
+        "robust_sharpe": 1.0,
+        "robust_hit_rate": 0.50,
+        "robust_max_drawdown": -0.04,
+        "disable_governors": ["a", "b", "c", "d"],
+        "search_flag_count": 4,
+        "enable_asset_class_diversification": False,
+        "macro_proxy_strength": 0.0,
+        "capacity_impact_strength": 0.0,
+        "uncertainty_macro_shock_blend": 0.0,
+    }
+    complex_row = {
+        "robust_sharpe": 1.0,
+        "robust_hit_rate": 0.50,
+        "robust_max_drawdown": -0.04,
+        "disable_governors": [],
+        "search_flag_count": 4,
+        "enable_asset_class_diversification": True,
+        "macro_proxy_strength": 0.3,
+        "capacity_impact_strength": 0.2,
+        "uncertainty_macro_shock_blend": 0.2,
+    }
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_COMPLEXITY_PENALTY", "0.2")
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_COMPLEXITY_STRENGTH_PENALTY", "0.2")
+    assert float(rcs._score_row(simple)) > float(rcs._score_row(complex_row))
+
+
 def test_base_runtime_env_uses_friction_calibration(monkeypatch, tmp_path: Path):
     runs = tmp_path / "runs_plus"
     runs.mkdir(parents=True, exist_ok=True)

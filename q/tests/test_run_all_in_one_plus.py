@@ -230,6 +230,13 @@ def test_should_run_asset_class_diversification_only_with_env(monkeypatch):
     assert raip.should_run_asset_class_diversification() is True
 
 
+def test_should_ingest_multi_asset_bundle_only_with_source_env(monkeypatch):
+    monkeypatch.delenv("Q_MULTI_ASSET_SOURCE_DIR", raising=False)
+    assert raip.should_ingest_multi_asset_bundle() is False
+    monkeypatch.setenv("Q_MULTI_ASSET_SOURCE_DIR", "/tmp/bundle")
+    assert raip.should_ingest_multi_asset_bundle() is True
+
+
 def test_should_auto_ingest_new_assets_detects_csv(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(raip, "ROOT", tmp_path)
     dnew = tmp_path / "data_new"

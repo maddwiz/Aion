@@ -111,6 +111,16 @@ def main() -> int:
     min_latest_hit = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_LATEST_OOS_HIT", "0.48")), 0.0, 1.0))
     max_latest_abs_mdd = float(np.clip(float(os.getenv("Q_PROMOTION_MAX_LATEST_ABS_MDD", "0.12")), 0.001, 2.0))
     min_latest_n = int(np.clip(int(float(os.getenv("Q_PROMOTION_MIN_LATEST_OOS_SAMPLES", "126"))), 1, 1000000))
+    require_external_holdout = str(os.getenv("Q_PROMOTION_REQUIRE_EXTERNAL_HOLDOUT", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    min_external_sh = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_EXTERNAL_HOLDOUT_SHARPE", "0.75")), -2.0, 10.0))
+    min_external_hit = float(np.clip(float(os.getenv("Q_PROMOTION_MIN_EXTERNAL_HOLDOUT_HIT", "0.47")), 0.0, 1.0))
+    max_external_abs_mdd = float(np.clip(float(os.getenv("Q_PROMOTION_MAX_EXTERNAL_HOLDOUT_ABS_MDD", "0.15")), 0.001, 2.0))
+    min_external_n = int(np.clip(int(float(os.getenv("Q_PROMOTION_MIN_EXTERNAL_HOLDOUT_SAMPLES", "126"))), 1, 1000000))
 
     reasons = []
     if n < min_n:
@@ -130,6 +140,44 @@ def main() -> int:
             reasons.append(f"latest_oos_hit<{min_latest_hit:.2f} ({latest_hit:.3f})")
         if abs(latest_mdd) > max_latest_abs_mdd:
             reasons.append(f"latest_oos_abs_mdd>{max_latest_abs_mdd:.3f} ({abs(latest_mdd):.3f})")
+
+    ext_path = RUNS / "external_holdout_validation.json"
+    ext = _load_json(ext_path)
+    ext_summary = None
+    ext_metrics = {}
+    if isinstance(ext, dict) and ext:
+        ext_metrics = ext.get("metrics_external_holdout_net", {}) if isinstance(ext.get("metrics_external_holdout_net"), dict) else {}
+        ext_summary = {
+            "ok": bool(ext.get("ok", False)),
+            "path": str(ext_path),
+            "method": str(ext.get("method", "")),
+            "rows": int(ext.get("rows", ext_metrics.get("n", 0))),
+            "metrics_external_holdout_net": {
+                "sharpe": float(ext_metrics.get("sharpe", 0.0)),
+                "hit_rate": float(ext_metrics.get("hit_rate", 0.0)),
+                "max_drawdown": float(ext_metrics.get("max_drawdown", 0.0)),
+                "n": int(ext_metrics.get("n", 0)),
+            },
+            "reason": str(ext.get("reason", "")),
+        }
+    if require_external_holdout:
+        if not isinstance(ext, dict) or not ext:
+            reasons.append("external_holdout_missing")
+        elif not bool(ext.get("ok", False)):
+            reasons.append("external_holdout_fail")
+        else:
+            ext_sh = float(ext_metrics.get("sharpe", 0.0))
+            ext_hit = float(ext_metrics.get("hit_rate", 0.0))
+            ext_mdd = float(ext_metrics.get("max_drawdown", 0.0))
+            ext_n = int(ext_metrics.get("n", ext.get("rows", 0)))
+            if ext_n < min_external_n:
+                reasons.append(f"external_holdout_samples<{min_external_n} ({ext_n})")
+            if ext_sh < min_external_sh:
+                reasons.append(f"external_holdout_sharpe<{min_external_sh:.2f} ({ext_sh:.3f})")
+            if ext_hit < min_external_hit:
+                reasons.append(f"external_holdout_hit<{min_external_hit:.2f} ({ext_hit:.3f})")
+            if abs(ext_mdd) > max_external_abs_mdd:
+                reasons.append(f"external_holdout_abs_mdd>{max_external_abs_mdd:.3f} ({abs(ext_mdd):.3f})")
 
     cost_stress_path = RUNS / "cost_stress_validation.json"
     cost_stress = _load_json(cost_stress_path)
@@ -169,6 +217,11 @@ def main() -> int:
             "min_latest_oos_hit": float(min_latest_hit),
             "max_latest_abs_mdd": float(max_latest_abs_mdd),
             "min_latest_oos_samples": int(min_latest_n),
+            "require_external_holdout": bool(require_external_holdout),
+            "min_external_holdout_sharpe": float(min_external_sh),
+            "min_external_holdout_hit": float(min_external_hit),
+            "max_external_holdout_abs_mdd": float(max_external_abs_mdd),
+            "min_external_holdout_samples": int(min_external_n),
         },
         "metrics_oos_net": {
             "sharpe": float(sharpe),
@@ -184,6 +237,7 @@ def main() -> int:
         },
         "require_cost_stress": bool(require_cost_stress),
         "cost_stress": cost_stress_summary,
+        "external_holdout": ext_summary,
         "reasons": reasons,
     }
     (RUNS / "q_promotion_gate.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
@@ -199,6 +253,15 @@ def main() -> int:
         f"<p>Latest OOS window: Sharpe={latest_sh:.3f}, Hit={latest_hit:.3f}, "
         f"MaxDD={latest_mdd:.3f}, N={latest_n}, required={bool(require_latest_holdout)}.</p>"
     )
+    if ext_summary:
+        em = ext_summary.get("metrics_external_holdout_net", {})
+        html += (
+            f"<p>External holdout: ok={bool(ext_summary.get('ok', False))}, "
+            f"Sharpe={float(em.get('sharpe', 0.0)):.3f}, "
+            f"Hit={float(em.get('hit_rate', 0.0)):.3f}, "
+            f"MaxDD={float(em.get('max_drawdown', 0.0)):.3f}, "
+            f"N={int(em.get('n', 0))}, required={bool(require_external_holdout)}.</p>"
+        )
     if cost_stress_summary:
         wc = cost_stress_summary["worst_case_robust"]
         html += (

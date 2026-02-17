@@ -401,6 +401,11 @@ def should_auto_ingest_new_assets() -> bool:
         return False
     return any(dnew.glob("*.csv"))
 
+
+def should_ingest_multi_asset_bundle() -> bool:
+    src = str(os.getenv("Q_MULTI_ASSET_SOURCE_DIR", "")).strip()
+    return bool(src)
+
 if __name__ == "__main__":
     strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
     apply_q_preset_defaults()
@@ -414,6 +419,10 @@ if __name__ == "__main__":
     write_pipeline_status([], strict_mode=strict)
 
     # ---------- PHASE 0: Primers / basics ----------
+    if should_ingest_multi_asset_bundle():
+        ok, rc = run_script("tools/ingest_multi_asset_csv_bundle.py")
+        if not ok and rc is not None:
+            failures.append({"step": "tools/ingest_multi_asset_csv_bundle.py", "code": rc})
     if should_auto_ingest_new_assets():
         # Normalize/clean incoming CSVs before building returns matrices.
         for tool in [
@@ -588,6 +597,9 @@ if __name__ == "__main__":
     # Cost sensitivity stress on strict OOS at higher friction assumptions.
     ok, rc = run_script("tools/run_cost_stress_validation.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_cost_stress_validation.py", "code": rc})
+    # Optional external untouched holdout validation (data_holdout or explicit returns file).
+    ok, rc = run_script("tools/run_external_holdout_validation.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_external_holdout_validation.py", "code": rc})
     # Promotion gate artifact for AION overlay safety.
     os.environ.setdefault("Q_PROMOTION_REQUIRE_COST_STRESS", "1")
     ok, rc = run_script("tools/run_q_promotion_gate.py")

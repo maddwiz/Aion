@@ -169,6 +169,7 @@ def main() -> int:
 
     strict = _read_json(RUNS / "strict_oos_validation.json")
     stress = _read_json(RUNS / "cost_stress_validation.json")
+    external_holdout = _read_json(RUNS / "external_holdout_validation.json")
     final_info = _read_json(RUNS / "final_portfolio_info.json")
     governor_compound = _summarize_governor_compound()
     (RESULTS / "governor_compound_summary.json").write_text(json.dumps(governor_compound, indent=2), encoding="utf-8")
@@ -199,6 +200,7 @@ def main() -> int:
         "primary_metrics": primary_metrics,
         "strict_oos": strict,
         "cost_stress": stress,
+        "external_holdout": external_holdout,
         "final_portfolio_info": final_info,
         "governor_compound": governor_compound,
         "benchmarks": bench_rows,
@@ -225,6 +227,16 @@ def main() -> int:
         f"- Mean compound scalar: `{governor_compound.get('mean', 0.0):.3f}`",
         f"- Min compound scalar: `{governor_compound.get('min', 0.0):.3f}`",
         f"- Share below 0.20: `{governor_compound.get('below_0_20_share', 0.0):.3f}`",
+        "",
+        "## External Holdout",
+        "",
+        f"- Present: `{bool(external_holdout)}`",
+        f"- OK: `{bool(external_holdout.get('ok', False)) if isinstance(external_holdout, dict) else False}`",
+        (
+            f"- Sharpe: `{float((external_holdout.get('metrics_external_holdout_net', {}) or {}).get('sharpe', 0.0)):.3f}`"
+            if isinstance(external_holdout, dict)
+            else "- Sharpe: `0.000`"
+        ),
         "",
         "## Files",
         "",

@@ -103,6 +103,44 @@ def test_build_costed_daily_returns_adds_cash_carry():
     assert np.allclose(net, expected_carry)
 
 
+def test_build_costed_daily_returns_applies_asset_class_multipliers():
+    w = np.array(
+        [
+            [0.50, 0.50],
+            [0.75, 0.25],
+            [0.25, 0.75],
+        ],
+        dtype=float,
+    )
+    a = np.array(
+        [
+            [0.00, 0.00],
+            [0.00, 0.00],
+            [0.00, 0.00],
+        ],
+        dtype=float,
+    )
+    net0, _gross0, cost0, _turn0, _bps0, _carry0, _cash0 = mdw.build_costed_daily_returns(
+        w,
+        a,
+        base_bps=10.0,
+        vol_scaled_bps=0.0,
+        half_turnover=True,
+        fixed_daily_fee=0.0,
+    )
+    net1, _gross1, cost1, _turn1, _bps1, _carry1, _cash1 = mdw.build_costed_daily_returns(
+        w,
+        a,
+        base_bps=10.0,
+        vol_scaled_bps=0.0,
+        half_turnover=True,
+        fixed_daily_fee=0.0,
+        asset_cost_multipliers=np.array([2.0, 0.5], dtype=float),
+    )
+    assert float(np.sum(cost1)) > float(np.sum(cost0))
+    assert np.allclose(net1, -cost1)
+
+
 def test_resolve_cost_params_uses_friction_calibration_defaults(monkeypatch, tmp_path: Path):
     runs = tmp_path / "runs_plus"
     runs.mkdir(parents=True, exist_ok=True)

@@ -1,14 +1,14 @@
 # Results Snapshot
 
-- Generated (UTC): `2026-02-17T22:10:26.689131+00:00`
+- Generated (UTC): `2026-02-17T23:00:21.760959+00:00`
 - Source returns: `runs_plus/wf_oos_returns.csv`
 
 ## Primary Metrics
 
 - N: `795`
-- Sharpe: `1.486`
-- Hit rate: `0.488`
-- Annualized return: `0.052`
+- Sharpe: `1.449`
+- Hit rate: `0.484`
+- Annualized return: `0.051`
 - Annualized vol: `0.035`
 - Max drawdown: `-0.019`
 
@@ -16,7 +16,13 @@
 
 - Mean compound scalar: `0.358`
 - Min compound scalar: `0.140`
-- Share below 0.20: `0.287`
+- Share below 0.20: `0.291`
+
+## External Holdout
+
+- Present: `True`
+- OK: `False`
+- Sharpe: `0.000`
 
 ## Files
 

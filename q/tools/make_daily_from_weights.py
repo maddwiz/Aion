@@ -27,6 +27,104 @@ def first_mat(paths):
     return None, None
 
 
+def _infer_asset_class(sym: str) -> str:
+    s = str(sym or "").upper().replace("-", "").replace("_", "").replace("/", "")
+    if not s:
+        return "EQ"
+    if s in {"VIX", "VIX9D", "VIX3M", "VIXCLS", "UVXY", "VXX"}:
+        return "VOL"
+    if s in {"LQD", "HYG", "JNK", "BND", "AGG", "MBB", "HYGTR", "LQDTR"} or s.endswith("_TR"):
+        return "CREDIT"
+    if s in {"TLT", "IEF", "SHY", "VGSH", "DGS2", "DGS3MO", "DGS5", "DGS10", "DGS30", "TY", "ZN", "ZB"}:
+        return "RATES"
+    if s in {"GLD", "SLV", "USO", "UNG", "CORN", "WEAT", "CPER", "DBC", "DBA", "XLE", "XOP"}:
+        return "COMMOD"
+    if len(s) == 6 and s[:3] in {"USD", "EUR", "JPY", "GBP", "CHF", "CAD", "AUD", "NZD"} and s[3:] in {
+        "USD",
+        "EUR",
+        "JPY",
+        "GBP",
+        "CHF",
+        "CAD",
+        "AUD",
+        "NZD",
+    }:
+        return "FX"
+    if s.startswith("BTC") or s.startswith("ETH") or s in {"IBIT", "FBTC", "BITO"}:
+        return "CRYPTO"
+    return "EQ"
+
+
+def _load_asset_names(n: int) -> list[str]:
+    p = RUNS / "asset_names.csv"
+    if p.exists():
+        try:
+            import csv
+
+            with p.open("r", encoding="utf-8", newline="") as fh:
+                rows = list(csv.reader(fh))
+            if rows and rows[0]:
+                vals = [str(r[0]).strip().upper() for r in rows[1:] if r]
+                vals = [x for x in vals if x]
+                if len(vals) >= n:
+                    return vals[:n]
+        except Exception:
+            pass
+    return [f"A{i:03d}" for i in range(n)]
+
+
+def _load_asset_classes(names: list[str]) -> list[str]:
+    p = RUNS / "asset_class_map_used.csv"
+    mapping = {}
+    if p.exists():
+        try:
+            import csv
+
+            with p.open("r", encoding="utf-8", newline="") as fh:
+                rows = list(csv.DictReader(fh))
+            for r in rows:
+                a = str(r.get("asset", "")).strip().upper()
+                c = str(r.get("asset_class", "")).strip().upper()
+                if a and c:
+                    mapping[a] = c
+        except Exception:
+            mapping = {}
+    out = []
+    for nm in names:
+        out.append(mapping.get(str(nm).strip().upper(), _infer_asset_class(nm)))
+    return out
+
+
+def _class_cost_multipliers(n: int) -> tuple[np.ndarray, dict]:
+    enabled = str(os.getenv("Q_COST_CLASS_MODEL_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    if (not enabled) or n <= 0:
+        return np.ones(max(0, int(n)), dtype=float), {"enabled": False, "classes": []}
+    names = _load_asset_names(n)
+    classes = _load_asset_classes(names)
+    mult_cfg = {
+        "EQ": float(np.clip(float(os.getenv("Q_COST_CLASS_EQ_MULT", "1.00")), 0.25, 5.0)),
+        "CREDIT": float(np.clip(float(os.getenv("Q_COST_CLASS_CREDIT_MULT", "1.10")), 0.25, 5.0)),
+        "RATES": float(np.clip(float(os.getenv("Q_COST_CLASS_RATES_MULT", "0.85")), 0.25, 5.0)),
+        "COMMOD": float(np.clip(float(os.getenv("Q_COST_CLASS_COMMOD_MULT", "1.20")), 0.25, 5.0)),
+        "FX": float(np.clip(float(os.getenv("Q_COST_CLASS_FX_MULT", "0.90")), 0.25, 5.0)),
+        "CRYPTO": float(np.clip(float(os.getenv("Q_COST_CLASS_CRYPTO_MULT", "1.60")), 0.25, 5.0)),
+        "VOL": float(np.clip(float(os.getenv("Q_COST_CLASS_VOL_MULT", "1.40")), 0.25, 5.0)),
+    }
+    mult = np.ones(n, dtype=float)
+    for i, c in enumerate(classes):
+        mult[i] = float(mult_cfg.get(str(c).upper(), 1.0))
+    class_counts = {}
+    for c in classes:
+        k = str(c).upper()
+        class_counts[k] = int(class_counts.get(k, 0) + 1)
+    return mult, {
+        "enabled": True,
+        "classes": sorted(set(str(x).upper() for x in classes)),
+        "class_counts": class_counts,
+        "class_multipliers": mult_cfg,
+    }
+
+
 def _safe_float(x, default):
     try:
         v = float(x)
@@ -109,6 +207,7 @@ def build_costed_daily_returns(
     fixed_daily_fee: float = 0.0,
     cash_yield_annual: float = 0.0,
     cash_exposure_target: float = 1.0,
+    asset_cost_multipliers: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     w = np.asarray(W, float)
     a = np.asarray(A, float)
@@ -122,9 +221,12 @@ def build_costed_daily_returns(
     cash_carry = cash_frac * (float(max(0.0, cash_yield_annual)) / 252.0)
     gross = trade_gross + cash_carry
     turnover = np.zeros(T, dtype=float)
+    turnover_asset = np.zeros((T, w.shape[1]), dtype=float)
     if T > 1:
-        turnover[1:] = np.sum(np.abs(np.diff(w, axis=0)), axis=1)
+        turnover_asset[1:] = np.abs(np.diff(w, axis=0))
+        turnover[1:] = np.sum(turnover_asset[1:], axis=1)
     if bool(half_turnover):
+        turnover_asset *= 0.5
         turnover = 0.5 * turnover
 
     # Rolling realized volatility (daily) for volatility-scaled slippage.
@@ -138,7 +240,15 @@ def build_costed_daily_returns(
     vol_ratio = np.clip(vol / ref, 0.0, 6.0)
     eff_bps = np.clip(float(base_bps), 0.0, 10_000.0) + np.clip(float(vol_scaled_bps), 0.0, 10_000.0) * vol_ratio
 
-    var_cost = (eff_bps / 10000.0) * turnover
+    if asset_cost_multipliers is not None:
+        am = np.asarray(asset_cost_multipliers, float).ravel()
+        if am.size == w.shape[1]:
+            class_eff = (eff_bps.reshape(-1, 1) * am.reshape(1, -1))
+            var_cost = np.sum((class_eff / 10000.0) * turnover_asset, axis=1)
+        else:
+            var_cost = (eff_bps / 10000.0) * turnover
+    else:
+        var_cost = (eff_bps / 10000.0) * turnover
     fee = np.full(T, float(max(0.0, fixed_daily_fee)), dtype=float)
     cost = var_cost + fee
     net = gross - cost
@@ -181,6 +291,7 @@ if __name__ == "__main__":
     fixed_daily_fee = float(np.clip(float(os.getenv("Q_FIXED_DAILY_FEE", "0.0")), 0.0, 1.0))
     cash_yield_annual = float(np.clip(float(os.getenv("Q_CASH_YIELD_ANNUAL", "0.0")), 0.0, 0.20))
     cash_exposure_target = float(np.clip(float(os.getenv("Q_CASH_EXPOSURE_TARGET", "1.0")), 0.25, 5.0))
+    class_cost_mult, class_cost_info = _class_cost_multipliers(W.shape[1])
     net, gross, cost, turnover, eff_bps, cash_carry, cash_frac = build_costed_daily_returns(
         W[:T],
         A[:T],
@@ -192,6 +303,7 @@ if __name__ == "__main__":
         fixed_daily_fee=fixed_daily_fee,
         cash_yield_annual=cash_yield_annual,
         cash_exposure_target=cash_exposure_target,
+        asset_cost_multipliers=class_cost_mult,
     )
     np.savetxt(RUNS/"daily_returns.csv", net, delimiter=",")
     np.savetxt(RUNS/"daily_returns_gross.csv", gross, delimiter=",")
@@ -215,6 +327,10 @@ if __name__ == "__main__":
                 "friction_calibration_path": str(cost_cfg.get("friction_calibration_path", "")),
                 "cash_yield_annual": float(cash_yield_annual),
                 "cash_exposure_target": float(cash_exposure_target),
+                "class_cost_model_enabled": bool(class_cost_info.get("enabled", False)),
+                "class_cost_classes": list(class_cost_info.get("classes", [])),
+                "class_cost_counts": dict(class_cost_info.get("class_counts", {})),
+                "class_cost_multipliers": dict(class_cost_info.get("class_multipliers", {})),
                 "rows": int(T),
                 "mean_cost_daily": float(np.mean(cost)) if T else 0.0,
                 "ann_cost_estimate": float(np.mean(cost) * 252.0) if T else 0.0,

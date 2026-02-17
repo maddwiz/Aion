@@ -91,3 +91,38 @@ def test_objective_uses_oos_metrics_when_available():
     assert detail["objective_sharpe"] == cur["oos_sharpe"]
     assert detail["objective_hit_rate"] == cur["oos_hit_rate"]
     assert score < cur["sharpe"]
+
+
+def test_objective_complexity_penalizes_over_tuned_profiles(monkeypatch):
+    base = {
+        "oos_sharpe": 1.00,
+        "oos_hit_rate": 0.50,
+        "oos_max_drawdown": -0.05,
+        "oos_n": 300,
+        "turnover_mean": 0.03,
+        "runtime_total_floor": 0.18,
+        "shock_alpha": 0.35,
+    }
+    simple = {
+        **base,
+        "meta_execution_gate_strength": 1.0,
+        "global_governor_strength": 1.0,
+        "rank_sleeve_blend": 0.0,
+        "low_vol_sleeve_blend": 0.0,
+        "signal_deadzone": 0.0,
+    }
+    complex_row = {
+        **base,
+        "meta_execution_gate_strength": 1.4,
+        "global_governor_strength": 0.6,
+        "rank_sleeve_blend": 0.10,
+        "low_vol_sleeve_blend": 0.08,
+        "signal_deadzone": 0.004,
+        "runtime_total_floor": 0.08,
+        "shock_alpha": 0.55,
+    }
+    monkeypatch.setenv("Q_SWEEP_COMPLEXITY_PENALTY", "0.2")
+    s_simple, d_simple = rps._objective(simple, base)
+    s_complex, d_complex = rps._objective(complex_row, base)
+    assert float(d_complex["complexity_penalty"]) > float(d_simple["complexity_penalty"])
+    assert float(s_simple) > float(s_complex)

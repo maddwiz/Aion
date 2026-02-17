@@ -198,3 +198,27 @@ def test_q_promotion_gate_latest_holdout_required_fail(tmp_path: Path, monkeypat
     out = json.loads((runs / "q_promotion_gate.json").read_text(encoding="utf-8"))
     assert out["ok"] is False
     assert any("latest_oos" in str(x) for x in out.get("reasons", []))
+
+
+def test_q_promotion_gate_external_holdout_required_fail(tmp_path: Path, monkeypatch):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    payload = {"metrics_oos_net": {"sharpe": 1.3, "hit_rate": 0.51, "max_drawdown": -0.04, "n": 300}}
+    ext = {
+        "ok": True,
+        "metrics_external_holdout_net": {"sharpe": 0.2, "hit_rate": 0.40, "max_drawdown": -0.30, "n": 80},
+    }
+    (runs / "strict_oos_validation.json").write_text(json.dumps(payload), encoding="utf-8")
+    (runs / "external_holdout_validation.json").write_text(json.dumps(ext), encoding="utf-8")
+    monkeypatch.setattr(pg, "ROOT", tmp_path)
+    monkeypatch.setattr(pg, "RUNS", runs)
+    monkeypatch.setenv("Q_PROMOTION_REQUIRE_EXTERNAL_HOLDOUT", "1")
+    monkeypatch.setenv("Q_PROMOTION_MIN_EXTERNAL_HOLDOUT_SHARPE", "0.75")
+    monkeypatch.setenv("Q_PROMOTION_MIN_EXTERNAL_HOLDOUT_HIT", "0.47")
+    monkeypatch.setenv("Q_PROMOTION_MAX_EXTERNAL_HOLDOUT_ABS_MDD", "0.15")
+    monkeypatch.setenv("Q_PROMOTION_MIN_EXTERNAL_HOLDOUT_SAMPLES", "126")
+    rc = pg.main()
+    assert rc == 0
+    out = json.loads((runs / "q_promotion_gate.json").read_text(encoding="utf-8"))
+    assert out["ok"] is False
+    assert any("external_holdout" in str(x) for x in out.get("reasons", []))
