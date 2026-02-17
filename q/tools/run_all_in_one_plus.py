@@ -14,6 +14,7 @@ Outputs go to runs_plus/ when possible.
 
 import os, sys, subprocess, json
 from pathlib import Path
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs_plus"
@@ -130,6 +131,36 @@ def apply_profile_env_defaults():
         print(f"↺ applied runtime defaults from governor profile: {applied}")
 
 
+def _merge_csv_tokens(current: str, extra: list[str]) -> str:
+    vals = []
+    seen = set()
+    for token in str(current or "").split(","):
+        t = str(token).strip().lower()
+        if t and t not in seen:
+            seen.add(t)
+            vals.append(t)
+    for token in extra:
+        t = str(token).strip().lower()
+        if t and t not in seen:
+            seen.add(t)
+            vals.append(t)
+    return ",".join(vals)
+
+
+def apply_performance_defaults():
+    # Keep runtime floor below over-throttling zone unless explicitly overridden.
+    if "Q_RUNTIME_TOTAL_FLOOR" not in os.environ:
+        os.environ["Q_RUNTIME_TOTAL_FLOOR"] = str(
+            float(np.clip(float(os.getenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", "0.20")), 0.0, 1.0))
+        )
+    # Uncertainty governor improved robustness less than it reduced Sharpe in
+    # current regime; disable by default, but allow explicit opt-in.
+    enable_unc = str(os.getenv("Q_ENABLE_UNCERTAINTY_GOV", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if not enable_unc:
+        cur = os.getenv("Q_DISABLE_GOVERNORS", "")
+        os.environ["Q_DISABLE_GOVERNORS"] = _merge_csv_tokens(cur, ["uncertainty_sizing"])
+
+
 def default_aion_overlay_mirror() -> str:
     p = ROOT.parent / "aion" / "state" / "q_signal_overlay.json"
     if p.parent.exists():
@@ -204,6 +235,7 @@ if __name__ == "__main__":
     if not ensure_env():
         write_pipeline_status([{"step": "env_preflight", "code": 2}], strict_mode=strict)
         raise SystemExit(2)
+    apply_performance_defaults()
     apply_profile_env_defaults()
     failures = []
     # Reset status at run start so alert checks do not read stale failures.

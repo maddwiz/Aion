@@ -143,17 +143,16 @@ def _apply_governor_strength(vec: np.ndarray, strength: float, lo: float = 0.0, 
 
 
 def _disabled_governors() -> set[str]:
-    raw = str(os.getenv("Q_DISABLE_GOVERNORS", "")).strip()
     out = set()
-    if raw:
-        for token in raw.split(","):
-            t = str(token).strip().lower()
-            if t:
-                out.add(t)
-        return out
     vals = _GOV_PROFILE.get("disable_governors", [])
     if isinstance(vals, list):
         for token in vals:
+            t = str(token).strip().lower()
+            if t:
+                out.add(t)
+    raw = str(os.getenv("Q_DISABLE_GOVERNORS", "")).strip()
+    if raw:
+        for token in raw.split(","):
             t = str(token).strip().lower()
             if t:
                 out.add(t)

@@ -15,14 +15,18 @@ from __future__ import annotations
 import csv
 import json
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from tools.make_daily_from_weights import build_costed_daily_returns
 from tools import run_strict_oos_validation as so
 
-ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
 

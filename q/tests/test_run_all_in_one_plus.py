@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import tools.run_all_in_one_plus as raip
 
@@ -83,3 +84,20 @@ def test_should_force_legacy_tune_with_env(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(raip, "RUNS", runs)
     monkeypatch.setenv("Q_ENABLE_LEGACY_TUNE", "1")
     assert raip.should_run_legacy_tune() is True
+
+
+def test_apply_performance_defaults_sets_runtime_floor(monkeypatch):
+    monkeypatch.delenv("Q_RUNTIME_TOTAL_FLOOR", raising=False)
+    monkeypatch.setenv("Q_DEFAULT_RUNTIME_TOTAL_FLOOR", "0.20")
+    monkeypatch.delenv("Q_DISABLE_GOVERNORS", raising=False)
+    monkeypatch.delenv("Q_ENABLE_UNCERTAINTY_GOV", raising=False)
+    raip.apply_performance_defaults()
+    assert os.environ.get("Q_RUNTIME_TOTAL_FLOOR") == "0.2"
+    assert "uncertainty_sizing" in os.environ.get("Q_DISABLE_GOVERNORS", "")
+
+
+def test_apply_performance_defaults_respects_uncertainty_opt_in(monkeypatch):
+    monkeypatch.setenv("Q_ENABLE_UNCERTAINTY_GOV", "1")
+    monkeypatch.setenv("Q_DISABLE_GOVERNORS", "quality_governor")
+    raip.apply_performance_defaults()
+    assert os.environ.get("Q_DISABLE_GOVERNORS") == "quality_governor"

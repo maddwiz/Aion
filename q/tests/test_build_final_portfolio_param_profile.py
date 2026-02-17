@@ -65,3 +65,18 @@ def test_apply_governor_strength_blends_with_identity():
     assert list(full_effect) == [0.7, 1.0, 1.2]
     assert stronger[0] < full_effect[0]
     assert stronger[2] > full_effect[2]
+
+
+def test_disabled_governors_merges_profile_and_env(monkeypatch):
+    monkeypatch.setattr(
+        bfp,
+        "_GOV_PROFILE",
+        {
+            "disable_governors": ["dream_coherence", "symbolic_governor"],
+        },
+    )
+    monkeypatch.setenv("Q_DISABLE_GOVERNORS", "uncertainty_sizing,symbolic_governor")
+    out = bfp._disabled_governors()
+    assert "dream_coherence" in out
+    assert "symbolic_governor" in out
+    assert "uncertainty_sizing" in out
