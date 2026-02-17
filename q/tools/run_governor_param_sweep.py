@@ -90,26 +90,74 @@ def _metrics() -> dict:
     }
 
 
+def _strict_oos_metrics() -> dict:
+    p = RUNS / "strict_oos_validation.json"
+    if not p.exists():
+        return {"sharpe": 0.0, "hit_rate": 0.0, "max_drawdown": 0.0, "n": 0}
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {"sharpe": 0.0, "hit_rate": 0.0, "max_drawdown": 0.0, "n": 0}
+    m = obj.get("metrics_oos_net", {}) if isinstance(obj, dict) else {}
+    if not isinstance(m, dict):
+        return {"sharpe": 0.0, "hit_rate": 0.0, "max_drawdown": 0.0, "n": 0}
+    return {
+        "sharpe": float(m.get("sharpe", 0.0)),
+        "hit_rate": float(m.get("hit_rate", 0.0)),
+        "max_drawdown": float(m.get("max_drawdown", 0.0)),
+        "n": int(m.get("n", 0)),
+    }
+
+
 def _objective(cur: dict, base: dict) -> tuple[float, dict]:
-    base_dd = max(1e-9, abs(float(base["max_drawdown"])))
-    cur_dd = abs(float(cur["max_drawdown"]))
+    cur_sh = float(cur.get("oos_sharpe", cur["sharpe"]))
+    base_sh = float(base.get("oos_sharpe", base["sharpe"]))
+    cur_hit = float(cur.get("oos_hit_rate", cur["hit_rate"]))
+    base_hit = float(base.get("oos_hit_rate", base["hit_rate"]))
+    cur_dd = abs(float(cur.get("oos_max_drawdown", cur["max_drawdown"])))
+    base_dd = max(1e-9, abs(float(base.get("oos_max_drawdown", base["max_drawdown"]))))
     dd_ratio = cur_dd / base_dd
-    hit_delta = float(cur["hit_rate"]) - float(base["hit_rate"])
+    hit_delta = cur_hit - base_hit
+    sharpe_delta = cur_sh - base_sh
     turn_ratio = float(cur["turnover_mean"]) / max(1e-9, float(base["turnover_mean"]))
 
-    # Sharpe-first objective with gentle risk penalties and hard vetoes.
+    min_oos_sharpe = float(np.clip(float(os.getenv("Q_SWEEP_MIN_OOS_SHARPE", "1.00")), -2.0, 10.0))
+    min_oos_hit = float(np.clip(float(os.getenv("Q_SWEEP_MIN_OOS_HIT", "0.49")), 0.0, 1.0))
+    max_oos_abs_mdd = float(np.clip(float(os.getenv("Q_SWEEP_MAX_OOS_ABS_MDD", "0.10")), 0.001, 2.0))
+    min_oos_n = int(np.clip(int(float(os.getenv("Q_SWEEP_MIN_OOS_N", "252"))), 1, 1000000))
+
+    # Strict-OOS-first objective with target-aware penalties and hard vetoes.
+    target_gap_sharpe = max(0.0, min_oos_sharpe - cur_sh)
+    target_gap_hit = max(0.0, min_oos_hit - cur_hit)
     penalty = 0.012 * max(0.0, dd_ratio - 1.0)
     penalty += 0.006 * max(0.0, turn_ratio - 2.0)
     penalty += 0.010 * max(0.0, -hit_delta)
-    score = float(cur["sharpe"]) - penalty
+    penalty += 0.65 * target_gap_sharpe
+    penalty += 0.40 * target_gap_hit
+    score = cur_sh - penalty
 
-    veto = dd_ratio > 2.0 or cur_dd > 0.22 or hit_delta < -0.03
+    oos_n = int(cur.get("oos_n", cur.get("n", 0)))
+    veto = (
+        dd_ratio > 2.5
+        or cur_dd > (1.75 * max_oos_abs_mdd)
+        or cur_hit < (min_oos_hit - 0.06)
+        or cur_sh < (min_oos_sharpe - 0.60)
+        or oos_n < min_oos_n
+    )
     if veto:
         score -= 1.0
     detail = {
+        "objective_sharpe": float(cur_sh),
+        "objective_hit_rate": float(cur_hit),
+        "objective_sharpe_delta": float(sharpe_delta),
         "dd_ratio": float(dd_ratio),
         "hit_delta": float(hit_delta),
         "turnover_ratio": float(turn_ratio),
+        "target_gap_sharpe": float(target_gap_sharpe),
+        "target_gap_hit_rate": float(target_gap_hit),
+        "target_max_abs_mdd": float(max_oos_abs_mdd),
+        "target_min_oos_n": int(min_oos_n),
+        "oos_n": int(oos_n),
         "penalty": float(penalty),
         "veto": bool(veto),
     }
@@ -132,6 +180,9 @@ def _profile_from_row(row: dict) -> dict:
         "regime_moe_strength": float(row.get("regime_moe_strength", 1.0)),
         "uncertainty_sizing_strength": float(row.get("uncertainty_sizing_strength", 1.0)),
         "vol_target_strength": float(row.get("vol_target_strength", 1.0)),
+        "hit_gate_strength": float(row.get("hit_gate_strength", 1.0)),
+        "hit_gate_threshold": float(row.get("hit_gate_threshold", 0.50)),
+        "signal_deadzone": float(row.get("signal_deadzone", 0.0)),
         "use_concentration_governor": bool(int(row["use_concentration_governor"])),
         "concentration_top1_cap": float(row["concentration_top1_cap"]),
         "concentration_top3_cap": float(row["concentration_top3_cap"]),
@@ -163,6 +214,9 @@ def _csv_write(rows: list[dict], outp: Path) -> None:
         "regime_moe_strength",
         "uncertainty_sizing_strength",
         "vol_target_strength",
+        "hit_gate_strength",
+        "hit_gate_threshold",
+        "signal_deadzone",
         "use_concentration_governor",
         "concentration_top1_cap",
         "concentration_top3_cap",
@@ -170,12 +224,23 @@ def _csv_write(rows: list[dict], outp: Path) -> None:
         "sharpe",
         "hit_rate",
         "max_drawdown",
+        "oos_sharpe",
+        "oos_hit_rate",
+        "oos_max_drawdown",
+        "oos_n",
         "turnover_mean",
         "gross_mean",
         "score",
+        "objective_sharpe",
+        "objective_hit_rate",
+        "objective_sharpe_delta",
         "dd_ratio",
         "hit_delta",
         "turnover_ratio",
+        "target_gap_sharpe",
+        "target_gap_hit_rate",
+        "target_max_abs_mdd",
+        "target_min_oos_n",
         "penalty",
         "veto",
     ]
@@ -202,6 +267,9 @@ def _env_from_params(params: dict) -> dict[str, str]:
         "Q_REGIME_MOE_STRENGTH": str(params.get("regime_moe_strength", 1.0)),
         "Q_UNCERTAINTY_SIZING_STRENGTH": str(params.get("uncertainty_sizing_strength", 1.0)),
         "Q_VOL_TARGET_STRENGTH": str(params.get("vol_target_strength", 1.0)),
+        "Q_HIT_GATE_STRENGTH": str(params.get("hit_gate_strength", 1.0)),
+        "Q_HIT_GATE_THRESHOLD": str(params.get("hit_gate_threshold", 0.50)),
+        "Q_SIGNAL_DEADZONE": str(params.get("signal_deadzone", 0.0)),
         "Q_USE_CONCENTRATION_GOV": str(params["use_concentration_governor"]),
         "Q_CONCENTRATION_TOP1_CAP": str(params["concentration_top1_cap"]),
         "Q_CONCENTRATION_TOP3_CAP": str(params["concentration_top3_cap"]),
@@ -211,7 +279,16 @@ def _env_from_params(params: dict) -> dict[str, str]:
 
 def _evaluate_candidate(params: dict, base: dict, rows: list[dict]) -> tuple[float, dict, dict]:
     _build_make_daily(_env_from_params(params))
-    m = _metrics()
+    _run_strict_oos(_env_from_params(params))
+    full = _metrics()
+    oos = _strict_oos_metrics()
+    m = {
+        **full,
+        "oos_sharpe": float(oos["sharpe"]),
+        "oos_hit_rate": float(oos["hit_rate"]),
+        "oos_max_drawdown": float(oos["max_drawdown"]),
+        "oos_n": int(oos["n"]),
+    }
     score, detail = _objective(m, base)
     row = _row_from_params(params, m, score, detail)
     rows.append(row)
@@ -243,12 +320,24 @@ def main() -> int:
     regime_moe_strengths = [0.0, 0.5, 1.0, 1.25]
     uncertainty_sizing_strengths = [0.5, 0.75, 1.00, 1.25]
     vol_target_strengths = [0.0, 0.5, 1.0, 1.25]
+    hit_gate_strengths = [0.0, 0.5, 1.0]
+    hit_gate_thresholds = [0.49, 0.52, 0.55]
+    signal_deadzones = [0.0, 0.0005, 0.0015]
 
     rows: list[dict] = []
     try:
         # Baseline under current profile.
         _build_make_daily()
-        base = _metrics()
+        _run_strict_oos()
+        full = _metrics()
+        oos = _strict_oos_metrics()
+        base = {
+            **full,
+            "oos_sharpe": float(oos["sharpe"]),
+            "oos_hit_rate": float(oos["hit_rate"]),
+            "oos_max_drawdown": float(oos["max_drawdown"]),
+            "oos_n": int(oos["n"]),
+        }
 
         best_score = -1e9
         best_row = None
@@ -270,6 +359,9 @@ def main() -> int:
                 "regime_moe_strength": 1.0,
                 "uncertainty_sizing_strength": 1.0,
                 "vol_target_strength": 1.0,
+                "hit_gate_strength": 1.0,
+                "hit_gate_threshold": 0.50,
+                "signal_deadzone": 0.0,
                 "use_concentration_governor": int(conc["use_concentration_governor"]),
                 "concentration_top1_cap": float(conc["concentration_top1_cap"]),
                 "concentration_top3_cap": float(conc["concentration_top3_cap"]),
@@ -300,6 +392,9 @@ def main() -> int:
                 ("regime_moe_strength", regime_moe_strengths),
                 ("uncertainty_sizing_strength", uncertainty_sizing_strengths),
                 ("vol_target_strength", vol_target_strengths),
+                ("hit_gate_strength", hit_gate_strengths),
+                ("hit_gate_threshold", hit_gate_thresholds),
+                ("signal_deadzone", signal_deadzones),
             ]
             for _pass in range(2):
                 improved = False
@@ -321,6 +416,9 @@ def main() -> int:
                             "regime_moe_strength": float(cur.get("regime_moe_strength", 1.0)),
                             "uncertainty_sizing_strength": float(cur.get("uncertainty_sizing_strength", 1.0)),
                             "vol_target_strength": float(cur.get("vol_target_strength", 1.0)),
+                            "hit_gate_strength": float(cur.get("hit_gate_strength", 1.0)),
+                            "hit_gate_threshold": float(cur.get("hit_gate_threshold", 0.50)),
+                            "signal_deadzone": float(cur.get("signal_deadzone", 0.0)),
                             "use_concentration_governor": int(cur["use_concentration_governor"]),
                             "concentration_top1_cap": float(cur["concentration_top1_cap"]),
                             "concentration_top3_cap": float(cur["concentration_top3_cap"]),
@@ -353,6 +451,9 @@ def main() -> int:
                 ("regime_moe_strength", 0.05, 0.0, 2.0),
                 ("uncertainty_sizing_strength", 0.05, 0.0, 2.0),
                 ("vol_target_strength", 0.05, 0.0, 2.0),
+                ("hit_gate_strength", 0.05, 0.0, 2.0),
+                ("hit_gate_threshold", 0.01, 0.35, 0.75),
+                ("signal_deadzone", 0.0004, 0.0, 0.020),
             ]
             for _pass in range(2):
                 improved = False
@@ -384,6 +485,9 @@ def main() -> int:
                             "regime_moe_strength": float(cur.get("regime_moe_strength", 1.0)),
                             "uncertainty_sizing_strength": float(cur.get("uncertainty_sizing_strength", 1.0)),
                             "vol_target_strength": float(cur.get("vol_target_strength", 1.0)),
+                            "hit_gate_strength": float(cur.get("hit_gate_strength", 1.0)),
+                            "hit_gate_threshold": float(cur.get("hit_gate_threshold", 0.50)),
+                            "signal_deadzone": float(cur.get("signal_deadzone", 0.0)),
                             "use_concentration_governor": int(cur["use_concentration_governor"]),
                             "concentration_top1_cap": float(cur["concentration_top1_cap"]),
                             "concentration_top3_cap": float(cur["concentration_top3_cap"]),
@@ -423,6 +527,9 @@ def main() -> int:
                 "regime_moe_strength": regime_moe_strengths,
                 "uncertainty_sizing_strength": uncertainty_sizing_strengths,
                 "vol_target_strength": vol_target_strengths,
+                "hit_gate_strength": hit_gate_strengths,
+                "hit_gate_threshold": hit_gate_thresholds,
+                "signal_deadzone": signal_deadzones,
                 "num_candidates": len(rows),
             },
         }
@@ -433,6 +540,7 @@ def main() -> int:
         _build_make_daily()
         _run_strict_oos()
         applied = _metrics()
+        applied_oos = _strict_oos_metrics()
 
         print(f"✅ Wrote {sweep_csv}")
         print(f"✅ Wrote {out_json}")
@@ -441,12 +549,18 @@ def main() -> int:
             f"Sharpe={base['sharpe']:.3f}",
             f"Hit={base['hit_rate']:.3f}",
             f"MaxDD={base['max_drawdown']:.3f}",
+            f"OOS_Sharpe={base['oos_sharpe']:.3f}",
+            f"OOS_Hit={base['oos_hit_rate']:.3f}",
+            f"OOS_MaxDD={base['oos_max_drawdown']:.3f}",
         )
         print(
             "Best:",
             f"Sharpe={best_row['sharpe']:.3f}",
             f"Hit={best_row['hit_rate']:.3f}",
             f"MaxDD={best_row['max_drawdown']:.3f}",
+            f"OOS_Sharpe={best_row['oos_sharpe']:.3f}",
+            f"OOS_Hit={best_row['oos_hit_rate']:.3f}",
+            f"OOS_MaxDD={best_row['oos_max_drawdown']:.3f}",
             f"Score={best_row['score']:.3f}",
         )
         print(
@@ -454,6 +568,9 @@ def main() -> int:
             f"Sharpe={applied['sharpe']:.3f}",
             f"Hit={applied['hit_rate']:.3f}",
             f"MaxDD={applied['max_drawdown']:.3f}",
+            f"OOS_Sharpe={applied_oos['sharpe']:.3f}",
+            f"OOS_Hit={applied_oos['hit_rate']:.3f}",
+            f"OOS_MaxDD={applied_oos['max_drawdown']:.3f}",
         )
         return 0
     finally:

@@ -26,6 +26,7 @@ TRACE_STEPS = [
     "low_vol_sleeve_blend",
     "turnover_governor",
     "meta_execution_gate",
+    "execution_hit_gate",
     "council_gate",
     "meta_mix_leverage",
     "meta_mix_reliability",
@@ -325,6 +326,81 @@ def compute_vol_target_scalars(
             sm[t] = alpha * raw[t] + (1.0 - alpha) * sm[t - 1]
     return np.clip(sm, lo, hi)
 
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    z = np.asarray(x, float)
+    z = np.clip(z, -50.0, 50.0)
+    return 1.0 / (1.0 + np.exp(-z))
+
+
+def compute_hit_gate_scalars(
+    hit_proxy: np.ndarray,
+    *,
+    threshold: float = 0.50,
+    floor: float = 0.35,
+    ceiling: float = 1.05,
+    slope: float = 14.0,
+) -> np.ndarray:
+    hp = np.clip(np.asarray(hit_proxy, float).ravel(), 0.0, 1.0)
+    thr = float(np.clip(float(threshold), 0.35, 0.75))
+    lo = float(np.clip(float(floor), 0.0, 1.0))
+    hi = float(np.clip(float(ceiling), lo, 1.5))
+    k = float(np.clip(float(slope), 1.0, 40.0))
+    raw = _sigmoid((hp - thr) * k)
+    out = lo + (hi - lo) * raw
+    return np.clip(out, lo, hi)
+
+
+def apply_signal_deadzone(
+    weights: np.ndarray,
+    *,
+    base_deadzone: float,
+    hit_proxy: np.ndarray | None = None,
+    hit_threshold: float = 0.50,
+    hit_sensitivity: float = 1.0,
+) -> tuple[np.ndarray, dict]:
+    w = np.asarray(weights, float).copy()
+    T = w.shape[0]
+    dz0 = float(np.clip(float(base_deadzone), 0.0, 0.10))
+    if T == 0 or dz0 <= 0.0:
+        return w, {
+            "enabled": False,
+            "base_deadzone": dz0,
+            "active_before": int(np.count_nonzero(np.abs(w) > 0.0)),
+            "active_after": int(np.count_nonzero(np.abs(w) > 0.0)),
+            "pruned_fraction": 0.0,
+        }
+
+    if hit_proxy is None:
+        dz = np.full(T, dz0, dtype=float)
+    else:
+        hp = np.clip(np.asarray(hit_proxy, float).ravel(), 0.0, 1.0)
+        if hp.size < T:
+            fill = float(hp[-1]) if hp.size else 0.5
+            pad = np.full(T - hp.size, fill, dtype=float)
+            hp = np.concatenate([hp, pad], axis=0)
+        hp = hp[:T]
+        hs = float(np.clip(float(hit_sensitivity), 0.0, 3.0))
+        weak = np.clip((float(hit_threshold) - hp) / 0.5, 0.0, 1.0)
+        dz = dz0 * (1.0 + hs * weak)
+
+    before = int(np.count_nonzero(np.abs(w) > 0.0))
+    mask = np.abs(w) < dz.reshape(-1, 1)
+    w[mask] = 0.0
+    after = int(np.count_nonzero(np.abs(w) > 0.0))
+    pruned = float((before - after) / max(1, before))
+    info = {
+        "enabled": True,
+        "base_deadzone": dz0,
+        "deadzone_mean": float(np.mean(dz)),
+        "deadzone_max": float(np.max(dz)),
+        "active_before": before,
+        "active_after": after,
+        "pruned_fraction": pruned,
+    }
+    return w, info
+
+
 def append_card(title, html):
     for name in ["report_all.html","report_best_plus.html","report_plus.html","report.html"]:
         f = ROOT/name
@@ -384,6 +460,55 @@ if __name__ == "__main__":
         1.0,
         0.0,
         2.0,
+    )
+    hit_gate_strength = _env_or_profile_float(
+        "Q_HIT_GATE_STRENGTH",
+        "hit_gate_strength",
+        1.0,
+        0.0,
+        2.0,
+    )
+    hit_gate_threshold = _env_or_profile_float(
+        "Q_HIT_GATE_THRESHOLD",
+        "hit_gate_threshold",
+        0.50,
+        0.35,
+        0.75,
+    )
+    hit_gate_floor = _env_or_profile_float(
+        "Q_HIT_GATE_FLOOR",
+        "hit_gate_floor",
+        0.35,
+        0.0,
+        1.0,
+    )
+    hit_gate_ceiling = _env_or_profile_float(
+        "Q_HIT_GATE_CEILING",
+        "hit_gate_ceiling",
+        1.05,
+        0.5,
+        1.5,
+    )
+    hit_gate_slope = _env_or_profile_float(
+        "Q_HIT_GATE_SLOPE",
+        "hit_gate_slope",
+        14.0,
+        1.0,
+        40.0,
+    )
+    signal_deadzone = _env_or_profile_float(
+        "Q_SIGNAL_DEADZONE",
+        "signal_deadzone",
+        0.0,
+        0.0,
+        0.10,
+    )
+    signal_deadzone_hit_sens = _env_or_profile_float(
+        "Q_SIGNAL_DEADZONE_HIT_SENS",
+        "signal_deadzone_hit_sens",
+        1.0,
+        0.0,
+        3.0,
     )
     meta_reliability_strength = _env_or_profile_float(
         "Q_META_RELIABILITY_STRENGTH",
@@ -533,6 +658,32 @@ if __name__ == "__main__":
         W[:L] = W[:L] * mg
         steps.append("meta_execution_gate")
         _trace_put("meta_execution_gate", mg.ravel())
+
+    # 6b) Hit-rate execution gate from calibrated confidence/probability.
+    hit_proxy, hit_src = None, None
+    for rel in [
+        "runs_plus/meta_execution_prob.csv",
+        "runs_plus/meta_mix_confidence_calibrated.csv",
+        "runs_plus/meta_mix_confidence_raw.csv",
+    ]:
+        hp = load_series(rel)
+        if hp is not None:
+            hit_proxy, hit_src = hp, rel
+            break
+    if _gov_enabled("execution_hit_gate") and hit_proxy is not None and hit_gate_strength > 0.0:
+        L = min(len(hit_proxy), W.shape[0])
+        hg_raw = compute_hit_gate_scalars(
+            hit_proxy[:L],
+            threshold=hit_gate_threshold,
+            floor=hit_gate_floor,
+            ceiling=hit_gate_ceiling,
+            slope=hit_gate_slope,
+        )
+        hg = _apply_governor_strength(hg_raw, hit_gate_strength, lo=0.0, hi=2.0).reshape(-1, 1)
+        W[:L] = W[:L] * hg
+        steps.append("execution_hit_gate")
+        steps.append(f"execution_hit_source={hit_src}")
+        _trace_put("execution_hit_gate", hg.ravel())
 
     # 7) Council disagreement gate (scalar per t) → scale exposure
     gate = load_series("runs_plus/disagreement_gate.csv")
@@ -803,6 +954,25 @@ if __name__ == "__main__":
             )
         )
 
+    # 28) Signal deadzone filter to drop micro-positions/noise.
+    deadzone_info = {
+        "enabled": False,
+        "base_deadzone": float(signal_deadzone),
+        "active_before": int(np.count_nonzero(np.abs(W) > 0.0)),
+        "active_after": int(np.count_nonzero(np.abs(W) > 0.0)),
+        "pruned_fraction": 0.0,
+    }
+    if _gov_enabled("signal_deadzone") and signal_deadzone > 0.0:
+        W, deadzone_info = apply_signal_deadzone(
+            W,
+            base_deadzone=signal_deadzone,
+            hit_proxy=hit_proxy,
+            hit_threshold=hit_gate_threshold,
+            hit_sensitivity=signal_deadzone_hit_sens,
+        )
+        steps.append("signal_deadzone")
+    (RUNS / "signal_deadzone_info.json").write_text(json.dumps(deadzone_info, indent=2))
+
     # Build governor trace artifact for auditability.
     for name in TRACE_STEPS:
         if name not in trace:
@@ -819,11 +989,11 @@ if __name__ == "__main__":
         comments="",
     )
 
-    # 27) Save final
+    # 29) Save final
     outp = RUNS/"portfolio_weights_final.csv"
     np.savetxt(outp, W, delimiter=",")
 
-    # 28) Small JSON breadcrumb
+    # 30) Small JSON breadcrumb
     (RUNS/"final_portfolio_info.json").write_text(
         json.dumps(
             {
@@ -839,6 +1009,13 @@ if __name__ == "__main__":
                     "rank_sleeve_blend": rank_sleeve_blend,
                     "low_vol_sleeve_blend": low_vol_sleeve_blend,
                     "meta_execution_gate_strength": meta_execution_gate_strength,
+                    "hit_gate_strength": hit_gate_strength,
+                    "hit_gate_threshold": hit_gate_threshold,
+                    "hit_gate_floor": hit_gate_floor,
+                    "hit_gate_ceiling": hit_gate_ceiling,
+                    "hit_gate_slope": hit_gate_slope,
+                    "signal_deadzone": signal_deadzone,
+                    "signal_deadzone_hit_sens": signal_deadzone_hit_sens,
                     "council_gate_strength": council_gate_strength,
                     "meta_mix_leverage_strength": meta_mix_leverage_strength,
                     "meta_reliability_strength": meta_reliability_strength,
@@ -883,12 +1060,13 @@ if __name__ == "__main__":
                 "runtime_total_scalar_mean": float(np.mean(trace_total)),
                 "runtime_total_scalar_min": float(np.min(trace_total)),
                 "runtime_total_scalar_max": float(np.max(trace_total)),
+                "signal_deadzone_info_file": str(RUNS / "signal_deadzone_info.json"),
             },
             indent=2,
         )
     )
 
-    # 29) Report card
+    # 31) Report card
     html = f"<p>Built <b>portfolio_weights_final.csv</b> (T={T}, N={N}). Steps: {', '.join(steps)}.</p>"
     append_card("Final Portfolio ✔", html)
 

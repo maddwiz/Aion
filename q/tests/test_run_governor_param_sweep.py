@@ -36,6 +36,9 @@ def test_profile_from_row_casts_types():
         "regime_moe_strength": 1.2,
         "uncertainty_sizing_strength": 0.85,
         "vol_target_strength": 0.7,
+        "hit_gate_strength": 0.6,
+        "hit_gate_threshold": 0.53,
+        "signal_deadzone": 0.0012,
         "use_concentration_governor": 1,
         "concentration_top1_cap": 0.18,
         "concentration_top3_cap": 0.42,
@@ -56,5 +59,35 @@ def test_profile_from_row_casts_types():
     assert out["regime_moe_strength"] == 1.2
     assert out["uncertainty_sizing_strength"] == 0.85
     assert out["vol_target_strength"] == 0.7
+    assert out["hit_gate_strength"] == 0.6
+    assert out["hit_gate_threshold"] == 0.53
+    assert out["signal_deadzone"] == 0.0012
     assert out["use_concentration_governor"] is True
     assert out["concentration_top1_cap"] == 0.18
+
+
+def test_objective_uses_oos_metrics_when_available():
+    base = {
+        "sharpe": 1.6,
+        "hit_rate": 0.55,
+        "max_drawdown": -0.04,
+        "turnover_mean": 0.02,
+        "oos_sharpe": 1.10,
+        "oos_hit_rate": 0.50,
+        "oos_max_drawdown": -0.05,
+        "oos_n": 300,
+    }
+    cur = {
+        "sharpe": 2.1,  # better in-sample
+        "hit_rate": 0.58,
+        "max_drawdown": -0.03,
+        "turnover_mean": 0.02,
+        "oos_sharpe": 0.85,  # worse OOS
+        "oos_hit_rate": 0.47,
+        "oos_max_drawdown": -0.07,
+        "oos_n": 300,
+    }
+    score, detail = rps._objective(cur, base)
+    assert detail["objective_sharpe"] == cur["oos_sharpe"]
+    assert detail["objective_hit_rate"] == cur["oos_hit_rate"]
+    assert score < cur["sharpe"]
