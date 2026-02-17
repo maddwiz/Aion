@@ -165,6 +165,7 @@ def test_apply_performance_defaults_applies_selected_runtime_knobs(monkeypatch, 
             '"enable_asset_class_diversification":true,'
             '"macro_proxy_strength":0.25,'
             '"credit_leadlag_strength":0.35,'
+            '"microstructure_strength":0.22,'
             '"capacity_impact_strength":0.15,'
             '"uncertainty_macro_shock_blend":0.1}'
         ),
@@ -178,12 +179,14 @@ def test_apply_performance_defaults_applies_selected_runtime_knobs(monkeypatch, 
     monkeypatch.delenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", raising=False)
     monkeypatch.delenv("Q_MACRO_PROXY_STRENGTH", raising=False)
     monkeypatch.delenv("Q_CREDIT_LEADLAG_STRENGTH", raising=False)
+    monkeypatch.delenv("Q_MICROSTRUCTURE_STRENGTH", raising=False)
     monkeypatch.delenv("Q_CAPACITY_IMPACT_STRENGTH", raising=False)
     monkeypatch.delenv("Q_UNCERTAINTY_MACRO_SHOCK_BLEND", raising=False)
     raip.apply_performance_defaults()
     assert os.environ.get("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION") == "1"
     assert os.environ.get("Q_MACRO_PROXY_STRENGTH") == "0.25"
     assert os.environ.get("Q_CREDIT_LEADLAG_STRENGTH") == "0.35"
+    assert os.environ.get("Q_MICROSTRUCTURE_STRENGTH") == "0.22"
     assert os.environ.get("Q_CAPACITY_IMPACT_STRENGTH") == "0.15"
     assert os.environ.get("Q_UNCERTAINTY_MACRO_SHOCK_BLEND") == "0.1"
 
