@@ -869,6 +869,18 @@ def _build_global_overlay(scored: pd.DataFrame) -> dict:
     }
 
 
+def _load_q_promotion_gate(runs_dir: Path) -> dict:
+    p = runs_dir / "q_promotion_gate.json"
+    obj = _load_json(p)
+    if not isinstance(obj, dict):
+        return {"present": False, "ok": True, "reason": "missing_q_promotion_gate", "source": str(p)}
+    out = dict(obj)
+    out["present"] = True
+    out.setdefault("source", str(p))
+    out["ok"] = bool(out.get("ok", False))
+    return out
+
+
 def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument("--wf", default=str(RUNS / "walk_forward_table_plus.csv"))
@@ -929,7 +941,31 @@ def main() -> int:
         min_health_score=float(args.min_health_score),
         max_health_age_hours=float(args.max_health_age_hours),
     )
+    pgate = _load_q_promotion_gate(RUNS)
+    require_pgate = str(os.getenv("Q_EXPORT_REQUIRE_PROMOTION_GATE", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    pgate_fail = bool(pgate.get("present", False)) and (not bool(pgate.get("ok", False)))
+    if require_pgate and (not bool(pgate.get("present", False))):
+        pgate_fail = True
+
+    if pgate_fail:
+        qgate["ok"] = False
+        issues = qgate.get("issues", [])
+        if not isinstance(issues, list):
+            issues = []
+        reasons = pgate.get("reasons", [])
+        if isinstance(reasons, list) and reasons:
+            issues.extend([f"promotion_gate:{str(x)}" for x in reasons])
+        else:
+            issues.append(str(pgate.get("reason", "promotion_gate_failed")))
+        qgate["issues"] = issues
     ctx = _runtime_context(RUNS)
+    if pgate_fail:
+        flags = ctx.get("risk_flags", [])
+        if not isinstance(flags, list):
+            flags = []
+        flags.append("q_promotion_fail")
+        ctx["risk_flags"] = _canonicalize_risk_flags(flags)
+    ctx["q_promotion_gate"] = pgate
     degrade = (not qgate["ok"]) and (not bool(args.allow_degraded))
     if degrade:
         scored = scored.iloc[0:0].copy()

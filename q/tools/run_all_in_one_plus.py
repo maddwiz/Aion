@@ -266,6 +266,15 @@ if __name__ == "__main__":
     # Assemble final portfolio weights from available layers
     ok, rc = run_script("tools/build_final_portfolio.py")
     if not ok and rc is not None: failures.append({"step": "tools/build_final_portfolio.py", "code": rc})
+    # Costed returns from final weights (single source for evaluation/sweeps).
+    ok, rc = run_script("tools/make_daily_from_weights.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_daily_from_weights.py", "code": rc})
+    # Strict holdout OOS validation from costed returns.
+    ok, rc = run_script("tools/run_strict_oos_validation.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_strict_oos_validation.py", "code": rc})
+    # Promotion gate artifact for AION overlay safety.
+    ok, rc = run_script("tools/run_q_promotion_gate.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_q_promotion_gate.py", "code": rc})
     # Apply execution constraints for live realism
     ok, rc = run_script("tools/run_execution_constraints.py", ["--replace-final"])
     if not ok and rc is not None: failures.append({"step": "tools/run_execution_constraints.py", "code": rc})
@@ -281,6 +290,7 @@ if __name__ == "__main__":
     ok, rc = run_script("tools/run_health_alerts.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_health_alerts.py", "code": rc})
     # Export Q overlay pack for AION consumption (safe degraded mode if needed)
+    os.environ.setdefault("Q_EXPORT_REQUIRE_PROMOTION_GATE", "1")
     export_args = []
     mirror_json = str(os.getenv("Q_EXPORT_MIRROR_JSON", "")).strip()
     if not mirror_json:

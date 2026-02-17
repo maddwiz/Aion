@@ -53,6 +53,13 @@ def _build_make_daily(env_overrides: dict[str, str] | None = None) -> None:
     _run([PYTHON, str(ROOT / "tools" / "make_daily_from_weights.py")], env)
 
 
+def _run_strict_oos(env_overrides: dict[str, str] | None = None) -> None:
+    env = os.environ.copy()
+    if env_overrides:
+        env.update({k: str(v) for k, v in env_overrides.items()})
+    _run([PYTHON, str(ROOT / "tools" / "run_strict_oos_validation.py")], env)
+
+
 def _metrics() -> dict:
     rp = RUNS / "daily_returns.csv"
     wp = RUNS / "portfolio_weights_final.csv"
@@ -404,6 +411,7 @@ def main() -> int:
 
         # Apply chosen profile for downstream runs.
         _build_make_daily()
+        _run_strict_oos()
         applied = _metrics()
 
         print(f"✅ Wrote {sweep_csv}")
