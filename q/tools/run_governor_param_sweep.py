@@ -130,6 +130,7 @@ def _profile_from_row(row: dict) -> dict:
         "quality_governor_strength": float(row.get("quality_governor_strength", 1.0)),
         "regime_moe_strength": float(row.get("regime_moe_strength", 1.0)),
         "uncertainty_sizing_strength": float(row.get("uncertainty_sizing_strength", 1.0)),
+        "vol_target_strength": float(row.get("vol_target_strength", 1.0)),
         "use_concentration_governor": bool(int(row["use_concentration_governor"])),
         "concentration_top1_cap": float(row["concentration_top1_cap"]),
         "concentration_top3_cap": float(row["concentration_top3_cap"]),
@@ -159,6 +160,7 @@ def _csv_write(rows: list[dict], outp: Path) -> None:
         "quality_governor_strength",
         "regime_moe_strength",
         "uncertainty_sizing_strength",
+        "vol_target_strength",
         "use_concentration_governor",
         "concentration_top1_cap",
         "concentration_top3_cap",
@@ -196,6 +198,7 @@ def _env_from_params(params: dict) -> dict[str, str]:
         "Q_QUALITY_GOVERNOR_STRENGTH": str(params.get("quality_governor_strength", 1.0)),
         "Q_REGIME_MOE_STRENGTH": str(params.get("regime_moe_strength", 1.0)),
         "Q_UNCERTAINTY_SIZING_STRENGTH": str(params.get("uncertainty_sizing_strength", 1.0)),
+        "Q_VOL_TARGET_STRENGTH": str(params.get("vol_target_strength", 1.0)),
         "Q_USE_CONCENTRATION_GOV": str(params["use_concentration_governor"]),
         "Q_CONCENTRATION_TOP1_CAP": str(params["concentration_top1_cap"]),
         "Q_CONCENTRATION_TOP3_CAP": str(params["concentration_top3_cap"]),
@@ -235,6 +238,7 @@ def main() -> int:
     rank_sleeve_blends = [0.00, 0.05, 0.10]
     regime_moe_strengths = [0.0, 0.5, 1.0, 1.25]
     uncertainty_sizing_strengths = [0.5, 0.75, 1.00, 1.25]
+    vol_target_strengths = [0.0, 0.5, 1.0, 1.25]
 
     rows: list[dict] = []
     try:
@@ -260,6 +264,7 @@ def main() -> int:
                 "quality_governor_strength": 1.0,
                 "regime_moe_strength": 1.0,
                 "uncertainty_sizing_strength": 1.0,
+                "vol_target_strength": 1.0,
                 "use_concentration_governor": int(conc["use_concentration_governor"]),
                 "concentration_top1_cap": float(conc["concentration_top1_cap"]),
                 "concentration_top3_cap": float(conc["concentration_top3_cap"]),
@@ -288,6 +293,7 @@ def main() -> int:
                 ("rank_sleeve_blend", rank_sleeve_blends),
                 ("regime_moe_strength", regime_moe_strengths),
                 ("uncertainty_sizing_strength", uncertainty_sizing_strengths),
+                ("vol_target_strength", vol_target_strengths),
             ]
             for _pass in range(2):
                 improved = False
@@ -307,6 +313,7 @@ def main() -> int:
                             "quality_governor_strength": float(cur["quality_governor_strength"]),
                             "regime_moe_strength": float(cur.get("regime_moe_strength", 1.0)),
                             "uncertainty_sizing_strength": float(cur.get("uncertainty_sizing_strength", 1.0)),
+                            "vol_target_strength": float(cur.get("vol_target_strength", 1.0)),
                             "use_concentration_governor": int(cur["use_concentration_governor"]),
                             "concentration_top1_cap": float(cur["concentration_top1_cap"]),
                             "concentration_top3_cap": float(cur["concentration_top3_cap"]),
@@ -337,6 +344,7 @@ def main() -> int:
                 ("quality_governor_strength", 0.05, 0.8, 1.4),
                 ("regime_moe_strength", 0.05, 0.0, 2.0),
                 ("uncertainty_sizing_strength", 0.05, 0.0, 2.0),
+                ("vol_target_strength", 0.05, 0.0, 2.0),
             ]
             for _pass in range(2):
                 improved = False
@@ -366,6 +374,7 @@ def main() -> int:
                             "quality_governor_strength": float(cur["quality_governor_strength"]),
                             "regime_moe_strength": float(cur.get("regime_moe_strength", 1.0)),
                             "uncertainty_sizing_strength": float(cur.get("uncertainty_sizing_strength", 1.0)),
+                            "vol_target_strength": float(cur.get("vol_target_strength", 1.0)),
                             "use_concentration_governor": int(cur["use_concentration_governor"]),
                             "concentration_top1_cap": float(cur["concentration_top1_cap"]),
                             "concentration_top3_cap": float(cur["concentration_top3_cap"]),
@@ -403,6 +412,7 @@ def main() -> int:
                 "quality_governor_strength": quality_governor_strengths,
                 "regime_moe_strength": regime_moe_strengths,
                 "uncertainty_sizing_strength": uncertainty_sizing_strengths,
+                "vol_target_strength": vol_target_strengths,
                 "num_candidates": len(rows),
             },
         }

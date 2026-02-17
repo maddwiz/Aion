@@ -44,6 +44,7 @@ TRACE_STEPS = [
     "novaspine_context_boost",
     "novaspine_hive_boost",
     "shock_mask_guard",
+    "vol_target",
     "runtime_floor",
 ]
 
@@ -279,6 +280,50 @@ def first_mat(paths):
         if a is not None: return a, rel
     return None, None
 
+
+def compute_vol_target_scalars(
+    weights: np.ndarray,
+    asset_returns: np.ndarray,
+    *,
+    target_annual_vol: float = 0.10,
+    lookback: int = 63,
+    min_scalar: float = 0.40,
+    max_scalar: float = 1.80,
+    smooth_alpha: float = 0.20,
+) -> np.ndarray:
+    w = np.asarray(weights, float)
+    a = np.asarray(asset_returns, float)
+    T = min(w.shape[0], a.shape[0])
+    if T <= 0:
+        return np.ones(0, dtype=float)
+    r = np.sum(w[:T] * a[:T], axis=1)
+    lb = int(np.clip(int(lookback), 2, max(2, T)))
+    tgt = float(np.clip(float(target_annual_vol), 0.01, 2.0))
+    lo = float(np.clip(float(min_scalar), 0.01, 5.0))
+    hi = float(np.clip(float(max_scalar), lo, 5.0))
+    alpha = float(np.clip(float(smooth_alpha), 0.0, 1.0))
+
+    raw = np.ones(T, dtype=float)
+    for t in range(T):
+        i0 = max(0, t - lb + 1)
+        seg = r[i0 : t + 1]
+        vol_d = float(np.std(seg)) if seg.size else 0.0
+        vol_a = vol_d * np.sqrt(252.0)
+        if vol_a > 1e-9:
+            raw[t] = tgt / vol_a
+        else:
+            raw[t] = 1.0
+    raw = np.clip(raw, lo, hi)
+
+    if alpha <= 0.0:
+        sm = raw
+    else:
+        sm = np.zeros(T, dtype=float)
+        sm[0] = raw[0]
+        for t in range(1, T):
+            sm[t] = alpha * raw[t] + (1.0 - alpha) * sm[t - 1]
+    return np.clip(sm, lo, hi)
+
 def append_card(title, html):
     for name in ["report_all.html","report_best_plus.html","report_plus.html","report.html"]:
         f = ROOT/name
@@ -380,6 +425,48 @@ if __name__ == "__main__":
         1.0,
         0.0,
         2.0,
+    )
+    vol_target_strength = _env_or_profile_float(
+        "Q_VOL_TARGET_STRENGTH",
+        "vol_target_strength",
+        1.0,
+        0.0,
+        2.0,
+    )
+    vol_target_annual = _env_or_profile_float(
+        "Q_VOL_TARGET_ANNUAL",
+        "vol_target_annual",
+        0.10,
+        0.01,
+        1.00,
+    )
+    vol_target_lookback = _env_or_profile_int(
+        "Q_VOL_TARGET_LOOKBACK",
+        "vol_target_lookback",
+        63,
+        5,
+        756,
+    )
+    vol_target_min_scalar = _env_or_profile_float(
+        "Q_VOL_TARGET_MIN_SCALAR",
+        "vol_target_min_scalar",
+        0.40,
+        0.01,
+        5.0,
+    )
+    vol_target_max_scalar = _env_or_profile_float(
+        "Q_VOL_TARGET_MAX_SCALAR",
+        "vol_target_max_scalar",
+        1.80,
+        0.01,
+        5.0,
+    )
+    vol_target_smooth_alpha = _env_or_profile_float(
+        "Q_VOL_TARGET_SMOOTH_ALPHA",
+        "vol_target_smooth_alpha",
+        0.20,
+        0.0,
+        1.0,
     )
 
     # 2) Cross-sectional rank sleeve blend.
@@ -625,7 +712,43 @@ if __name__ == "__main__":
         steps.append("shock_mask_guard")
         _trace_put("shock_mask_guard", sc.ravel())
 
-    # 25) Runtime floor guard: avoid excessive exposure collapse from stacked governors.
+    # 25) Explicit portfolio volatility targeting (global scalar).
+    if _gov_enabled("vol_target") and vol_target_strength > 0.0:
+        Aret = load_mat("runs_plus/asset_returns.csv")
+        if Aret is not None and Aret.shape[1] == W.shape[1]:
+            scalars_raw = compute_vol_target_scalars(
+                W,
+                Aret,
+                target_annual_vol=vol_target_annual,
+                lookback=vol_target_lookback,
+                min_scalar=vol_target_min_scalar,
+                max_scalar=vol_target_max_scalar,
+                smooth_alpha=vol_target_smooth_alpha,
+            )
+            L = min(len(scalars_raw), W.shape[0])
+            sv = _apply_governor_strength(scalars_raw[:L], vol_target_strength, lo=0.0, hi=3.0).reshape(-1, 1)
+            W[:L] = W[:L] * sv
+            steps.append("vol_target")
+            _trace_put("vol_target", sv.ravel())
+            (RUNS / "vol_target_info.json").write_text(
+                json.dumps(
+                    {
+                        "enabled": True,
+                        "target_annual_vol": float(vol_target_annual),
+                        "lookback": int(vol_target_lookback),
+                        "min_scalar": float(vol_target_min_scalar),
+                        "max_scalar": float(vol_target_max_scalar),
+                        "smooth_alpha": float(vol_target_smooth_alpha),
+                        "strength": float(vol_target_strength),
+                        "scalar_mean": float(np.mean(sv)),
+                        "scalar_min": float(np.min(sv)),
+                        "scalar_max": float(np.max(sv)),
+                    },
+                    indent=2,
+                )
+            )
+
+    # 26) Runtime floor guard: avoid excessive exposure collapse from stacked governors.
     runtime_floor = _runtime_total_floor_default()
     if _gov_enabled("runtime_floor") and runtime_floor > 0.0:
         active_keys = [k for k in TRACE_STEPS if (k in trace and k != "runtime_floor")]
@@ -640,7 +763,7 @@ if __name__ == "__main__":
                 steps.append("runtime_floor")
             _trace_put("runtime_floor", adj)
 
-    # 26) Concentration governor (top1/top3 + HHI caps).
+    # 27) Concentration governor (top1/top3 + HHI caps).
     use_conc = _env_or_profile_bool("Q_USE_CONCENTRATION_GOV", "use_concentration_governor", True)
     conc_top1 = _env_or_profile_float("Q_CONCENTRATION_TOP1_CAP", "concentration_top1_cap", 0.18, 0.01, 1.0)
     conc_top3 = _env_or_profile_float("Q_CONCENTRATION_TOP3_CAP", "concentration_top3_cap", 0.42, 0.01, 1.0)
@@ -707,6 +830,12 @@ if __name__ == "__main__":
                     "quality_governor_strength": quality_governor_strength,
                     "regime_moe_strength": regime_moe_strength,
                     "uncertainty_sizing_strength": uncertainty_sizing_strength,
+                    "vol_target_strength": vol_target_strength,
+                    "vol_target_annual": vol_target_annual,
+                    "vol_target_lookback": vol_target_lookback,
+                    "vol_target_min_scalar": vol_target_min_scalar,
+                    "vol_target_max_scalar": vol_target_max_scalar,
+                    "vol_target_smooth_alpha": vol_target_smooth_alpha,
                     "use_concentration_governor": bool(use_conc),
                     "concentration_top1_cap": conc_top1,
                     "concentration_top3_cap": conc_top3,

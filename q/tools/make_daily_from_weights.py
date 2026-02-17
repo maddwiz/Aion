@@ -31,9 +31,13 @@ def build_costed_daily_returns(
     W: np.ndarray,
     A: np.ndarray,
     *,
-    cost_bps: float,
+    base_bps: float,
+    vol_scaled_bps: float = 0.0,
+    vol_lookback: int = 20,
+    vol_ref_daily: float = 0.0063,
+    half_turnover: bool = True,
     fixed_daily_fee: float = 0.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     w = np.asarray(W, float)
     a = np.asarray(A, float)
     T = min(w.shape[0], a.shape[0])
@@ -43,11 +47,25 @@ def build_costed_daily_returns(
     turnover = np.zeros(T, dtype=float)
     if T > 1:
         turnover[1:] = np.sum(np.abs(np.diff(w, axis=0)), axis=1)
-    var_cost = np.clip(float(cost_bps), 0.0, 10_000.0) / 10000.0 * turnover
+    if bool(half_turnover):
+        turnover = 0.5 * turnover
+
+    # Rolling realized volatility (daily) for volatility-scaled slippage.
+    vlook = int(np.clip(int(vol_lookback), 2, max(2, T)))
+    vol = np.zeros(T, dtype=float)
+    for t in range(T):
+        lo = max(0, t - vlook + 1)
+        seg = gross[lo : t + 1]
+        vol[t] = float(np.std(seg)) if seg.size else 0.0
+    ref = float(max(1e-6, vol_ref_daily))
+    vol_ratio = np.clip(vol / ref, 0.0, 6.0)
+    eff_bps = np.clip(float(base_bps), 0.0, 10_000.0) + np.clip(float(vol_scaled_bps), 0.0, 10_000.0) * vol_ratio
+
+    var_cost = (eff_bps / 10000.0) * turnover
     fee = np.full(T, float(max(0.0, fixed_daily_fee)), dtype=float)
     cost = var_cost + fee
     net = gross - cost
-    return net, gross, cost
+    return net, gross, cost, turnover, eff_bps
 
 if __name__ == "__main__":
     A = load_mat("runs_plus/asset_returns.csv")
@@ -77,27 +95,49 @@ if __name__ == "__main__":
         print(f"(!) Col mismatch: asset_returns N={A.shape[1]} vs weights N={W.shape[1]}.")
         raise SystemExit(0)
 
-    cost_bps = float(np.clip(float(os.getenv("Q_COST_BPS", "10.0")), 0.0, 100.0))
+    # Backward-compatible legacy knob.
+    legacy_bps = str(os.getenv("Q_COST_BPS", "")).strip()
+    if legacy_bps and (not str(os.getenv("Q_COST_BASE_BPS", "")).strip()):
+        base_bps = float(np.clip(float(legacy_bps), 0.0, 100.0))
+    else:
+        base_bps = float(np.clip(float(os.getenv("Q_COST_BASE_BPS", "10.0")), 0.0, 100.0))
+    vol_scaled_bps = float(np.clip(float(os.getenv("Q_COST_VOL_SCALED_BPS", "0.0")), 0.0, 100.0))
+    vol_lookback = int(np.clip(int(float(os.getenv("Q_COST_VOL_LOOKBACK", "20"))), 2, 252))
+    vol_ref_daily = float(np.clip(float(os.getenv("Q_COST_VOL_REF_DAILY", "0.0063")), 1e-5, 0.25))
+    half_turnover = str(os.getenv("Q_COST_HALF_TURNOVER", "1")).strip().lower() in {"1", "true", "yes", "on"}
     fixed_daily_fee = float(np.clip(float(os.getenv("Q_FIXED_DAILY_FEE", "0.0")), 0.0, 1.0))
-    net, gross, cost = build_costed_daily_returns(
+    net, gross, cost, turnover, eff_bps = build_costed_daily_returns(
         W[:T],
         A[:T],
-        cost_bps=cost_bps,
+        base_bps=base_bps,
+        vol_scaled_bps=vol_scaled_bps,
+        vol_lookback=vol_lookback,
+        vol_ref_daily=vol_ref_daily,
+        half_turnover=half_turnover,
         fixed_daily_fee=fixed_daily_fee,
     )
     np.savetxt(RUNS/"daily_returns.csv", net, delimiter=",")
     np.savetxt(RUNS/"daily_returns_gross.csv", gross, delimiter=",")
     np.savetxt(RUNS/"daily_costs.csv", cost, delimiter=",")
+    np.savetxt(RUNS/"daily_turnover.csv", turnover, delimiter=",")
+    np.savetxt(RUNS/"daily_effective_cost_bps.csv", eff_bps, delimiter=",")
     (RUNS / "daily_costs_info.json").write_text(
         json.dumps(
             {
-                "cost_bps": float(cost_bps),
+                "cost_base_bps": float(base_bps),
+                "cost_vol_scaled_bps": float(vol_scaled_bps),
+                "cost_vol_lookback": int(vol_lookback),
+                "cost_vol_ref_daily": float(vol_ref_daily),
+                "cost_half_turnover": bool(half_turnover),
                 "fixed_daily_fee": float(fixed_daily_fee),
                 "rows": int(T),
                 "mean_cost_daily": float(np.mean(cost)) if T else 0.0,
                 "ann_cost_estimate": float(np.mean(cost) * 252.0) if T else 0.0,
                 "mean_gross_daily": float(np.mean(gross)) if T else 0.0,
                 "mean_net_daily": float(np.mean(net)) if T else 0.0,
+                "mean_turnover": float(np.mean(turnover)) if T else 0.0,
+                "mean_effective_cost_bps": float(np.mean(eff_bps)) if T else 0.0,
+                "max_effective_cost_bps": float(np.max(eff_bps)) if T else 0.0,
             },
             indent=2,
         ),
@@ -107,5 +147,5 @@ if __name__ == "__main__":
         print(f"(!) Clipped {clip_events} extreme asset-return values with |r|>{clip_abs:.3f}")
     print(
         f"✅ Wrote runs_plus/daily_returns.csv (T={T}) from weights='{src}' "
-        f"[cost_bps={cost_bps:.2f}, fixed_daily_fee={fixed_daily_fee:.5f}]"
+        f"[base_bps={base_bps:.2f}, vol_scaled_bps={vol_scaled_bps:.2f}, fixed_daily_fee={fixed_daily_fee:.5f}]"
     )

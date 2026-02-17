@@ -51,6 +51,7 @@ TRACE_GOVS = [
     "novaspine_context_boost",
     "novaspine_hive_boost",
     "shock_mask_guard",
+    "vol_target",
     "runtime_floor",
 ]
 

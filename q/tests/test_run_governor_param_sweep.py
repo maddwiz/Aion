@@ -34,6 +34,7 @@ def test_profile_from_row_casts_types():
         "quality_governor_strength": 1.05,
         "regime_moe_strength": 1.2,
         "uncertainty_sizing_strength": 0.85,
+        "vol_target_strength": 0.7,
         "use_concentration_governor": 1,
         "concentration_top1_cap": 0.18,
         "concentration_top3_cap": 0.42,
@@ -52,5 +53,6 @@ def test_profile_from_row_casts_types():
     assert out["quality_governor_strength"] == 1.05
     assert out["regime_moe_strength"] == 1.2
     assert out["uncertainty_sizing_strength"] == 0.85
+    assert out["vol_target_strength"] == 0.7
     assert out["use_concentration_governor"] is True
     assert out["concentration_top1_cap"] == 0.18
