@@ -102,6 +102,13 @@ def apply_profile_env_defaults():
         "meta_exec_min_prob": "Q_META_EXEC_MIN_PROB",
         "meta_exec_floor": "Q_META_EXEC_FLOOR",
         "meta_exec_slope": "Q_META_EXEC_SLOPE",
+        "runtime_total_floor": "Q_RUNTIME_TOTAL_FLOOR",
+        "vol_target_strength": "Q_VOL_TARGET_STRENGTH",
+        "vol_target_annual": "Q_VOL_TARGET_ANNUAL",
+        "vol_target_lookback": "Q_VOL_TARGET_LOOKBACK",
+        "vol_target_min_scalar": "Q_VOL_TARGET_MIN_SCALAR",
+        "vol_target_max_scalar": "Q_VOL_TARGET_MAX_SCALAR",
+        "vol_target_smooth_alpha": "Q_VOL_TARGET_SMOOTH_ALPHA",
         "cash_yield_annual": "Q_CASH_YIELD_ANNUAL",
         "cash_exposure_target": "Q_CASH_EXPOSURE_TARGET",
     }

@@ -135,6 +135,14 @@ def _score_candidate(metrics: dict) -> tuple[float, dict]:
     return float(score), detail
 
 
+def _meets_targets(metrics: dict, *, target_hit: float, target_mdd: float, target_n: int) -> bool:
+    return (
+        float(metrics.get("hit_rate", 0.0)) >= float(target_hit)
+        and abs(float(metrics.get("max_drawdown", 0.0))) <= float(target_mdd)
+        and int(metrics.get("n", 0)) >= int(target_n)
+    )
+
+
 def _local_grid(center: float, lo: float, hi: float, step: float) -> list[float]:
     vals = [
         float(np.clip(center - 2.0 * step, lo, hi)),
@@ -163,6 +171,13 @@ def _params_from_profile() -> dict:
         "meta_exec_min_prob": float(p.get("meta_exec_min_prob", 0.53)),
         "meta_exec_floor": float(p.get("meta_exec_floor", 0.35)),
         "meta_exec_slope": float(p.get("meta_exec_slope", 10.0)),
+        "runtime_total_floor": float(p.get("runtime_total_floor", 0.10)),
+        "vol_target_strength": float(p.get("vol_target_strength", 1.0)),
+        "vol_target_annual": float(p.get("vol_target_annual", 0.10)),
+        "vol_target_lookback": int(float(p.get("vol_target_lookback", 63))),
+        "vol_target_min_scalar": float(p.get("vol_target_min_scalar", 0.40)),
+        "vol_target_max_scalar": float(p.get("vol_target_max_scalar", 1.80)),
+        "vol_target_smooth_alpha": float(p.get("vol_target_smooth_alpha", 0.20)),
         "cash_yield_annual": float(p.get("cash_yield_annual", 0.0)),
         "cash_exposure_target": float(p.get("cash_exposure_target", 1.0)),
     }
@@ -181,6 +196,13 @@ def _env_from_params(params: dict) -> dict[str, str]:
         "Q_META_EXEC_MIN_PROB": str(params["meta_exec_min_prob"]),
         "Q_META_EXEC_FLOOR": str(params["meta_exec_floor"]),
         "Q_META_EXEC_SLOPE": str(params["meta_exec_slope"]),
+        "Q_RUNTIME_TOTAL_FLOOR": str(params["runtime_total_floor"]),
+        "Q_VOL_TARGET_STRENGTH": str(params["vol_target_strength"]),
+        "Q_VOL_TARGET_ANNUAL": str(params["vol_target_annual"]),
+        "Q_VOL_TARGET_LOOKBACK": str(params["vol_target_lookback"]),
+        "Q_VOL_TARGET_MIN_SCALAR": str(params["vol_target_min_scalar"]),
+        "Q_VOL_TARGET_MAX_SCALAR": str(params["vol_target_max_scalar"]),
+        "Q_VOL_TARGET_SMOOTH_ALPHA": str(params["vol_target_smooth_alpha"]),
         "Q_CASH_YIELD_ANNUAL": str(params["cash_yield_annual"]),
         "Q_CASH_EXPOSURE_TARGET": str(params["cash_exposure_target"]),
     }
@@ -193,6 +215,11 @@ def _evaluate(params: dict, rows: list[dict]) -> tuple[float, dict]:
     score, detail = _score_candidate(oos)
     row = {**params, **oos, **detail, "score": float(score)}
     rows.append(row)
+    if (len(rows) % 25) == 0:
+        print(
+            f"… evaluated {len(rows)} candidates | score={float(score):.3f} "
+            f"sh={float(oos.get('sharpe', 0.0)):.3f} hit={float(oos.get('hit_rate', 0.0)):.3f}"
+        )
     return score, row
 
 
@@ -209,6 +236,13 @@ def _write_csv(rows: list[dict], outp: Path) -> None:
         "meta_exec_min_prob",
         "meta_exec_floor",
         "meta_exec_slope",
+        "runtime_total_floor",
+        "vol_target_strength",
+        "vol_target_annual",
+        "vol_target_lookback",
+        "vol_target_min_scalar",
+        "vol_target_max_scalar",
+        "vol_target_smooth_alpha",
         "cash_yield_annual",
         "cash_exposure_target",
         "source",
@@ -252,6 +286,13 @@ def _merge_profile(best: dict) -> None:
             "meta_exec_min_prob": float(best["meta_exec_min_prob"]),
             "meta_exec_floor": float(best["meta_exec_floor"]),
             "meta_exec_slope": float(best["meta_exec_slope"]),
+            "runtime_total_floor": float(best["runtime_total_floor"]),
+            "vol_target_strength": float(best["vol_target_strength"]),
+            "vol_target_annual": float(best["vol_target_annual"]),
+            "vol_target_lookback": int(best["vol_target_lookback"]),
+            "vol_target_min_scalar": float(best["vol_target_min_scalar"]),
+            "vol_target_max_scalar": float(best["vol_target_max_scalar"]),
+            "vol_target_smooth_alpha": float(best["vol_target_smooth_alpha"]),
             "cash_yield_annual": float(best["cash_yield_annual"]),
             "cash_exposure_target": float(best["cash_exposure_target"]),
         }
@@ -271,6 +312,13 @@ def _merge_profile(best: dict) -> None:
             "meta_exec_min_prob": float(best["meta_exec_min_prob"]),
             "meta_exec_floor": float(best["meta_exec_floor"]),
             "meta_exec_slope": float(best["meta_exec_slope"]),
+            "runtime_total_floor": float(best["runtime_total_floor"]),
+            "vol_target_strength": float(best["vol_target_strength"]),
+            "vol_target_annual": float(best["vol_target_annual"]),
+            "vol_target_lookback": int(best["vol_target_lookback"]),
+            "vol_target_min_scalar": float(best["vol_target_min_scalar"]),
+            "vol_target_max_scalar": float(best["vol_target_max_scalar"]),
+            "vol_target_smooth_alpha": float(best["vol_target_smooth_alpha"]),
             "cash_yield_annual": float(best["cash_yield_annual"]),
             "cash_exposure_target": float(best["cash_exposure_target"]),
         },
@@ -314,6 +362,13 @@ def main() -> int:
             "meta_exec_min_prob": [0.48, 0.51, 0.54, 0.57],
             "meta_exec_floor": [0.20, 0.30, 0.35],
             "meta_exec_slope": [8.0, 12.0, 16.0],
+            "runtime_total_floor": [0.10, 0.14, 0.18, 0.22, 0.26],
+            "vol_target_strength": [0.50, 0.75, 1.00, 1.25],
+            "vol_target_annual": [0.08, 0.10, 0.12],
+            "vol_target_lookback": [42, 63, 84],
+            "vol_target_min_scalar": [0.30, 0.40, 0.50],
+            "vol_target_max_scalar": [1.40, 1.80, 2.20],
+            "vol_target_smooth_alpha": [0.10, 0.20, 0.30],
             "cash_yield_annual": [0.0, 0.01, 0.02, 0.03, 0.04, 0.05],
             "cash_exposure_target": [1.0],
         }
@@ -332,6 +387,13 @@ def main() -> int:
                 round(float(p["meta_exec_min_prob"]), 6),
                 round(float(p["meta_exec_floor"]), 6),
                 round(float(p["meta_exec_slope"]), 6),
+                round(float(p["runtime_total_floor"]), 6),
+                round(float(p["vol_target_strength"]), 6),
+                round(float(p["vol_target_annual"]), 6),
+                int(p["vol_target_lookback"]),
+                round(float(p["vol_target_min_scalar"]), 6),
+                round(float(p["vol_target_max_scalar"]), 6),
+                round(float(p["vol_target_smooth_alpha"]), 6),
                 round(float(p["cash_yield_annual"]), 6),
                 round(float(p["cash_exposure_target"]), 6),
             )
@@ -371,6 +433,15 @@ def main() -> int:
             cand["meta_exec_min_prob"] = float(rng.uniform(0.46, 0.58))
             cand["meta_exec_floor"] = float(rng.uniform(0.18, 0.40))
             cand["meta_exec_slope"] = float(rng.uniform(6.0, 18.0))
+            cand["runtime_total_floor"] = float(rng.uniform(0.08, 0.30))
+            cand["vol_target_strength"] = float(rng.uniform(0.35, 1.35))
+            cand["vol_target_annual"] = float(rng.uniform(0.07, 0.14))
+            cand["vol_target_lookback"] = int(rng.choice([21, 42, 63, 84, 126]))
+            cand["vol_target_min_scalar"] = float(rng.uniform(0.25, 0.70))
+            cand["vol_target_max_scalar"] = float(rng.uniform(1.25, 2.40))
+            if cand["vol_target_max_scalar"] < cand["vol_target_min_scalar"] + 0.15:
+                cand["vol_target_max_scalar"] = cand["vol_target_min_scalar"] + 0.15
+            cand["vol_target_smooth_alpha"] = float(rng.uniform(0.05, 0.45))
             cand["cash_yield_annual"] = float(rng.uniform(0.0, 0.05))
             cand["cash_exposure_target"] = 1.0
             k = _key(cand)
@@ -425,6 +496,27 @@ def main() -> int:
                 ),
             )
             best_score = float(best.get("score", -1e9))
+
+        # Stability re-check: replay top candidates and keep the first that still
+        # passes hard targets. This reduces profile churn from one-off lucky runs.
+        recheck_k = int(np.clip(int(float(os.getenv("Q_HIT_RECOVERY_RECHECK_TOPK", "6"))), 0, 30))
+        if recheck_k > 0:
+            ranked = sorted(rows, key=lambda r: float(r.get("score", -1e9)), reverse=True)
+            rechecked: list[dict] = []
+            for cand in ranked[:recheck_k]:
+                env = _env_from_params(cand)
+                _build_and_validate(env)
+                oos = _strict_oos_metrics()
+                score, detail = _score_candidate(oos)
+                chk = {**cand, **oos, **detail, "score": float(score), "rechecked": True}
+                rechecked.append(chk)
+                if _meets_targets(oos, target_hit=target_hit, target_mdd=target_mdd, target_n=target_n):
+                    best = chk
+                    best_score = float(score)
+                    break
+            if rechecked and not _meets_targets(best, target_hit=target_hit, target_mdd=target_mdd, target_n=target_n):
+                best = max(rechecked, key=lambda r: float(r.get("score", -1e9)))
+                best_score = float(best.get("score", -1e9))
 
         _write_csv(rows, RUNS / "hit_rate_recovery_sweep.csv")
         (RUNS / "hit_rate_recovery_profile.json").write_text(

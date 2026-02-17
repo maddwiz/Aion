@@ -120,12 +120,18 @@ def build_alert_payload(
 
     issues = []
     score = float(health.get("health_score", 0.0))
-    n_issues = len(health.get("issues", []) or [])
+    health_issues = [str(x) for x in (health.get("issues", []) or [])]
+    soft_prefixes = _soft_alert_prefixes_from_env()
+    health_soft_issues = [x for x in health_issues if _is_soft_alert(x, soft_prefixes)]
+    health_hard_issues = [x for x in health_issues if not _is_soft_alert(x, soft_prefixes)]
+    n_issues = len(health_issues)
+    n_hard_issues = len(health_hard_issues)
+    n_soft_issues = len(health_soft_issues)
     if score < min_health:
         issues.append(f"health_score<{min_health} ({score:.1f})")
-    if n_issues > max_issues:
-        issues.append(f"health_issues>{max_issues} ({n_issues})")
-    health_issue_text = [str(x).lower() for x in (health.get("issues", []) or [])]
+    if n_hard_issues > max_issues:
+        issues.append(f"health_issues>{max_issues} ({n_hard_issues})")
+    health_issue_text = [str(x).lower() for x in health_hard_issues]
     if any("over-throttling turnover" in x for x in health_issue_text):
         issues.append("execution_constraints_over_throttling")
     if any("collapsed gross exposure" in x for x in health_issue_text):
@@ -716,6 +722,8 @@ def build_alert_payload(
         "observed": {
             "health_score": score,
             "health_issues": n_issues,
+            "health_issues_hard": n_hard_issues,
+            "health_issues_soft": n_soft_issues,
             "heartbeat_stress_mean": hb_stress,
             "exec_gross_before_mean": exec_gross_before,
             "exec_gross_after_mean": exec_gross_after,
