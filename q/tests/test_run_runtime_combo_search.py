@@ -171,6 +171,48 @@ def test_profile_payload_carries_cost_fields():
     assert abs(float(out["mean_effective_cost_bps"]) - 10.3) < 1e-12
 
 
+def test_profile_payload_carries_latest_oos_fields():
+    row = {
+        "runtime_total_floor": 0.16,
+        "disable_governors": [],
+        "latest_oos_sharpe": 1.2,
+        "latest_oos_hit_rate": 0.49,
+        "latest_oos_max_drawdown": -0.03,
+        "latest_oos_n": 252,
+    }
+    out = rcs._profile_payload(row)
+    assert abs(float(out["latest_oos_sharpe"]) - 1.2) < 1e-12
+    assert abs(float(out["latest_oos_hit_rate"]) - 0.49) < 1e-12
+    assert abs(float(out["latest_oos_max_drawdown"]) + 0.03) < 1e-12
+    assert int(out["latest_oos_n"]) == 252
+
+
+def test_score_row_penalizes_weak_latest_oos(monkeypatch):
+    strong = {
+        "robust_sharpe": 1.2,
+        "robust_hit_rate": 0.50,
+        "robust_max_drawdown": -0.04,
+        "ann_cost_estimate": 0.01,
+        "mean_turnover": 0.04,
+        "latest_oos_sharpe": 1.1,
+        "latest_oos_hit_rate": 0.50,
+        "latest_oos_max_drawdown": -0.04,
+        "latest_oos_n": 252,
+    }
+    weak = {
+        **strong,
+        "latest_oos_sharpe": 0.20,
+        "latest_oos_hit_rate": 0.42,
+        "latest_oos_max_drawdown": -0.20,
+        "latest_oos_n": 80,
+    }
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_LATEST_SHARPE_WEIGHT", "0.50")
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_LATEST_HIT_WEIGHT", "0.50")
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_LATEST_MDD_PENALTY", "2.0")
+    monkeypatch.setenv("Q_RUNTIME_SEARCH_LATEST_N_PENALTY", "1.0")
+    assert float(rcs._score_row(strong)) > float(rcs._score_row(weak))
+
+
 def test_default_class_enable_grid_detects_diversified_universe(monkeypatch, tmp_path: Path):
     runs = tmp_path / "runs_plus"
     runs.mkdir(parents=True, exist_ok=True)

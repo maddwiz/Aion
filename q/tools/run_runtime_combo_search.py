@@ -204,6 +204,7 @@ def _eval_combo(env_overrides: dict[str, str]) -> dict:
 
     strict = _load_json(RUNS / "strict_oos_validation.json")
     robust = strict.get("metrics_oos_robust", {}) if isinstance(strict.get("metrics_oos_robust"), dict) else {}
+    latest = strict.get("metrics_oos_latest", {}) if isinstance(strict.get("metrics_oos_latest"), dict) else {}
     promo = _load_json(RUNS / "q_promotion_gate.json")
     stress = _load_json(RUNS / "cost_stress_validation.json")
     health = _load_json(RUNS / "health_alerts.json")
@@ -213,6 +214,10 @@ def _eval_combo(env_overrides: dict[str, str]) -> dict:
         "robust_sharpe": float(robust.get("sharpe", 0.0)),
         "robust_hit_rate": float(robust.get("hit_rate", 0.0)),
         "robust_max_drawdown": float(robust.get("max_drawdown", 0.0)),
+        "latest_oos_sharpe": float(latest.get("sharpe", 0.0)),
+        "latest_oos_hit_rate": float(latest.get("hit_rate", 0.0)),
+        "latest_oos_max_drawdown": float(latest.get("max_drawdown", 0.0)),
+        "latest_oos_n": int(latest.get("n", 0)),
         "ann_cost_estimate": float(cinfo.get("ann_cost_estimate", 0.0)),
         "mean_turnover": float(cinfo.get("mean_turnover", 0.0)),
         "mean_effective_cost_bps": float(cinfo.get("mean_effective_cost_bps", 0.0)),
@@ -241,9 +246,27 @@ def _score_row(row: dict) -> float:
     over_mdd = max(0.0, mdd - mdd_ref)
     over_cost = max(0.0, ann_cost - cost_ref)
     over_turn = max(0.0, mean_turn - turn_ref)
+    latest_sh = float(row.get("latest_oos_sharpe", 0.0))
+    latest_hit = float(row.get("latest_oos_hit_rate", 0.0))
+    latest_mdd = abs(float(row.get("latest_oos_max_drawdown", 0.0)))
+    latest_n = int(row.get("latest_oos_n", 0))
+    latest_sh_ref = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_SHARPE_REF", "0.90")), -2.0, 10.0))
+    latest_hit_ref = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_HIT_REF", "0.48")), 0.0, 1.0))
+    latest_mdd_ref = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_MDD_REF", "0.12")), 0.001, 2.0))
+    latest_sh_w = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_SHARPE_WEIGHT", "0.25")), 0.0, 10.0))
+    latest_hit_w = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_HIT_WEIGHT", "0.25")), 0.0, 10.0))
+    latest_mdd_pen = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_MDD_PENALTY", "1.5")), 0.0, 25.0))
+    latest_min_n = int(np.clip(int(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_MIN_N", "126"))), 1, 1000000))
+    latest_n_pen = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_LATEST_N_PENALTY", "0.50")), 0.0, 25.0))
+    latest_over_mdd = max(0.0, latest_mdd - latest_mdd_ref)
+    latest_n_shortfall = max(0.0, (latest_min_n - latest_n) / max(1.0, float(latest_min_n)))
     return float(
         sh
         + hit_w * (hit - target_hit)
+        + latest_sh_w * (latest_sh - latest_sh_ref)
+        + latest_hit_w * (latest_hit - latest_hit_ref)
+        - latest_mdd_pen * latest_over_mdd
+        - latest_n_pen * latest_n_shortfall
         - mdd_w * over_mdd
         - cost_w * over_cost
         - turn_w * over_turn
@@ -287,6 +310,10 @@ def _profile_payload(row: dict) -> dict:
         "robust_sharpe": float(row.get("robust_sharpe", 0.0)),
         "robust_hit_rate": float(row.get("robust_hit_rate", 0.0)),
         "robust_max_drawdown": float(row.get("robust_max_drawdown", 0.0)),
+        "latest_oos_sharpe": float(row.get("latest_oos_sharpe", 0.0)),
+        "latest_oos_hit_rate": float(row.get("latest_oos_hit_rate", 0.0)),
+        "latest_oos_max_drawdown": float(row.get("latest_oos_max_drawdown", 0.0)),
+        "latest_oos_n": int(row.get("latest_oos_n", 0)),
         "ann_cost_estimate": float(row.get("ann_cost_estimate", 0.0)),
         "mean_turnover": float(row.get("mean_turnover", 0.0)),
         "mean_effective_cost_bps": float(row.get("mean_effective_cost_bps", 0.0)),
@@ -484,18 +511,7 @@ def main() -> int:
             and float(row["score"]) > float(best_so_far_score)
         ):
             best_so_far_score = float(row["score"])
-            best_so_far = {
-                "runtime_total_floor": float(row["runtime_total_floor"]),
-                "disable_governors": list(row["disable_governors"]),
-                "enable_asset_class_diversification": bool(row["enable_asset_class_diversification"]),
-                "macro_proxy_strength": float(row["macro_proxy_strength"]),
-                "capacity_impact_strength": float(row["capacity_impact_strength"]),
-                "uncertainty_macro_shock_blend": float(row["uncertainty_macro_shock_blend"]),
-                "robust_sharpe": float(row["robust_sharpe"]),
-                "robust_hit_rate": float(row["robust_hit_rate"]),
-                "robust_max_drawdown": float(row["robust_max_drawdown"]),
-                "score": float(row["score"]),
-            }
+            best_so_far = _profile_payload(row)
         if i % 8 == 0 or i == total:
             print(f"… evaluated {i}/{total} combos")
             _write_progress(evaluated=i, total=total, best=best_so_far)
