@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -116,6 +117,28 @@ def _eval_combo(env_overrides: dict[str, str]) -> dict:
     }
 
 
+def _score_row(row: dict) -> float:
+    sh = float(row.get("robust_sharpe", 0.0))
+    hit = float(row.get("robust_hit_rate", 0.0))
+    mdd = abs(float(row.get("robust_max_drawdown", 0.0)))
+    target_hit = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TARGET_HIT", "0.49")), 0.0, 1.0))
+    hit_w = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_HIT_WEIGHT", "0.75")), 0.0, 10.0))
+    mdd_ref = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_MDD_REF", "0.04")), 0.001, 1.0))
+    mdd_w = float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_MDD_PENALTY", "4.0")), 0.0, 25.0))
+    over_mdd = max(0.0, mdd - mdd_ref)
+    return float(sh + hit_w * (hit - target_hit) - mdd_w * over_mdd)
+
+
+def _write_progress(*, evaluated: int, total: int, best: dict | None) -> None:
+    payload = {
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "evaluated": int(evaluated),
+        "total": int(total),
+        "best_so_far": best or {},
+    }
+    (RUNS / "runtime_combo_search_progress.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def _base_runtime_env() -> dict[str, str]:
     prof = _load_json(RUNS / "governor_params_profile.json")
     params = prof.get("parameters", prof)
@@ -157,6 +180,8 @@ def main() -> int:
     combos = list(itertools.product([0, 1], repeat=len(flags)))
     total = len(floors) * len(combos)
     i = 0
+    best_so_far = None
+    best_so_far_score = -1e9
     for floor in floors:
         for bits in combos:
             i += 1
@@ -170,9 +195,28 @@ def main() -> int:
                 "disable_governors": disabled,
                 **out,
             }
+            row["score"] = _score_row(row)
             rows.append(row)
+            if (
+                bool(row.get("promotion_ok", False))
+                and bool(row.get("cost_stress_ok", False))
+                and bool(row.get("health_ok", False))
+                and int(row.get("health_alerts_hard", 999)) == 0
+                and all(int(x.get("code", 1)) == 0 for x in (row.get("rc") or []))
+                and float(row["score"]) > float(best_so_far_score)
+            ):
+                best_so_far_score = float(row["score"])
+                best_so_far = {
+                    "runtime_total_floor": float(row["runtime_total_floor"]),
+                    "disable_governors": list(row["disable_governors"]),
+                    "robust_sharpe": float(row["robust_sharpe"]),
+                    "robust_hit_rate": float(row["robust_hit_rate"]),
+                    "robust_max_drawdown": float(row["robust_max_drawdown"]),
+                    "score": float(row["score"]),
+                }
             if i % 8 == 0 or i == total:
                 print(f"… evaluated {i}/{total} combos")
+                _write_progress(evaluated=i, total=total, best=best_so_far)
 
     def _valid(r: dict) -> bool:
         rc_ok = all(int(x.get("code", 1)) == 0 for x in (r.get("rc") or []))
@@ -188,9 +232,9 @@ def main() -> int:
     valid_sorted = sorted(
         valid,
         key=lambda r: (
+            float(r.get("score", -1e9)),
             float(r.get("robust_sharpe", 0.0)),
             float(r.get("robust_hit_rate", 0.0)),
-            -abs(float(r.get("robust_max_drawdown", 0.0))),
         ),
         reverse=True,
     )
@@ -201,6 +245,13 @@ def main() -> int:
         "flags": flags,
         "rows_total": len(rows),
         "rows_valid": len(valid_sorted),
+        "score_formula": {
+            "score": "sharpe + hit_weight*(hit-target_hit) - mdd_penalty*max(0, abs(max_drawdown)-mdd_ref)",
+            "target_hit": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_TARGET_HIT", "0.49")), 0.0, 1.0)),
+            "hit_weight": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_HIT_WEIGHT", "0.75")), 0.0, 10.0)),
+            "mdd_ref": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_MDD_REF", "0.04")), 0.001, 1.0)),
+            "mdd_penalty": float(np.clip(float(os.getenv("Q_RUNTIME_SEARCH_MDD_PENALTY", "4.0")), 0.0, 25.0)),
+        },
         "top_valid": valid_sorted[:20],
         "selected": selected,
     }
@@ -213,6 +264,7 @@ def main() -> int:
             "robust_sharpe": float(selected.get("robust_sharpe", 0.0)),
             "robust_hit_rate": float(selected.get("robust_hit_rate", 0.0)),
             "robust_max_drawdown": float(selected.get("robust_max_drawdown", 0.0)),
+            "score": float(selected.get("score", 0.0)),
             "promotion_ok": bool(selected.get("promotion_ok", False)),
             "cost_stress_ok": bool(selected.get("cost_stress_ok", False)),
             "health_ok": bool(selected.get("health_ok", False)),
@@ -222,6 +274,7 @@ def main() -> int:
     else:
         print("(!) No valid runtime profile found in search grid.")
 
+    _write_progress(evaluated=total, total=total, best=best_so_far)
     print(f"✅ Wrote {RUNS/'runtime_combo_search.json'}")
     if selected:
         print(f"✅ Wrote {RUNS/'runtime_profile_selected.json'}")

@@ -18,16 +18,18 @@ def test_runtime_combo_search_selects_best_valid(monkeypatch, tmp_path: Path):
     def _fake_eval(env):
         floor = float(env.get("Q_RUNTIME_TOTAL_FLOOR", "0.18"))
         disabled = {x for x in env.get("Q_DISABLE_GOVERNORS", "").split(",") if x}
-        # Best valid case: floor 0.18 with only b disabled.
+        # Best valid case by score: floor 0.18 with only b disabled.
         sharpe = 1.0
+        hit = 0.50
+        mdd = -0.04
         if floor == 0.18 and disabled == {"b"}:
-            sharpe = 1.6
+            sharpe, hit, mdd = 1.6, 0.50, -0.04
         elif floor == 0.22 and disabled == {"a"}:
-            sharpe = 1.4
+            sharpe, hit, mdd = 1.55, 0.50, -0.08
         return {
             "robust_sharpe": sharpe,
-            "robust_hit_rate": 0.50,
-            "robust_max_drawdown": -0.04,
+            "robust_hit_rate": hit,
+            "robust_max_drawdown": mdd,
             "promotion_ok": True,
             "cost_stress_ok": True,
             "health_ok": True,
@@ -42,3 +44,4 @@ def test_runtime_combo_search_selects_best_valid(monkeypatch, tmp_path: Path):
     sel = json.loads((runs / "runtime_profile_selected.json").read_text(encoding="utf-8"))
     assert abs(float(sel["runtime_total_floor"]) - 0.18) < 1e-9
     assert sel["disable_governors"] == ["b"]
+    assert (runs / "runtime_combo_search_progress.json").exists()
