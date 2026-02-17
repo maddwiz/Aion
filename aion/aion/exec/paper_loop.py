@@ -1868,6 +1868,9 @@ def main() -> int:
                     mtf_score = 1.0
                     mtf_reasons = []
                     meta_prob = 1.0
+                    intraday_gate = "off" if (not cfg.INTRADAY_CONFIRM_ENABLED) else "skip"
+                    mtf_gate = "off" if (not cfg.MTF_CONFIRM_ENABLED) else "skip"
+                    meta_gate = "off" if (not cfg.META_LABEL_ENABLED) else "skip"
 
                     if signal["side"] and cfg.INTRADAY_CONFIRM_ENABLED:
                         intraday_score, intraday_reasons = intraday_entry_alignment(feats, signal["side"], cfg)
@@ -1875,12 +1878,14 @@ def main() -> int:
                             signal["reasons"].append(f"Intraday blocked ({intraday_score:.2f})")
                             signal["reasons"].extend(intraday_reasons)
                             signal["side"] = None
+                            intraday_gate = "block"
                         else:
                             mult = float(cfg.INTRADAY_CONF_BASE) + float(cfg.INTRADAY_CONF_GAIN) * float(intraday_score)
                             signal["confidence"] = min(1.0, base_conf * max(0.4, mult))
                             signal["reasons"].append(f"Intraday align {intraday_score:.2f}")
                             signal["reasons"].extend(intraday_reasons)
                             base_conf = float(signal.get("confidence", base_conf))
+                            intraday_gate = "pass"
 
                     if signal["side"] and cfg.MTF_CONFIRM_ENABLED:
                         df_1h = hist_bars_cached(
@@ -1899,9 +1904,11 @@ def main() -> int:
                         if mtf_score < cfg.MTF_MIN_ALIGNMENT_SCORE:
                             signal["reasons"].append(f"MTF blocked ({mtf_score:.2f})")
                             signal["side"] = None
+                            mtf_gate = "block"
                         else:
                             signal["confidence"] = min(1.0, base_conf * (0.70 + 0.55 * mtf_score))
                             signal["reasons"].extend(mtf_reasons)
+                            mtf_gate = "pass"
 
                     if signal["side"] and cfg.META_LABEL_ENABLED:
                         meta_prob = meta_model.predict_proba(
@@ -1915,8 +1922,10 @@ def main() -> int:
                         if meta_prob < cfg.META_LABEL_MIN_PROB:
                             signal["reasons"].append(f"Meta-label veto ({meta_prob:.2f})")
                             signal["side"] = None
+                            meta_gate = "block"
                         else:
                             signal["confidence"] = min(1.0, float(signal["confidence"]) * (0.60 + 0.70 * meta_prob))
+                            meta_gate = "pass"
 
                     cycle_conf.append(max(float(signal["long_conf"]), float(signal["short_conf"])))
                     log_signal(
@@ -1929,6 +1938,10 @@ def main() -> int:
                         signal["reasons"],
                         meta_prob=meta_prob,
                         mtf_score=mtf_score,
+                        intraday_score=intraday_score,
+                        intraday_gate=intraday_gate,
+                        mtf_gate=mtf_gate,
+                        meta_gate=meta_gate,
                         pattern_hits=int(signal.get("pattern_hits", 0)),
                         indicator_hits=int(signal.get("indicator_hits", 0)),
                     )

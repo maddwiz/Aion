@@ -54,7 +54,7 @@ def _ensure_headers():
         SCANLOG.write_text("")
     _ensure_csv_header(
         SIGNALS,
-        "timestamp,symbol,regime,long_conf,short_conf,decision,meta_prob,mtf_score,pattern_hits,indicator_hits,reasons",
+        "timestamp,symbol,regime,long_conf,short_conf,decision,meta_prob,mtf_score,intraday_score,intraday_gate,mtf_gate,meta_gate,pattern_hits,indicator_hits,reasons",
     )
     if not ALERTS.exists():
         ALERTS.write_text("")
@@ -137,6 +137,10 @@ def log_signal(
     reasons: list[str],
     meta_prob: float = 0.0,
     mtf_score: float = 0.0,
+    intraday_score: float = 1.0,
+    intraday_gate: str = "",
+    mtf_gate: str = "",
+    meta_gate: str = "",
     pattern_hits: int = 0,
     indicator_hits: int = 0,
 ):
@@ -152,6 +156,10 @@ def log_signal(
                 decision,
                 f"{meta_prob:.4f}",
                 f"{mtf_score:.4f}",
+                f"{intraday_score:.4f}",
+                str(intraday_gate or "").strip(),
+                str(mtf_gate or "").strip(),
+                str(meta_gate or "").strip(),
                 str(int(pattern_hits)),
                 str(int(indicator_hits)),
                 " | ".join(reasons),

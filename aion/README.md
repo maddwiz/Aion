@@ -233,6 +233,8 @@ Format:
 - `logs/performance_report.json`
 - `logs/performance_report.md`
 
+`logs/signals.csv` includes per-symbol gate telemetry (`intraday_score`, `intraday_gate`, `mtf_gate`, `meta_gate`) so blocked-entry causes are visible in the dashboard/API.
+
 ## Legacy runtime
 
 ```bash

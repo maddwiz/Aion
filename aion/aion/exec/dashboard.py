@@ -2,6 +2,7 @@ import csv
 import errno
 import json
 import math
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -48,6 +49,93 @@ def _tail_csv(path: Path, limit: int = 30):
         return rows[-max(1, limit):]
     except Exception:
         return []
+
+
+_INTRADAY_ALIGN_RE = re.compile(r"intraday align\s+([0-9]*\.?[0-9]+)", re.IGNORECASE)
+
+
+def _to_float(raw, default=None):
+    try:
+        v = float(raw)
+        if math.isfinite(v):
+            return v
+    except Exception:
+        pass
+    return default
+
+
+def _signal_gate_summary(rows: list[dict]) -> dict:
+    out = {
+        "rows": int(len(rows or [])),
+        "considered": 0,
+        "passed": 0,
+        "blocked_total": 0,
+        "blocked_intraday": 0,
+        "blocked_mtf": 0,
+        "blocked_meta": 0,
+        "avg_intraday_score": None,
+        "last_intraday_score": None,
+        "block_rate": None,
+    }
+    if not rows:
+        return out
+
+    intraday_scores = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        decision = str(row.get("decision", "")).strip().upper()
+        reasons = str(row.get("reasons", "")).strip().lower()
+
+        intraday_gate = str(row.get("intraday_gate", "")).strip().lower()
+        mtf_gate = str(row.get("mtf_gate", "")).strip().lower()
+        meta_gate = str(row.get("meta_gate", "")).strip().lower()
+
+        if not intraday_gate:
+            intraday_gate = "block" if "intraday blocked" in reasons else ("pass" if "intraday align" in reasons else "")
+        if not mtf_gate:
+            mtf_gate = "block" if "mtf blocked" in reasons else ""
+        if not meta_gate:
+            meta_gate = "block" if "meta-label veto" in reasons else ""
+
+        considered = bool(
+            intraday_gate in {"pass", "block"}
+            or mtf_gate in {"pass", "block"}
+            or meta_gate in {"pass", "block"}
+            or decision in {"BUY", "SELL"}
+        )
+        if considered:
+            out["considered"] += 1
+
+        blocked_any = False
+        if intraday_gate == "block":
+            out["blocked_intraday"] += 1
+            blocked_any = True
+        if mtf_gate == "block":
+            out["blocked_mtf"] += 1
+            blocked_any = True
+        if meta_gate == "block":
+            out["blocked_meta"] += 1
+            blocked_any = True
+        if blocked_any:
+            out["blocked_total"] += 1
+        elif decision in {"BUY", "SELL"}:
+            out["passed"] += 1
+
+        score = _to_float(row.get("intraday_score"), None)
+        if score is None and reasons:
+            m = _INTRADAY_ALIGN_RE.search(reasons)
+            if m:
+                score = _to_float(m.group(1), None)
+        if score is not None:
+            intraday_scores.append(float(score))
+
+    if intraday_scores:
+        out["avg_intraday_score"] = float(sum(intraday_scores) / len(intraday_scores))
+        out["last_intraday_score"] = float(intraday_scores[-1])
+    if out["considered"] > 0:
+        out["block_rate"] = float(out["blocked_total"] / out["considered"])
+    return out
 
 
 def _to_int(raw, default: int):
@@ -112,6 +200,8 @@ def _status_payload():
 
     trade_metrics = perf.get("trade_metrics", {})
     equity_metrics = perf.get("equity_metrics", {})
+    signal_rows = _tail_csv(cfg.LOG_DIR / "signals.csv", limit=200)
+    signal_gate_summary = _signal_gate_summary(signal_rows)
     ext = _doctor_check(doctor, "external_overlay") or {}
     ext_details = ext.get("details", {}) if isinstance(ext.get("details"), dict) else {}
     ext_ok = bool(ext.get("ok", True))
@@ -212,6 +302,7 @@ def _status_payload():
         "watchlist_count": len(watchlist),
         "trade_metrics": trade_metrics,
         "equity_metrics": equity_metrics,
+        "signal_gate_summary": signal_gate_summary,
         "adaptive_stats": profile.get("adaptive_stats", {}),
         "trading_enabled": bool(profile.get("trading_enabled", True)),
     }
@@ -260,6 +351,7 @@ def _html_template():
       <div class="card kpi"><div class="k">Closed Trades</div><div class="v" id="closed_trades">-</div></div>
       <div class="card kpi"><div class="k">Q Overlay</div><div class="v" id="overlay_ok">-</div></div>
       <div class="card kpi"><div class="k">Ops Guard</div><div class="v" id="ops_guard_ok">-</div></div>
+      <div class="card kpi"><div class="k">Entry Gates</div><div class="v" id="gate_summary">-</div></div>
 
       <div class="card wide">
         <div class="k">System Snapshot</div>
@@ -280,7 +372,7 @@ def _html_template():
       <div class="card full">
         <div class="k">Recent Signals</div>
         <table id="signals_tbl"><thead><tr>
-          <th>Time</th><th>Symbol</th><th>Decision</th><th>L</th><th>S</th><th>Patterns</th><th>Indicators</th>
+          <th>Time</th><th>Symbol</th><th>Decision</th><th>Intra</th><th>MTF</th><th>Meta</th><th>IntraScore</th><th>L</th><th>S</th><th>Patterns</th><th>Indicators</th>
         </tr></thead><tbody></tbody></table>
       </div>
     </div>
@@ -311,6 +403,11 @@ def _html_template():
       txt('closed_trades', s.trade_metrics?.closed_trades ?? 0);
       txt('overlay_ok', s.external_overlay_ok ? 'OK' : 'WARN'); cls('overlay_ok', !!s.external_overlay_ok);
       txt('ops_guard_ok', s.ops_guard_ok ? 'OK' : 'WARN'); cls('ops_guard_ok', !!s.ops_guard_ok);
+      const gates = s.signal_gate_summary || {};
+      const considered = gates.considered ?? 0;
+      const blocked = gates.blocked_total ?? 0;
+      txt('gate_summary', `${blocked}/${considered}`);
+      cls('gate_summary', considered === 0 ? true : (blocked / Math.max(considered, 1)) < 0.65);
       txt('snapshot', JSON.stringify({
         ib: s.ib,
         external_overlay_ok: s.external_overlay_ok,
@@ -333,12 +430,17 @@ def _html_template():
         winrate: s.trade_metrics?.winrate,
         expectancy: s.trade_metrics?.expectancy,
         return_pct: s.equity_metrics?.return_pct,
+        signal_gate_summary: s.signal_gate_summary,
         adaptive: s.adaptive_stats,
         remediation: s.doctor_remediation
       }, null, 2));
       txt('alerts', (al.lines || []).join('\\n') || 'No alerts.');
       renderTable('trades_tbl', tr.rows || [], ['timestamp','symbol','side','qty','pnl','reason']);
-      renderTable('signals_tbl', sg.rows || [], ['timestamp','symbol','decision','long_conf','short_conf','pattern_hits','indicator_hits']);
+      renderTable(
+        'signals_tbl',
+        sg.rows || [],
+        ['timestamp','symbol','decision','intraday_gate','mtf_gate','meta_gate','intraday_score','long_conf','short_conf','pattern_hits','indicator_hits']
+      );
     }
     refresh();
     setInterval(refresh, 5000);

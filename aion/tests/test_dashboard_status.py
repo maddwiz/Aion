@@ -96,6 +96,17 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     old_ts = 946684800
     os.utime(overlay_file, (old_ts, old_ts))
     (state_dir / "watchlist.txt").write_text("AAPL\nMSFT\n", encoding="utf-8")
+    (log_dir / "signals.csv").write_text(
+        "\n".join(
+            [
+                "timestamp,symbol,regime,long_conf,short_conf,decision,meta_prob,mtf_score,intraday_score,intraday_gate,mtf_gate,meta_gate,pattern_hits,indicator_hits,reasons",
+                "2026-01-01 09:31:00,AAPL,trending,0.82,0.11,BUY,0.73,0.64,0.88,pass,pass,pass,3,5,Intraday align 0.88",
+                "2026-01-01 09:32:00,MSFT,trending,0.76,0.22,HOLD,0.69,0.41,0.32,block,skip,skip,2,4,Intraday blocked (0.32)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     s = dash._status_payload()
     assert s["external_overlay_ok"] is False
@@ -145,6 +156,12 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     assert s["runtime_controls_stale_threshold_sec"] >= 60
     assert s["runtime_controls_stale"] is False
     assert s["watchlist_count"] == 2
+    assert s["signal_gate_summary"]["rows"] == 2
+    assert s["signal_gate_summary"]["considered"] == 2
+    assert s["signal_gate_summary"]["blocked_intraday"] == 1
+    assert s["signal_gate_summary"]["blocked_total"] == 1
+    assert s["signal_gate_summary"]["passed"] == 1
+    assert s["signal_gate_summary"]["avg_intraday_score"] is not None
 
 
 def test_status_payload_falls_back_to_live_overlay_when_doctor_is_stale(tmp_path: Path, monkeypatch):
@@ -206,3 +223,25 @@ def test_status_payload_falls_back_to_live_overlay_when_doctor_is_stale(tmp_path
     assert s["external_overlay_ok"] is True
     assert "healthy" in str(s["external_overlay_msg"]).lower()
     assert s["external_overlay"]["quality_gate_ok"] is True
+
+
+def test_signal_gate_summary_supports_legacy_reason_fields():
+    rows = [
+        {
+            "decision": "HOLD",
+            "reasons": "Intraday blocked (0.35) | MTF blocked (0.42)",
+            "intraday_score": "",
+        },
+        {
+            "decision": "BUY",
+            "reasons": "Intraday align 0.81",
+        },
+    ]
+    out = dash._signal_gate_summary(rows)
+    assert out["rows"] == 2
+    assert out["considered"] == 2
+    assert out["blocked_intraday"] == 1
+    assert out["blocked_mtf"] == 1
+    assert out["blocked_total"] == 1
+    assert out["passed"] == 1
+    assert out["avg_intraday_score"] is not None

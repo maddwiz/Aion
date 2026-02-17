@@ -38,6 +38,10 @@ EXPECTED_HEADERS = {
         "decision",
         "meta_prob",
         "mtf_score",
+        "intraday_score",
+        "intraday_gate",
+        "mtf_gate",
+        "meta_gate",
         "pattern_hits",
         "indicator_hits",
         "reasons",
@@ -140,6 +144,19 @@ def check_csv_schema(path: Path, expected: list[str]) -> tuple[bool, str]:
     if header == expected:
         return True, f"Schema ok: {path.name}"
     if path.name == "signals.csv":
+        prev = [
+            "timestamp",
+            "symbol",
+            "regime",
+            "long_conf",
+            "short_conf",
+            "decision",
+            "meta_prob",
+            "mtf_score",
+            "pattern_hits",
+            "indicator_hits",
+            "reasons",
+        ]
         legacy = [
             "timestamp",
             "symbol",
@@ -151,6 +168,8 @@ def check_csv_schema(path: Path, expected: list[str]) -> tuple[bool, str]:
             "mtf_score",
             "reasons",
         ]
+        if header == prev:
+            return True, "Schema ok (legacy): signals.csv will auto-migrate on first runtime write"
         if header == legacy:
             return True, "Schema ok (legacy): signals.csv will auto-migrate on first runtime write"
     return False, f"Schema mismatch in {path.name}"
