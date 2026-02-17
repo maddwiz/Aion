@@ -67,6 +67,7 @@ This now includes:
 - guardrails, governors, councils, meta/synapses, cross-hive, ecosystem
 - adaptive cross-hive arbitration (time-varying alpha/inertia from disagreement/divergence)
 - reliability-aware quality governor (nested WF + hive WF + council diagnostics)
+- credit-equity lead/lag overlay (HYG/LQD divergence vs SPY/QQQ)
 - NovaSpine recall feedback loop (augment -> context boost -> final risk scaling)
 - immune drill governance check (synthetic stress scenarios)
 - final portfolio assembly + system health + alert gate
@@ -133,6 +134,9 @@ export Q_MAX_HEARTBEAT_STRESS=0.85
 - `runs_plus/regime_fracture_signal.csv`
 - `runs_plus/regime_fracture_governor.csv`
 - `runs_plus/regime_fracture_info.json`
+- `runs_plus/credit_leadlag_signal.csv`
+- `runs_plus/credit_leadlag_overlay.csv`
+- `runs_plus/credit_leadlag_info.json`
 - `runs_plus/hive_transparency.json`
 - `runs_plus/hive_dynamic_quality.csv`
 - `runs_plus/hive_crowding_penalty.csv`

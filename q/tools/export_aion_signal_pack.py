@@ -435,6 +435,7 @@ def _runtime_context(runs_dir: Path):
         "symbolic_governor": ("symbolic_governor.csv", 0.70, 1.15, 1.0),
         "legacy_exposure": ("legacy_exposure.csv", 0.40, 1.30, 1.0),
         "regime_fracture_governor": ("regime_fracture_governor.csv", 0.70, 1.06, 1.0),
+        "credit_leadlag_overlay": ("credit_leadlag_overlay.csv", 0.70, 1.30, 1.0),
     }
     active_vals = []
     for k, (fname, lo, hi, dflt) in specs.items():

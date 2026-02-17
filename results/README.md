@@ -1,6 +1,6 @@
 # Results Snapshot
 
-- Generated (UTC): `2026-02-17T11:47:05.611599+00:00`
+- Generated (UTC): `2026-02-17T11:54:27.143764+00:00`
 - Source returns: `runs_plus/wf_oos_returns.csv`
 
 ## Primary Metrics
@@ -14,7 +14,7 @@
 
 ## Governor Compound Diagnostics
 
-- Mean compound scalar: `0.546`
+- Mean compound scalar: `0.373`
 - Min compound scalar: `0.220`
 - Share below 0.20: `0.000`
 

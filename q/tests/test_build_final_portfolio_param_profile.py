@@ -56,6 +56,27 @@ def test_env_or_profile_helpers_parse_profile_values(monkeypatch):
     assert bv is True
 
 
+def test_credit_leadlag_strength_uses_profile_value(monkeypatch):
+    monkeypatch.delenv("Q_CREDIT_LEADLAG_STRENGTH", raising=False)
+    monkeypatch.setattr(
+        bfp,
+        "_GOV_PARAM_PROFILE",
+        {
+            "parameters": {
+                "credit_leadlag_strength": 0.44,
+            }
+        },
+    )
+    out = bfp._env_or_profile_float(
+        "Q_CREDIT_LEADLAG_STRENGTH",
+        "credit_leadlag_strength",
+        0.35,
+        0.0,
+        2.0,
+    )
+    assert abs(float(out) - 0.44) < 1e-9
+
+
 def test_apply_governor_strength_blends_with_identity():
     vec = [0.7, 1.0, 1.2]
     no_effect = bfp._apply_governor_strength(vec, 0.0)
