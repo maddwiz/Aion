@@ -84,6 +84,43 @@ def write_pipeline_status(failures, strict_mode: bool):
     print(f"✅ Wrote {RUNS/'pipeline_status.json'}")
 
 
+def apply_profile_env_defaults():
+    p = RUNS / "governor_params_profile.json"
+    if not p.exists():
+        return
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    params = obj.get("parameters", obj)
+    if not isinstance(params, dict):
+        return
+    mapping = {
+        "turnover_max_step": "TURNOVER_MAX_STEP",
+        "turnover_budget_window": "TURNOVER_BUDGET_WINDOW",
+        "turnover_budget_limit": "TURNOVER_BUDGET_LIMIT",
+        "meta_exec_min_prob": "Q_META_EXEC_MIN_PROB",
+        "meta_exec_floor": "Q_META_EXEC_FLOOR",
+        "meta_exec_slope": "Q_META_EXEC_SLOPE",
+    }
+    applied = {}
+    for k, envk in mapping.items():
+        if envk in os.environ:
+            continue
+        if k not in params:
+            continue
+        try:
+            v = params.get(k)
+            if v is None:
+                continue
+            os.environ[envk] = str(v)
+            applied[envk] = str(v)
+        except Exception:
+            continue
+    if applied:
+        print(f"↺ applied runtime defaults from governor profile: {applied}")
+
+
 def default_aion_overlay_mirror() -> str:
     p = ROOT.parent / "aion" / "state" / "q_signal_overlay.json"
     if p.parent.exists():
@@ -150,6 +187,7 @@ if __name__ == "__main__":
     if not ensure_env():
         write_pipeline_status([{"step": "env_preflight", "code": 2}], strict_mode=strict)
         raise SystemExit(2)
+    apply_profile_env_defaults()
     failures = []
     # Reset status at run start so alert checks do not read stale failures.
     write_pipeline_status([], strict_mode=strict)
@@ -257,19 +295,25 @@ if __name__ == "__main__":
     # Quality governor from nested/hive/council/system diagnostics
     ok, rc = run_script("tools/run_quality_governor.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_quality_governor.py", "code": rc})
-    # Meta-label execution gate for selective exposure scaling.
-    ok, rc = run_script("tools/run_meta_execution_gate.py")
-    if not ok and rc is not None: failures.append({"step": "tools/run_meta_execution_gate.py", "code": rc})
     # Regime mixture-of-experts governor (trend / mean-reversion / shock specialists).
     ok, rc = run_script("tools/run_regime_moe.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_regime_moe.py", "code": rc})
     # Uncertainty-aware sizing scalar (confidence/disagreement/meta-exec/shock).
     ok, rc = run_script("tools/run_uncertainty_sizing.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_uncertainty_sizing.py", "code": rc})
-    # Assemble final portfolio weights from available layers
+    # Assemble provisional portfolio weights and returns.
     ok, rc = run_script("tools/build_final_portfolio.py")
     if not ok and rc is not None: failures.append({"step": "tools/build_final_portfolio.py", "code": rc})
-    # Costed returns from final weights (single source for evaluation/sweeps).
+    # Costed returns from provisional weights.
+    ok, rc = run_script("tools/make_daily_from_weights.py")
+    if not ok and rc is not None: failures.append({"step": "tools/make_daily_from_weights.py", "code": rc})
+    # Meta-label execution gate refreshed from provisional returns.
+    ok, rc = run_script("tools/run_meta_execution_gate.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_meta_execution_gate.py", "code": rc})
+    # Rebuild final portfolio using refreshed execution gate.
+    ok, rc = run_script("tools/build_final_portfolio.py")
+    if not ok and rc is not None: failures.append({"step": "tools/build_final_portfolio.py", "code": rc})
+    # Final costed returns (single source for evaluation/sweeps).
     ok, rc = run_script("tools/make_daily_from_weights.py")
     if not ok and rc is not None: failures.append({"step": "tools/make_daily_from_weights.py", "code": rc})
     # Strict holdout OOS validation from costed returns.

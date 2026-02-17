@@ -214,6 +214,8 @@ def _prob_to_gate(
 
 
 def append_card(title: str, html: str) -> None:
+    if str(os.getenv("Q_DISABLE_REPORT_CARDS", "0")).strip().lower() in {"1", "true", "yes", "on"}:
+        return
     for name in ["report_all.html", "report_best_plus.html", "report_plus.html", "report.html"]:
         p = ROOT / name
         if not p.exists():

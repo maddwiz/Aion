@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import random
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -49,8 +50,15 @@ def _run(cmd: list[str], env: dict[str, str]) -> None:
 
 def _build_and_validate(env_overrides: dict[str, str] | None = None) -> None:
     env = os.environ.copy()
+    env.setdefault("Q_DISABLE_REPORT_CARDS", "1")
     if env_overrides:
         env.update({k: str(v) for k, v in env_overrides.items()})
+    _run([PYTHON, str(ROOT / "tools" / "run_guardrails.py")], env)
+    # Pass 1: provisional build to generate candidate-consistent daily returns.
+    _run([PYTHON, str(ROOT / "tools" / "build_final_portfolio.py")], env)
+    _run([PYTHON, str(ROOT / "tools" / "make_daily_from_weights.py")], env)
+    # Refresh meta execution gate from pass-1 returns, then rebuild pass-2.
+    _run([PYTHON, str(ROOT / "tools" / "run_meta_execution_gate.py")], env)
     _run([PYTHON, str(ROOT / "tools" / "build_final_portfolio.py")], env)
     _run([PYTHON, str(ROOT / "tools" / "make_daily_from_weights.py")], env)
     _run([PYTHON, str(ROOT / "tools" / "run_strict_oos_validation.py")], env)
@@ -149,6 +157,12 @@ def _params_from_profile() -> dict:
         "signal_deadzone": float(p.get("signal_deadzone", 0.0)),
         "rank_sleeve_blend": float(p.get("rank_sleeve_blend", 0.0)),
         "low_vol_sleeve_blend": float(p.get("low_vol_sleeve_blend", 0.0)),
+        "turnover_max_step": float(p.get("turnover_max_step", 0.35)),
+        "turnover_budget_window": int(float(p.get("turnover_budget_window", 5))),
+        "turnover_budget_limit": float(p.get("turnover_budget_limit", 1.00)),
+        "meta_exec_min_prob": float(p.get("meta_exec_min_prob", 0.53)),
+        "meta_exec_floor": float(p.get("meta_exec_floor", 0.35)),
+        "meta_exec_slope": float(p.get("meta_exec_slope", 10.0)),
     }
 
 
@@ -159,6 +173,12 @@ def _env_from_params(params: dict) -> dict[str, str]:
         "Q_SIGNAL_DEADZONE": str(params["signal_deadzone"]),
         "Q_RANK_SLEEVE_BLEND": str(params["rank_sleeve_blend"]),
         "Q_LOW_VOL_SLEEVE_BLEND": str(params["low_vol_sleeve_blend"]),
+        "TURNOVER_MAX_STEP": str(params["turnover_max_step"]),
+        "TURNOVER_BUDGET_WINDOW": str(params["turnover_budget_window"]),
+        "TURNOVER_BUDGET_LIMIT": str(params["turnover_budget_limit"]),
+        "Q_META_EXEC_MIN_PROB": str(params["meta_exec_min_prob"]),
+        "Q_META_EXEC_FLOOR": str(params["meta_exec_floor"]),
+        "Q_META_EXEC_SLOPE": str(params["meta_exec_slope"]),
     }
 
 
@@ -179,6 +199,12 @@ def _write_csv(rows: list[dict], outp: Path) -> None:
         "signal_deadzone",
         "rank_sleeve_blend",
         "low_vol_sleeve_blend",
+        "turnover_max_step",
+        "turnover_budget_window",
+        "turnover_budget_limit",
+        "meta_exec_min_prob",
+        "meta_exec_floor",
+        "meta_exec_slope",
         "source",
         "sharpe",
         "hit_rate",
@@ -214,6 +240,12 @@ def _merge_profile(best: dict) -> None:
             "signal_deadzone": float(best["signal_deadzone"]),
             "rank_sleeve_blend": float(best["rank_sleeve_blend"]),
             "low_vol_sleeve_blend": float(best["low_vol_sleeve_blend"]),
+            "turnover_max_step": float(best["turnover_max_step"]),
+            "turnover_budget_window": int(best["turnover_budget_window"]),
+            "turnover_budget_limit": float(best["turnover_budget_limit"]),
+            "meta_exec_min_prob": float(best["meta_exec_min_prob"]),
+            "meta_exec_floor": float(best["meta_exec_floor"]),
+            "meta_exec_slope": float(best["meta_exec_slope"]),
         }
     )
     base["parameters"] = params
@@ -225,6 +257,12 @@ def _merge_profile(best: dict) -> None:
             "signal_deadzone": float(best["signal_deadzone"]),
             "rank_sleeve_blend": float(best["rank_sleeve_blend"]),
             "low_vol_sleeve_blend": float(best["low_vol_sleeve_blend"]),
+            "turnover_max_step": float(best["turnover_max_step"]),
+            "turnover_budget_window": int(best["turnover_budget_window"]),
+            "turnover_budget_limit": float(best["turnover_budget_limit"]),
+            "meta_exec_min_prob": float(best["meta_exec_min_prob"]),
+            "meta_exec_floor": float(best["meta_exec_floor"]),
+            "meta_exec_slope": float(best["meta_exec_slope"]),
         },
         "oos": {
             "source": str(best.get("source", "")),
@@ -260,13 +298,40 @@ def main() -> int:
             "signal_deadzone": [0.0, 0.0003, 0.0006, 0.0010, 0.0015],
             "rank_sleeve_blend": _local_grid(base_params["rank_sleeve_blend"], 0.0, 0.25, 0.02),
             "low_vol_sleeve_blend": _local_grid(base_params["low_vol_sleeve_blend"], 0.0, 0.20, 0.015),
+            "turnover_max_step": [0.18, 0.22, 0.26, 0.30, 0.35],
+            "turnover_budget_window": [3, 5, 8],
+            "turnover_budget_limit": [0.55, 0.70, 0.85, 1.00],
+            "meta_exec_min_prob": [0.48, 0.51, 0.54, 0.57],
+            "meta_exec_floor": [0.20, 0.30, 0.35],
+            "meta_exec_slope": [8.0, 12.0, 16.0],
         }
+        seen = set()
+
+        def _key(p: dict) -> tuple:
+            return (
+                round(float(p["hit_gate_strength"]), 6),
+                round(float(p["hit_gate_threshold"]), 6),
+                round(float(p["signal_deadzone"]), 6),
+                round(float(p["rank_sleeve_blend"]), 6),
+                round(float(p["low_vol_sleeve_blend"]), 6),
+                round(float(p["turnover_max_step"]), 6),
+                int(p["turnover_budget_window"]),
+                round(float(p["turnover_budget_limit"]), 6),
+                round(float(p["meta_exec_min_prob"]), 6),
+                round(float(p["meta_exec_floor"]), 6),
+                round(float(p["meta_exec_slope"]), 6),
+            )
+
         for _pass in range(2):
             improved = False
             for key, vals in grids.items():
                 for v in vals:
                     cand = dict(cur)
                     cand[key] = float(v)
+                    k = _key(cand)
+                    if k in seen:
+                        continue
+                    seen.add(k)
                     sc, row = _evaluate(cand, rows)
                     if sc > best_score:
                         best_score = float(sc)
@@ -275,6 +340,31 @@ def main() -> int:
                         improved = True
             if not improved:
                 break
+
+        # Random exploration to escape local coordinate optima.
+        n_rand = int(np.clip(int(float(os.getenv("Q_HIT_RECOVERY_RANDOM_SAMPLES", "80"))), 0, 400))
+        rng = random.Random(int(os.getenv("Q_HIT_RECOVERY_RANDOM_SEED", "17")))
+        for _ in range(n_rand):
+            cand = dict(base_params)
+            cand["hit_gate_strength"] = float(rng.uniform(0.0, 1.3))
+            cand["hit_gate_threshold"] = float(rng.uniform(0.39, 0.52))
+            cand["signal_deadzone"] = float(rng.uniform(0.0, 0.0020))
+            cand["rank_sleeve_blend"] = float(rng.uniform(0.0, 0.15))
+            cand["low_vol_sleeve_blend"] = float(rng.uniform(0.0, 0.10))
+            cand["turnover_max_step"] = float(rng.uniform(0.16, 0.36))
+            cand["turnover_budget_window"] = int(rng.choice([3, 5, 8, 13]))
+            cand["turnover_budget_limit"] = float(rng.uniform(0.50, 1.00))
+            cand["meta_exec_min_prob"] = float(rng.uniform(0.46, 0.58))
+            cand["meta_exec_floor"] = float(rng.uniform(0.18, 0.40))
+            cand["meta_exec_slope"] = float(rng.uniform(6.0, 18.0))
+            k = _key(cand)
+            if k in seen:
+                continue
+            seen.add(k)
+            sc, row = _evaluate(cand, rows)
+            if sc > best_score:
+                best_score = float(sc)
+                best = dict(row)
 
         if not rows:
             print("(!) No candidates evaluated.")

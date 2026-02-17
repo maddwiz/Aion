@@ -402,6 +402,8 @@ def apply_signal_deadzone(
 
 
 def append_card(title, html):
+    if str(os.getenv("Q_DISABLE_REPORT_CARDS", "0")).strip().lower() in {"1", "true", "yes", "on"}:
+        return
     for name in ["report_all.html","report_best_plus.html","report_plus.html","report.html"]:
         f = ROOT/name
         if not f.exists(): continue

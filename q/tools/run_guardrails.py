@@ -78,6 +78,8 @@ def _load_named_numeric_col(path: Path, colname: str):
     return np.asarray(vals, float).ravel() if vals else None
 
 def _append_report_card(title, html):
+    if str(os.getenv("Q_DISABLE_REPORT_CARDS", "0")).strip().lower() in {"1", "true", "yes", "on"}:
+        return
     for name in ["report_all.html", "report_best_plus.html", "report_plus.html", "report.html"]:
         p = ROOT / name
         if not p.exists(): 
