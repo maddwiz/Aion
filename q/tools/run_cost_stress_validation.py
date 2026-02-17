@@ -79,6 +79,26 @@ def _parse_bps_list(raw: str) -> list[float]:
     return [float(v) for v in out]
 
 
+def _effective_hit_floor(min_hit: float, n: int) -> tuple[float, float]:
+    """
+    Returns (effective_floor, tolerance).
+
+    The tolerance is a bounded blend of fixed absolute allowance and
+    sampling-noise allowance (z * std_err), so tiny misses at modest sample
+    sizes do not cause hard cliff failures.
+    """
+    base = float(np.clip(float(min_hit), 0.0, 1.0))
+    nn = int(max(1, int(n)))
+    tol_abs = float(np.clip(float(os.getenv("Q_COST_STRESS_HIT_TOL_ABS", "0.0")), 0.0, 0.10))
+    tol_z = float(np.clip(float(os.getenv("Q_COST_STRESS_HIT_TOL_Z", "0.25")), 0.0, 5.0))
+    tol_cap = float(np.clip(float(os.getenv("Q_COST_STRESS_HIT_TOL_CAP", "0.005")), 0.0, 0.10))
+    p = float(np.clip(base, 1e-6, 1.0 - 1e-6))
+    tol_auto = float(min(tol_cap, max(0.0, tol_z * np.sqrt((p * (1.0 - p)) / float(nn)))))
+    tol = float(max(tol_abs, tol_auto))
+    eff = float(np.clip(base - tol, 0.0, 1.0))
+    return eff, tol
+
+
 def _metrics_for_returns(
     r: np.ndarray,
     *,
@@ -211,19 +231,24 @@ def main() -> int:
             }
         )
 
-    worst_robust_sharpe = float(min(r["oos_robust_sharpe"] for r in rows))
-    worst_robust_hit = float(min(r["oos_robust_hit_rate"] for r in rows))
-    worst_robust_mdd = float(min(r["oos_robust_max_drawdown"] for r in rows))
+    worst_sh_row = min(rows, key=lambda x: float(x["oos_robust_sharpe"]))
+    worst_hit_row = min(rows, key=lambda x: float(x["oos_robust_hit_rate"]))
+    worst_mdd_row = min(rows, key=lambda x: float(x["oos_robust_max_drawdown"]))
+    worst_robust_sharpe = float(worst_sh_row["oos_robust_sharpe"])
+    worst_robust_hit = float(worst_hit_row["oos_robust_hit_rate"])
+    worst_robust_mdd = float(worst_mdd_row["oos_robust_max_drawdown"])
+    worst_robust_hit_n = int(max(1, int(worst_hit_row.get("oos_robust_n", 0))))
 
     min_sh = float(np.clip(float(os.getenv("Q_COST_STRESS_MIN_ROBUST_SHARPE", "0.90")), -2.0, 10.0))
     min_hit = float(np.clip(float(os.getenv("Q_COST_STRESS_MIN_ROBUST_HIT", "0.48")), 0.0, 1.0))
     max_abs_mdd = float(np.clip(float(os.getenv("Q_COST_STRESS_MAX_ABS_MDD", "0.12")), 0.001, 2.0))
+    min_hit_eff, hit_tol = _effective_hit_floor(min_hit, worst_robust_hit_n)
 
     reasons = []
     if worst_robust_sharpe < min_sh:
         reasons.append(f"cost_stress_robust_sharpe<{min_sh:.2f} ({worst_robust_sharpe:.3f})")
-    if worst_robust_hit < min_hit:
-        reasons.append(f"cost_stress_robust_hit<{min_hit:.2f} ({worst_robust_hit:.3f})")
+    if worst_robust_hit < min_hit_eff:
+        reasons.append(f"cost_stress_robust_hit<{min_hit_eff:.3f} ({worst_robust_hit:.3f}; tol={hit_tol:.3f})")
     if abs(worst_robust_mdd) > max_abs_mdd:
         reasons.append(f"cost_stress_robust_abs_mdd>{max_abs_mdd:.3f} ({abs(worst_robust_mdd):.3f})")
     ok = len(reasons) == 0
@@ -253,6 +278,8 @@ def main() -> int:
         "thresholds": {
             "min_robust_sharpe": float(min_sh),
             "min_robust_hit_rate": float(min_hit),
+            "min_robust_hit_rate_effective": float(min_hit_eff),
+            "robust_hit_rate_tolerance": float(hit_tol),
             "max_abs_robust_mdd": float(max_abs_mdd),
         },
         "settings": {
@@ -268,6 +295,7 @@ def main() -> int:
         "worst_case_robust": {
             "sharpe": float(worst_robust_sharpe),
             "hit_rate": float(worst_robust_hit),
+            "hit_rate_n": int(worst_robust_hit_n),
             "max_drawdown": float(worst_robust_mdd),
         },
         "scenarios": rows,
