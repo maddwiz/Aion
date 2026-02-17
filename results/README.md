@@ -1,16 +1,16 @@
 # Results Snapshot
 
-- Generated (UTC): `2026-02-17T11:54:27.143764+00:00`
+- Generated (UTC): `2026-02-17T21:57:52.427974+00:00`
 - Source returns: `runs_plus/wf_oos_returns.csv`
 
 ## Primary Metrics
 
 - N: `795`
-- Sharpe: `1.361`
-- Hit rate: `0.478`
-- Annualized return: `0.075`
-- Annualized vol: `0.055`
-- Max drawdown: `-0.029`
+- Sharpe: `1.457`
+- Hit rate: `0.487`
+- Annualized return: `0.050`
+- Annualized vol: `0.035`
+- Max drawdown: `-0.019`
 
 ## Governor Compound Diagnostics
 
