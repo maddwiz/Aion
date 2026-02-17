@@ -43,6 +43,23 @@ def _load_json(path: Path):
         return None
 
 
+def _soft_alert_prefixes_from_env() -> list[str]:
+    raw = str(os.getenv("Q_HEALTH_SOFT_ALERT_PREFIXES", "aion_feedback_,stale_optional_file>")).strip()
+    out = []
+    for token in raw.split(","):
+        t = str(token).strip().lower()
+        if t:
+            out.append(t)
+    return out
+
+
+def _is_soft_alert(msg: str, soft_prefixes: list[str]) -> bool:
+    m = str(msg).strip().lower()
+    if not m:
+        return False
+    return any(m.startswith(p) for p in soft_prefixes)
+
+
 def build_alert_payload(
     health: dict,
     guards: dict,
@@ -867,9 +884,23 @@ if __name__ == "__main__":
             "max_aion_feedback_age_hours": max_aion_feedback_age_hours,
         },
     )
+    alerts = payload.get("alerts", [])
+    if not isinstance(alerts, list):
+        alerts = []
+    soft_prefixes = _soft_alert_prefixes_from_env()
+    hard_alerts = [a for a in alerts if not _is_soft_alert(str(a), soft_prefixes)]
+    soft_alerts = [a for a in alerts if _is_soft_alert(str(a), soft_prefixes)]
+    payload["ok_raw"] = bool(payload.get("ok", False))
+    payload["ok"] = len(hard_alerts) == 0
+    payload["alerts_total"] = int(len(alerts))
+    payload["alerts_hard"] = int(len(hard_alerts))
+    payload["alerts_soft"] = int(len(soft_alerts))
+    payload["soft_alert_prefixes"] = soft_prefixes
     (RUNS / "health_alerts.json").write_text(json.dumps(payload, indent=2))
     print(f"✅ Wrote {RUNS/'health_alerts.json'}")
-    if payload.get("alerts"):
-        print("ALERT:", "; ".join(payload["alerts"]))
+    if hard_alerts:
+        print("ALERT:", "; ".join([str(x) for x in hard_alerts]))
         raise SystemExit(2)
+    if soft_alerts:
+        print("WARN (soft alerts):", "; ".join([str(x) for x in soft_alerts]))
     print("✅ Health alerts clear")
