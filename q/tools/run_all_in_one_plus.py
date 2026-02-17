@@ -191,6 +191,14 @@ def ensure_env():
     print(f"PYTHONPATH : {os.environ.get('PYTHONPATH')}")
     return True
 
+
+def should_run_legacy_tune() -> bool:
+    # Legacy tuner can be noisy across repeated runs; keep it opt-in unless
+    # no legacy scaler exists yet.
+    if str(os.getenv("Q_ENABLE_LEGACY_TUNE", "0")).strip().lower() in {"1", "true", "yes", "on"}:
+        return True
+    return not (RUNS / "legacy_exposure.csv").exists()
+
 if __name__ == "__main__":
     strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
     if not ensure_env():
@@ -292,9 +300,13 @@ if __name__ == "__main__":
     # Feature neutralization between two feature sets
     ok, rc = run_script("tools/run_feature_neutralizer.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_feature_neutralizer.py", "code": rc})
-    # Legacy smooth scaler from DNA/heartbeat/symbolic/reflexive layers
-    ok, rc = run_script("tools/tune_legacy_knobs.py")
-    if not ok and rc is not None: failures.append({"step": "tools/tune_legacy_knobs.py", "code": rc})
+    # Legacy smooth scaler from DNA/heartbeat/symbolic/reflexive layers.
+    # Run only when bootstrapping or explicitly requested to avoid drift.
+    if should_run_legacy_tune():
+        ok, rc = run_script("tools/tune_legacy_knobs.py")
+        if not ok and rc is not None: failures.append({"step": "tools/tune_legacy_knobs.py", "code": rc})
+    else:
+        print("… skip (stable mode): tools/tune_legacy_knobs.py [set Q_ENABLE_LEGACY_TUNE=1 to retune]")
     # Pull recall context from NovaSpine and convert to a safe scalar boost.
     ok, rc = run_script("tools/run_novaspine_context.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_novaspine_context.py", "code": rc})

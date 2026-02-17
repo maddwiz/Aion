@@ -57,3 +57,29 @@ def test_default_aion_overlay_mirror_empty_when_no_aion_state(tmp_path: Path, mo
     monkeypatch.setattr(raip, "ROOT", root)
     mirror = raip.default_aion_overlay_mirror()
     assert mirror == ""
+
+
+def test_should_run_legacy_tune_when_missing(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(raip, "RUNS", runs)
+    monkeypatch.delenv("Q_ENABLE_LEGACY_TUNE", raising=False)
+    assert raip.should_run_legacy_tune() is True
+
+
+def test_should_skip_legacy_tune_when_present(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "legacy_exposure.csv").write_text("1.0\n", encoding="utf-8")
+    monkeypatch.setattr(raip, "RUNS", runs)
+    monkeypatch.delenv("Q_ENABLE_LEGACY_TUNE", raising=False)
+    assert raip.should_run_legacy_tune() is False
+
+
+def test_should_force_legacy_tune_with_env(monkeypatch, tmp_path: Path):
+    runs = tmp_path / "runs_plus"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / "legacy_exposure.csv").write_text("1.0\n", encoding="utf-8")
+    monkeypatch.setattr(raip, "RUNS", runs)
+    monkeypatch.setenv("Q_ENABLE_LEGACY_TUNE", "1")
+    assert raip.should_run_legacy_tune() is True
