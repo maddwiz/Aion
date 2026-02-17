@@ -31,6 +31,34 @@ cd "/Users/desmondpottle/Documents/New project/aion"
 AION_MODE=brain AION_TASK=trade ./run_aion.sh
 ```
 
+## Trading Modes
+
+AION now supports two runtime strategy modes:
+
+- `AION_TRADING_MODE=long_term` (default): slower cadence, wider targets, longer holds.
+- `AION_TRADING_MODE=day_skimmer`: 1-minute bar engine for intraday pattern skimming, tighter exits, higher trade cadence.
+
+Examples:
+
+```bash
+# Long-term swing mode
+AION_MODE=brain AION_TASK=trade AION_TRADING_MODE=long_term ./run_aion.sh
+
+# Day-trading skimmer mode (minute bars + after-hours enabled by default)
+AION_MODE=brain AION_TASK=trade AION_TRADING_MODE=day_skimmer ./run_aion.sh
+```
+
+`day_skimmer` aliases also work: `day`, `day_trading`, `intraday`, `skimmer`.
+
+Optional preset profiles (shared repo-level config):
+
+```bash
+# Uses config/aggressive.yaml -> aion_env defaults
+AION_PROFILE=aggressive AION_MODE=brain AION_TASK=trade ./run_aion.sh
+```
+
+`AION_PRESET_FILE=/absolute/path/to/profile.yaml` can point to a custom preset.
+
 Preflight doctor runs automatically before trading (set `AION_SKIP_DOCTOR=1` to bypass).
 `AION_DEGRADED_STARTUP=1` (default) keeps startup alive by falling back to the existing watchlist when needed.
 IB connection attempts also scan `AION_IB_PORT_CANDIDATES` (default: `IB_PORT,4002,7497,7496`) and auto-use the first working endpoint.

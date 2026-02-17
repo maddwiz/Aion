@@ -854,6 +854,10 @@ def save_runtime_controls_heartbeat(
         {
             "ts": dt.datetime.now().isoformat(),
             "day": str(day_key),
+            "trading_mode": str(getattr(cfg, "TRADING_MODE", "long_term")),
+            "hist_bar_size": str(getattr(cfg, "HIST_BAR_SIZE", "")),
+            "hist_duration": str(getattr(cfg, "HIST_DURATION", "")),
+            "hist_use_rth": bool(getattr(cfg, "HIST_USE_RTH", True)),
             "loop_seconds": int(cfg.LOOP_SECONDS),
             "watchlist_size": max(0, _safe_int(watchlist_size, 0)),
             "trades_today": max(0, _safe_int(trades_today, 0)),
@@ -1122,7 +1126,11 @@ def main() -> int:
         if samples > 0:
             log_run(f"Meta-label model trained on {samples} samples.")
 
-    log_run("Aion brain paper loop started (god-mode).")
+    log_run(
+        "Aion brain paper loop started (god-mode) "
+        f"[trading_mode={cfg.TRADING_MODE} bar={cfg.HIST_BAR_SIZE} loop={cfg.LOOP_SECONDS}s "
+        f"max_trades={cfg.MAX_TRADES_PER_DAY} max_hold={cfg.MAX_HOLD_CYCLES}]"
+    )
 
     try:
         while True:

@@ -78,6 +78,96 @@ def _dedupe_strs(values: list[str]) -> list[str]:
     return out
 
 
+def _canon_trading_mode(raw: str) -> str:
+    t = str(raw or "").strip().lower()
+    if t in {"skimmer", "day", "daytrading", "day_trading", "intraday", "scalp", "scalper", "day_skimmer"}:
+        return "day_skimmer"
+    return "long_term"
+
+
+def _mode_default(long_term_val, day_skimmer_val):
+    return day_skimmer_val if TRADING_MODE == "day_skimmer" else long_term_val
+
+
+def _strip_inline_comment(line: str) -> str:
+    s = str(line).rstrip("\n")
+    in_sq = False
+    in_dq = False
+    out = []
+    for ch in s:
+        if ch == "'" and not in_dq:
+            in_sq = not in_sq
+        elif ch == '"' and not in_sq:
+            in_dq = not in_dq
+        if ch == "#" and not in_sq and not in_dq:
+            break
+        out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _parse_simple_yaml_env(path: Path, section: str) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    current = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = _strip_inline_comment(raw)
+        if not line.strip():
+            continue
+        if not line.startswith((" ", "\t")) and line.endswith(":"):
+            current = line.strip()[:-1].strip()
+            continue
+        if current != section:
+            continue
+        if ":" not in line:
+            continue
+        stripped = line.strip()
+        key, val = stripped.split(":", 1)
+        k = key.strip()
+        v = val.strip()
+        if not k:
+            continue
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1]
+        out[k] = v
+    return out
+
+
+def _apply_aion_preset_defaults():
+    repo_root = Path(__file__).resolve().parents[2]
+    profile = str(os.getenv("AION_PROFILE", "default")).strip().lower() or "default"
+    preset_file = Path(os.getenv("AION_PRESET_FILE", str(repo_root / "config" / f"{profile}.yaml")))
+    env_map = _parse_simple_yaml_env(preset_file, "aion_env")
+    explicit_mode = os.getenv("AION_TRADING_MODE")
+    mode_sensitive = {
+        "AION_HIST_BAR_SIZE",
+        "AION_HIST_DURATION",
+        "AION_HIST_USE_RTH",
+        "AION_LOOP_SECONDS",
+        "AION_MAX_TRADES_PER_DAY",
+        "AION_MAX_OPEN_POSITIONS",
+        "AION_RISK_PER_TRADE",
+        "AION_ENTRY_THRESHOLD_LONG",
+        "AION_ENTRY_THRESHOLD_SHORT",
+        "AION_SIGNAL_MIN_MARGIN",
+        "AION_STOP_ATR_MULT",
+        "AION_TARGET_ATR_MULT",
+        "AION_TRAIL_ATR_MULT",
+        "AION_BREAKEVEN_R",
+        "AION_PARTIAL_TAKE_R",
+        "AION_MAX_HOLD_CYCLES",
+        "AION_MTF_CONFIRM_ENABLED",
+    }
+    for k, v in env_map.items():
+        if explicit_mode and (k in mode_sensitive):
+            continue
+        if k and (k not in os.environ):
+            os.environ[k] = str(v)
+
+
+_apply_aion_preset_defaults()
+
+
 AION_HOME = Path(os.getenv("AION_HOME", Path(__file__).resolve().parents[1]))
 Q_HOME = Path(os.getenv("AION_Q_HOME", AION_HOME.parent / "q"))
 LOG_DIR = Path(os.getenv("AION_LOG_DIR", AION_HOME / "logs"))
@@ -85,6 +175,8 @@ STATE_DIR = Path(os.getenv("AION_STATE_DIR", AION_HOME / "state"))
 UNIVERSE_DIR = Path(os.getenv("AION_UNIVERSE_DIR", AION_HOME / "universe"))
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+TRADING_MODE = _canon_trading_mode(os.getenv("AION_TRADING_MODE", "long_term"))
 
 IB_HOST = os.getenv("IB_HOST", "127.0.0.1")
 IB_PORT = int(os.getenv("IB_PORT", "4002"))
@@ -109,15 +201,15 @@ IB_WARMUP_SECONDS = int(os.getenv("AION_IB_WARMUP_SECONDS", "75"))
 IB_WARMUP_POLL_SECONDS = int(os.getenv("AION_IB_WARMUP_POLL_SECONDS", "5"))
 
 SHORTLIST_CAP = int(os.getenv("AION_SHORTLIST_CAP", "50"))
-HIST_BAR_SIZE = os.getenv("AION_HIST_BAR_SIZE", "5 mins")
-HIST_DURATION = os.getenv("AION_HIST_DURATION", "2 D")
-HIST_USE_RTH = _bool_env("AION_HIST_USE_RTH", True)
+HIST_BAR_SIZE = os.getenv("AION_HIST_BAR_SIZE", str(_mode_default("5 mins", "1 min")))
+HIST_DURATION = os.getenv("AION_HIST_DURATION", str(_mode_default("2 D", "3 D")))
+HIST_USE_RTH = _bool_env("AION_HIST_USE_RTH", bool(_mode_default(True, False)))
 MAIN_BARS_CACHE_SEC = int(os.getenv("AION_MAIN_BARS_CACHE_SEC", "25"))
 MTF_1H_CACHE_SEC = int(os.getenv("AION_MTF_1H_CACHE_SEC", "300"))
 MTF_4H_CACHE_SEC = int(os.getenv("AION_MTF_4H_CACHE_SEC", "900"))
 
 # Multi-timeframe confirmation
-MTF_CONFIRM_ENABLED = _bool_env("AION_MTF_CONFIRM_ENABLED", True)
+MTF_CONFIRM_ENABLED = _bool_env("AION_MTF_CONFIRM_ENABLED", bool(_mode_default(True, False)))
 MTF_1H_BAR = os.getenv("AION_MTF_1H_BAR", "1 hour")
 MTF_1H_DURATION = os.getenv("AION_MTF_1H_DURATION", "20 D")
 MTF_4H_BAR = os.getenv("AION_MTF_4H_BAR", "4 hours")
@@ -125,9 +217,9 @@ MTF_4H_DURATION = os.getenv("AION_MTF_4H_DURATION", "90 D")
 MTF_MIN_ALIGNMENT_SCORE = float(os.getenv("AION_MTF_MIN_ALIGNMENT_SCORE", "0.58"))
 
 EQUITY_START = float(os.getenv("AION_EQUITY_START", "5000"))
-RISK_PER_TRADE = float(os.getenv("AION_RISK_PER_TRADE", "0.02"))
-MAX_TRADES_PER_DAY = int(os.getenv("AION_MAX_TRADES_PER_DAY", "10"))
-MAX_OPEN_POSITIONS = int(os.getenv("AION_MAX_OPEN_POSITIONS", "5"))
+RISK_PER_TRADE = float(os.getenv("AION_RISK_PER_TRADE", str(_mode_default(0.02, 0.008))))
+MAX_TRADES_PER_DAY = int(os.getenv("AION_MAX_TRADES_PER_DAY", str(_mode_default(10, 30))))
+MAX_OPEN_POSITIONS = int(os.getenv("AION_MAX_OPEN_POSITIONS", str(_mode_default(5, 8))))
 MAX_POSITION_NOTIONAL_PCT = float(os.getenv("AION_MAX_POSITION_NOTIONAL_PCT", "0.22"))
 MAX_GROSS_LEVERAGE = float(os.getenv("AION_MAX_GROSS_LEVERAGE", "1.6"))
 DAILY_DRAWDOWN_LIMIT = float(os.getenv("AION_DAILY_DRAWDOWN_LIMIT", "0.10"))
@@ -170,16 +262,16 @@ DIVERGENCE_PRICE_MOVE_MIN = float(os.getenv("AION_DIVERGENCE_PRICE_MOVE_MIN", "0
 DIVERGENCE_RSI_DELTA_MIN = float(os.getenv("AION_DIVERGENCE_RSI_DELTA_MIN", "4.0"))
 DIVERGENCE_OBV_DELTA_MIN = float(os.getenv("AION_DIVERGENCE_OBV_DELTA_MIN", "0.0"))
 
-ENTRY_THRESHOLD_LONG = float(os.getenv("AION_ENTRY_THRESHOLD_LONG", "0.60"))
-ENTRY_THRESHOLD_SHORT = float(os.getenv("AION_ENTRY_THRESHOLD_SHORT", "0.60"))
-OPPOSITE_EXIT_THRESHOLD = float(os.getenv("AION_OPPOSITE_EXIT_THRESHOLD", "0.62"))
+ENTRY_THRESHOLD_LONG = float(os.getenv("AION_ENTRY_THRESHOLD_LONG", str(_mode_default(0.60, 0.63))))
+ENTRY_THRESHOLD_SHORT = float(os.getenv("AION_ENTRY_THRESHOLD_SHORT", str(_mode_default(0.60, 0.63))))
+OPPOSITE_EXIT_THRESHOLD = float(os.getenv("AION_OPPOSITE_EXIT_THRESHOLD", str(_mode_default(0.62, 0.58))))
 REENTRY_COOLDOWN_CYCLES = int(os.getenv("AION_REENTRY_COOLDOWN_CYCLES", "2"))
 
 CONFLUENCE_LONG_MIN = float(os.getenv("AION_CONFLUENCE_LONG_MIN", "0.46"))
 CONFLUENCE_SHORT_MIN = float(os.getenv("AION_CONFLUENCE_SHORT_MIN", "0.46"))
 CONFLUENCE_BOOST_MAX = float(os.getenv("AION_CONFLUENCE_BOOST_MAX", "0.12"))
 CONFLUENCE_PENALTY_MAX = float(os.getenv("AION_CONFLUENCE_PENALTY_MAX", "0.15"))
-SIGNAL_MIN_MARGIN = float(os.getenv("AION_SIGNAL_MIN_MARGIN", "0.05"))
+SIGNAL_MIN_MARGIN = float(os.getenv("AION_SIGNAL_MIN_MARGIN", str(_mode_default(0.05, 0.08))))
 
 REGIME_TH_SHIFT_TRENDING = float(os.getenv("AION_REGIME_TH_SHIFT_TRENDING", "-0.03"))
 REGIME_TH_SHIFT_SQUEEZE = float(os.getenv("AION_REGIME_TH_SHIFT_SQUEEZE", "0.02"))
@@ -194,13 +286,13 @@ REGIME_MARGIN_SHIFT_SQUEEZE = float(os.getenv("AION_REGIME_MARGIN_SHIFT_SQUEEZE"
 REGIME_MARGIN_SHIFT_CALM_RANGE = float(os.getenv("AION_REGIME_MARGIN_SHIFT_CALM_RANGE", "0.00"))
 REGIME_MARGIN_SHIFT_HIGH_VOL_CHOP = float(os.getenv("AION_REGIME_MARGIN_SHIFT_HIGH_VOL_CHOP", "0.03"))
 
-STOP_ATR_MULT = float(os.getenv("AION_STOP_ATR_MULT", "1.35"))
-TARGET_ATR_MULT = float(os.getenv("AION_TARGET_ATR_MULT", "2.8"))
-TRAIL_ATR_MULT = float(os.getenv("AION_TRAIL_ATR_MULT", "1.1"))
-BREAKEVEN_R = float(os.getenv("AION_BREAKEVEN_R", "1.0"))
-PARTIAL_TAKE_R = float(os.getenv("AION_PARTIAL_TAKE_R", "1.5"))
-PARTIAL_CLOSE_FRACTION = float(os.getenv("AION_PARTIAL_CLOSE_FRACTION", "0.40"))
-MAX_HOLD_CYCLES = int(os.getenv("AION_MAX_HOLD_CYCLES", "18"))
+STOP_ATR_MULT = float(os.getenv("AION_STOP_ATR_MULT", str(_mode_default(1.35, 0.90))))
+TARGET_ATR_MULT = float(os.getenv("AION_TARGET_ATR_MULT", str(_mode_default(2.8, 1.2))))
+TRAIL_ATR_MULT = float(os.getenv("AION_TRAIL_ATR_MULT", str(_mode_default(1.1, 0.7))))
+BREAKEVEN_R = float(os.getenv("AION_BREAKEVEN_R", str(_mode_default(1.0, 0.55))))
+PARTIAL_TAKE_R = float(os.getenv("AION_PARTIAL_TAKE_R", str(_mode_default(1.5, 0.8))))
+PARTIAL_CLOSE_FRACTION = float(os.getenv("AION_PARTIAL_CLOSE_FRACTION", str(_mode_default(0.40, 0.55))))
+MAX_HOLD_CYCLES = int(os.getenv("AION_MAX_HOLD_CYCLES", str(_mode_default(18, 6))))
 
 REGIME_ADX_TREND_MIN = float(os.getenv("AION_REGIME_ADX_TREND_MIN", "20.0"))
 REGIME_ATR_PCT_HIGH = float(os.getenv("AION_REGIME_ATR_PCT_HIGH", "0.045"))
@@ -209,8 +301,8 @@ REGIME_BB_SQUEEZE_PCT = float(os.getenv("AION_REGIME_BB_SQUEEZE_PCT", "0.06"))
 
 # Event/news risk filter
 EVENT_FILTER_ENABLED = _bool_env("AION_EVENT_FILTER_ENABLED", True)
-EVENT_BLOCK_OPEN_MIN = int(os.getenv("AION_EVENT_BLOCK_OPEN_MIN", "10"))
-EVENT_BLOCK_CLOSE_MIN = int(os.getenv("AION_EVENT_BLOCK_CLOSE_MIN", "10"))
+EVENT_BLOCK_OPEN_MIN = int(os.getenv("AION_EVENT_BLOCK_OPEN_MIN", str(_mode_default(10, 5))))
+EVENT_BLOCK_CLOSE_MIN = int(os.getenv("AION_EVENT_BLOCK_CLOSE_MIN", str(_mode_default(10, 5))))
 EVENT_BLOCK_FILE = Path(os.getenv("AION_EVENT_BLOCK_FILE", str(STATE_DIR / "event_blackouts.json")))
 
 # Meta label model
@@ -220,7 +312,7 @@ META_LABEL_TRAIN_MIN_SAMPLES = int(os.getenv("AION_META_LABEL_TRAIN_MIN_SAMPLES"
 META_LABEL_LR = float(os.getenv("AION_META_LABEL_LR", "0.05"))
 META_LABEL_EPOCHS = int(os.getenv("AION_META_LABEL_EPOCHS", "240"))
 
-LOOP_SECONDS = int(os.getenv("AION_LOOP_SECONDS", "30"))
+LOOP_SECONDS = int(os.getenv("AION_LOOP_SECONDS", str(_mode_default(30, 12))))
 SWING_LOOKBACK = int(os.getenv("AION_SWING_LOOKBACK", "60"))
 MIN_BARS = int(os.getenv("AION_MIN_BARS", "80"))
 RESTORE_RUNTIME_STATE = _bool_env("AION_RESTORE_RUNTIME_STATE", True)

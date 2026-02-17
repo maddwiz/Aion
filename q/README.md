@@ -82,6 +82,18 @@ If `../aion/state/` exists, the exporter now auto-mirrors overlay JSON there.
 ```
 This runs strict mode (`Q_STRICT=1`) and fails if critical health alerts trigger.
 If your default Python is missing deps, set `Q_PYTHON=/absolute/path/to/venv/bin/python`.
+
+### Publish investor-ready results snapshot
+After pipeline completion, publish a repo-level snapshot (equity/drawdown/benchmarks):
+```bash
+python tools/run_q_aion_integrated_backtest.py
+python tools/publish_results_snapshot.py
+```
+This writes:
+- `../results/walkforward_metrics.json`
+- `../results/walkforward_equity.csv`
+- `../results/benchmarks_metrics.csv`
+- `../results/governor_compound_summary.json`
 Extra alert thresholds (optional):
 ```bash
 export Q_MAX_SHOCK_RATE=0.25

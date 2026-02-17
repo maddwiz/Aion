@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -270,15 +271,22 @@ def test_build_events_falls_back_to_shadow_trades_aion_feedback(tmp_path, monkey
 
 def test_build_events_prefers_fresh_shadow_when_overlay_feedback_is_stale(tmp_path, monkeypatch):
     monkeypatch.setattr(sm, "RUNS", tmp_path)
+    now = datetime.now(timezone.utc)
+    ts = [
+        (now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S"),
+        (now - timedelta(hours=2, minutes=40)).strftime("%Y-%m-%d %H:%M:%S"),
+        (now - timedelta(hours=2, minutes=20)).strftime("%Y-%m-%d %H:%M:%S"),
+        (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"),
+    ]
     shadow = tmp_path / "shadow_trades.csv"
     shadow.write_text(
         "\n".join(
             [
                 "timestamp,symbol,side,pnl",
-                "2026-02-16 10:00:00,AAPL,EXIT_BUY,4.0",
-                "2026-02-16 10:05:00,MSFT,EXIT_SELL,-1.0",
-                "2026-02-16 10:10:00,NVDA,PARTIAL_BUY,2.0",
-                "2026-02-16 10:15:00,TSLA,EXIT_SELL,-0.5",
+                f"{ts[0]},AAPL,EXIT_BUY,4.0",
+                f"{ts[1]},MSFT,EXIT_SELL,-1.0",
+                f"{ts[2]},NVDA,PARTIAL_BUY,2.0",
+                f"{ts[3]},TSLA,EXIT_SELL,-0.5",
             ]
         ),
         encoding="utf-8",
@@ -314,15 +322,22 @@ def test_build_events_prefers_fresh_shadow_when_overlay_feedback_is_stale(tmp_pa
 
 def test_build_events_honors_shadow_source_preference(tmp_path, monkeypatch):
     monkeypatch.setattr(sm, "RUNS", tmp_path)
+    now = datetime.now(timezone.utc)
+    ts = [
+        (now - timedelta(minutes=25)).strftime("%Y-%m-%d %H:%M:%S"),
+        (now - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S"),
+        (now - timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M:%S"),
+        (now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"),
+    ]
     shadow = tmp_path / "shadow_trades.csv"
     shadow.write_text(
         "\n".join(
             [
                 "timestamp,symbol,side,pnl",
-                "2026-02-16 10:00:00,AAPL,EXIT_BUY,-6.0",
-                "2026-02-16 10:05:00,MSFT,EXIT_SELL,-5.0",
-                "2026-02-16 10:10:00,NVDA,PARTIAL_BUY,-4.0",
-                "2026-02-16 10:15:00,TSLA,EXIT_SELL,-3.0",
+                f"{ts[0]},AAPL,EXIT_BUY,-6.0",
+                f"{ts[1]},MSFT,EXIT_SELL,-5.0",
+                f"{ts[2]},NVDA,PARTIAL_BUY,-4.0",
+                f"{ts[3]},TSLA,EXIT_SELL,-3.0",
             ]
         ),
         encoding="utf-8",

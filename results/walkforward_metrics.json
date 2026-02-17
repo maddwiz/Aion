@@ -1,0 +1,282 @@
+{
+  "generated_at_utc": "2026-02-17T11:47:05.611599+00:00",
+  "source_returns": "runs_plus/wf_oos_returns.csv",
+  "primary_metrics": {
+    "n": 795,
+    "sharpe": 1.3606347588882113,
+    "hit_rate": 0.4779874213836478,
+    "ann_return": 0.07538656680663791,
+    "ann_vol": 0.055405439477849046,
+    "max_drawdown": -0.029478198678676848
+  },
+  "strict_oos": {
+    "method": "strict_holdout_costed",
+    "source": "runs_plus/daily_returns.csv",
+    "rows_total": 3179,
+    "split_index": 2384,
+    "train_frac_requested": 0.75,
+    "train_rows": 2384,
+    "oos_rows": 795,
+    "metrics_full_net": {
+      "n": 3179,
+      "mean_daily": 0.0004767288637521818,
+      "vol_daily": 0.005332589153815978,
+      "sharpe": 1.4191672899369145,
+      "hit_rate": 0.48348537275872916,
+      "max_drawdown": -0.06381462300847629,
+      "ann_return_arith": 0.12013567366554981,
+      "ann_vol": 0.08465222847046464
+    },
+    "metrics_train_net": {
+      "n": 2384,
+      "mean_daily": 0.0005359456328757619,
+      "vol_daily": 0.005817918054479908,
+      "sharpe": 1.4623569952985345,
+      "hit_rate": 0.4853187919463087,
+      "max_drawdown": -0.06381462300847629,
+      "ann_return_arith": 0.135058299484692,
+      "ann_vol": 0.09235658592183942
+    },
+    "metrics_oos_net": {
+      "n": 795,
+      "mean_daily": 0.0002991530428834838,
+      "vol_daily": 0.0034880188290936265,
+      "sharpe": 1.3614913121732355,
+      "hit_rate": 0.4779874213836478,
+      "max_drawdown": -0.029796042695513975,
+      "ann_return_arith": 0.07538656680663791,
+      "ann_vol": 0.05537058234055465
+    },
+    "metrics_oos_robust": {
+      "n": 252,
+      "sharpe": 1.5558972501590047,
+      "hit_rate": 0.4784688995215311,
+      "max_drawdown": -0.06381462300847576,
+      "sharpe_p25": 1.4744744156682021,
+      "hit_rate_p25": 0.4779874213836478,
+      "max_drawdown_worst": -0.06381462300847596,
+      "num_splits": 5
+    },
+    "metrics_oos_latest": {
+      "n": 252,
+      "mean_daily": 0.0004102223274672506,
+      "vol_daily": 0.003957301347296908,
+      "sharpe": 1.645585461616373,
+      "hit_rate": 0.46825396825396826,
+      "max_drawdown": -0.029796042695513947,
+      "ann_return_arith": 0.10337602652174716,
+      "ann_vol": 0.06282021136733079
+    },
+    "latest_holdout_days_requested": 252,
+    "latest_holdout_days_used": 252,
+    "robust_oos_splits_file": "/Users/desmondpottle/Documents/New project/q/runs_plus/strict_oos_splits.json",
+    "cost_context": {
+      "gross_full": {
+        "n": 3179,
+        "mean_daily": 0.0006040670919290955,
+        "vol_daily": 0.005333661878382265,
+        "sharpe": 1.7978769598276003,
+        "hit_rate": 0.5017301038062284,
+        "max_drawdown": -0.060479688070639914,
+        "ann_return_arith": 0.15222490716613207,
+        "ann_vol": 0.08466925744503064
+      },
+      "cost": {
+        "mean_daily": 0.00012733822817691376,
+        "ann_cost_estimate": 0.032089233500582265,
+        "sum": 0.4048082273744088
+      }
+    }
+  },
+  "cost_stress": {
+    "ok": false,
+    "weights_source": "runs_plus/portfolio_weights_final.csv",
+    "rows_total": 3179,
+    "thresholds": {
+      "min_robust_sharpe": 0.9,
+      "min_robust_hit_rate": 0.48,
+      "min_robust_hit_rate_effective": 0.475,
+      "robust_hit_rate_tolerance": 0.005,
+      "max_abs_robust_mdd": 0.12
+    },
+    "settings": {
+      "bps_list": [
+        10.0,
+        15.0,
+        20.0
+      ],
+      "vol_scaled_bps": 0.6897987767221483,
+      "vol_lookback": 20,
+      "vol_ref_daily": 0.0063,
+      "half_turnover": true,
+      "fixed_daily_fee": 0.0,
+      "cash_yield_annual": 0.01,
+      "cash_exposure_target": 1.0
+    },
+    "worst_case_robust": {
+      "sharpe": 1.12495580933926,
+      "hit_rate": 0.45720361509835195,
+      "hit_rate_n": 252,
+      "max_drawdown": -0.07281299912067271
+    },
+    "scenarios": [
+      {
+        "base_bps": 10.0,
+        "oos_sharpe": 1.3614913121732355,
+        "oos_hit_rate": 0.4779874213836478,
+        "oos_max_drawdown": -0.029796042695513975,
+        "oos_n": 795,
+        "oos_robust_sharpe": 1.5558972501590047,
+        "oos_robust_hit_rate": 0.4784688995215311,
+        "oos_robust_max_drawdown": -0.06381462300847576,
+        "oos_robust_n": 252,
+        "ann_cost_estimate": 0.032089233500582265
+      },
+      {
+        "base_bps": 15.0,
+        "oos_sharpe": 1.1032904136319437,
+        "oos_hit_rate": 0.4666666666666667,
+        "oos_max_drawdown": -0.030912389817248864,
+        "oos_n": 795,
+        "oos_robust_sharpe": 1.3405218187877497,
+        "oos_robust_hit_rate": 0.46943115364168,
+        "oos_robust_max_drawdown": -0.06831381106457424,
+        "oos_robust_n": 252,
+        "ann_cost_estimate": 0.047335078849266674
+      },
+      {
+        "base_bps": 20.0,
+        "oos_sharpe": 0.844831675165983,
+        "oos_hit_rate": 0.45031446540880504,
+        "oos_max_drawdown": -0.03202873693898392,
+        "oos_n": 795,
+        "oos_robust_sharpe": 1.12495580933926,
+        "oos_robust_hit_rate": 0.45720361509835195,
+        "oos_robust_max_drawdown": -0.07281299912067271,
+        "oos_robust_n": 252,
+        "ann_cost_estimate": 0.06258092419795108
+      }
+    ],
+    "reasons": [
+      "cost_stress_robust_hit<0.475 (0.457; tol=0.005)"
+    ]
+  },
+  "final_portfolio_info": {
+    "steps": [
+      "base=runs_plus/weights_asset_class_diversified.csv",
+      "asset_class_diversification",
+      "adaptive_caps",
+      "turnover_governor",
+      "turnover_source=runs_plus/weights_turnover_budget_governed.csv",
+      "meta_execution_gate",
+      "council_gate",
+      "meta_mix_leverage",
+      "meta_mix_reliability",
+      "legacy_scaler",
+      "dna_stress_governor",
+      "hive_diversification",
+      "hive_persistence",
+      "regime_fracture_governor",
+      "shock_mask_guard",
+      "vol_target",
+      "runtime_floor",
+      "concentration_governor",
+      "signal_deadzone"
+    ],
+    "T": 3179,
+    "N": 41,
+    "disabled_governors": [
+      "asset_class_diversification",
+      "capacity_impact_guard",
+      "dream_coherence",
+      "execution_hit_gate",
+      "global_governor",
+      "heartbeat_scaler",
+      "low_vol_sleeve_blend",
+      "macro_proxy_guard",
+      "novaspine_context_boost",
+      "novaspine_hive_boost",
+      "quality_governor",
+      "rank_sleeve_blend",
+      "reflex_health_governor",
+      "regime_moe_governor",
+      "symbolic_governor",
+      "uncertainty_sizing"
+    ],
+    "runtime_total_floor_target": 0.22,
+    "governor_params_profile_file": "/Users/desmondpottle/Documents/New project/q/runs_plus/governor_params_profile.json",
+    "governor_params_applied": {
+      "runtime_total_floor": 0.22,
+      "shock_alpha": 0.8,
+      "rank_sleeve_blend": 0.027669876018997355,
+      "low_vol_sleeve_blend": 0.0,
+      "meta_execution_gate_strength": 1.1500000000000001,
+      "hit_gate_strength": 0.0,
+      "hit_gate_threshold": 0.4058429447740963,
+      "hit_gate_floor": 0.35,
+      "hit_gate_ceiling": 1.05,
+      "hit_gate_slope": 14.0,
+      "signal_deadzone": 0.0015,
+      "signal_deadzone_hit_sens": 1.0,
+      "council_gate_strength": 0.65,
+      "meta_mix_leverage_strength": 1.2000000000000002,
+      "meta_reliability_strength": 0.7000000000000001,
+      "global_governor_strength": 0.8,
+      "heartbeat_scaler_strength": 1.2000000000000002,
+      "quality_governor_strength": 0.8,
+      "regime_moe_strength": 0.0,
+      "uncertainty_sizing_strength": 1.25,
+      "capacity_impact_strength": 0.0,
+      "macro_proxy_strength": 0.0,
+      "vol_target_strength": 0.45,
+      "vol_target_annual": 0.1,
+      "vol_target_lookback": 63,
+      "vol_target_min_scalar": 0.4,
+      "vol_target_max_scalar": 1.4,
+      "vol_target_smooth_alpha": 0.1,
+      "use_concentration_governor": true,
+      "concentration_top1_cap": 0.16,
+      "concentration_top3_cap": 0.38,
+      "concentration_max_hhi": 0.12,
+      "auto_turnover_max_step": 0.3,
+      "auto_turnover_budget_window": 5,
+      "auto_turnover_budget_limit": 1.0
+    },
+    "governor_trace_file": "/Users/desmondpottle/Documents/New project/q/runs_plus/final_governor_trace.csv",
+    "runtime_total_scalar_mean": 0.546090672823471,
+    "runtime_total_scalar_min": 0.21999999999999997,
+    "runtime_total_scalar_max": 1.4609877534216276,
+    "signal_deadzone_info_file": "/Users/desmondpottle/Documents/New project/q/runs_plus/signal_deadzone_info.json"
+  },
+  "governor_compound": {
+    "ok": true,
+    "rows": 3179,
+    "mean": 0.5460906728234709,
+    "median": 0.4890520379970294,
+    "p10": 0.21999999999999995,
+    "min": 0.21999999999999975,
+    "max": 1.4609877534216273,
+    "below_0_20_share": 0.0,
+    "below_0_10_share": 0.0
+  },
+  "benchmarks": [
+    {
+      "n": 795,
+      "sharpe": 1.1406856466108117,
+      "hit_rate": 0.5471698113207547,
+      "ann_return": 0.19584529076327253,
+      "ann_vol": 0.1716908521879427,
+      "max_drawdown": -0.18755235977795526,
+      "symbol": "SPY"
+    },
+    {
+      "n": 795,
+      "sharpe": 1.14071625432128,
+      "hit_rate": 0.5522012578616352,
+      "ann_return": 0.2527699786874534,
+      "ann_vol": 0.22158882869582833,
+      "max_drawdown": -0.2276830354959355,
+      "symbol": "QQQ"
+    }
+  ]
+}

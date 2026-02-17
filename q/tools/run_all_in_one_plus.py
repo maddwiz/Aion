@@ -22,6 +22,63 @@ RUNS.mkdir(exist_ok=True)
 
 PY = sys.executable  # may be overridden by dependency-aware selector.
 
+
+def _strip_inline_comment(line: str) -> str:
+    s = str(line).rstrip("\n")
+    in_sq = False
+    in_dq = False
+    out = []
+    for ch in s:
+        if ch == "'" and not in_dq:
+            in_sq = not in_sq
+        elif ch == '"' and not in_sq:
+            in_dq = not in_dq
+        if ch == "#" and not in_sq and not in_dq:
+            break
+        out.append(ch)
+    return "".join(out).rstrip()
+
+
+def _parse_simple_yaml_env(path: Path, section: str) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    out: dict[str, str] = {}
+    current = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = _strip_inline_comment(raw)
+        if not line.strip():
+            continue
+        if not line.startswith((" ", "\t")) and line.endswith(":"):
+            current = line.strip()[:-1].strip()
+            continue
+        if current != section:
+            continue
+        if ":" not in line:
+            continue
+        stripped = line.strip()
+        key, val = stripped.split(":", 1)
+        k = key.strip()
+        v = val.strip()
+        if not k:
+            continue
+        if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+            v = v[1:-1]
+        out[k] = v
+    return out
+
+
+def apply_q_preset_defaults():
+    profile = str(os.getenv("Q_PROFILE", "default")).strip().lower() or "default"
+    preset_file = Path(os.getenv("Q_PRESET_FILE", str(ROOT.parent / "config" / f"{profile}.yaml")))
+    env_map = _parse_simple_yaml_env(preset_file, "q_env")
+    applied = {}
+    for k, v in env_map.items():
+        if k and (k not in os.environ):
+            os.environ[k] = str(v)
+            applied[k] = str(v)
+    if applied:
+        print(f"↺ applied Q profile defaults ({profile}): {applied}")
+
 def exists(fp: Path) -> bool:
     return fp.exists()
 
@@ -318,6 +375,7 @@ def should_auto_ingest_new_assets() -> bool:
 
 if __name__ == "__main__":
     strict = str(os.getenv("Q_STRICT", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    apply_q_preset_defaults()
     if not ensure_env():
         write_pipeline_status([{"step": "env_preflight", "code": 2}], strict_mode=strict)
         raise SystemExit(2)
