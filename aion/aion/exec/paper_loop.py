@@ -2886,6 +2886,13 @@ def main() -> int:
                         indicator_hits=int(signal.get("indicator_hits", 0)),
                     )
 
+                    current_bar_ts = ""
+                    try:
+                        if hasattr(df, "index") and len(df.index) > 0:
+                            current_bar_ts = str(df.index[-1])
+                    except Exception:
+                        current_bar_ts = ""
+
                     pos = open_positions.get(sym)
 
                     # Manage open positions
