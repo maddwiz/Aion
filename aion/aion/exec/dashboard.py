@@ -228,6 +228,17 @@ def _equity_pnl_summary(path: Path) -> dict:
     return out
 
 
+def _closed_trades_from_shadow(path: Path) -> int | None:
+    rows = _tail_csv(path, limit=20000)
+    if not rows:
+        return None
+    count = 0
+    for r in rows:
+        if str((r or {}).get("status", "")).strip().upper() == "CLOSED":
+            count += 1
+    return int(count)
+
+
 def _doctor_check(doctor: dict, name: str):
     checks = doctor.get("checks", []) if isinstance(doctor, dict) else []
     if not isinstance(checks, list):
@@ -282,6 +293,18 @@ def _status_payload():
     ext_runtime = overlay_runtime_status(cfg.EXT_SIGNAL_FILE, max_age_hours=float(cfg.EXT_SIGNAL_MAX_AGE_HOURS))
 
     trade_metrics = perf.get("trade_metrics", {})
+    if not isinstance(trade_metrics, dict):
+        trade_metrics = {}
+    trade_metrics = dict(trade_metrics)
+    closed_trades = _to_int(trade_metrics.get("closed_trades"), 0)
+    if closed_trades <= 0:
+        closed_runtime = _to_int((runtime_controls if isinstance(runtime_controls, dict) else {}).get("aion_feedback_closed_trades"), 0)
+        if closed_runtime > 0:
+            trade_metrics["closed_trades"] = int(closed_runtime)
+        else:
+            closed_shadow = _closed_trades_from_shadow(cfg.LOG_DIR / "shadow_trades.csv")
+            if isinstance(closed_shadow, int) and closed_shadow > 0:
+                trade_metrics["closed_trades"] = int(closed_shadow)
     equity_metrics = perf.get("equity_metrics", {})
     signal_rows = _tail_csv(cfg.LOG_DIR / "signals.csv", limit=200)
     signal_gate_summary = _signal_gate_summary(signal_rows)

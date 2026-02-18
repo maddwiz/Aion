@@ -291,3 +291,51 @@ def test_tail_jsonl_returns_last_rows(tmp_path: Path):
     rows = dash._tail_jsonl(p, limit=1)
     assert len(rows) == 1
     assert rows[0]["symbol"] == "MSFT"
+
+
+def test_status_payload_closed_trades_falls_back_to_runtime_controls(tmp_path: Path, monkeypatch):
+    log_dir = tmp_path / "logs"
+    state_dir = tmp_path / "state"
+    ops_status = tmp_path / "ops_guard_status.json"
+    monkeypatch.setattr(dash.cfg, "LOG_DIR", log_dir)
+    monkeypatch.setattr(dash.cfg, "STATE_DIR", state_dir)
+    monkeypatch.setattr(dash.cfg, "OPS_GUARD_STATUS_FILE", ops_status)
+    monkeypatch.setattr(dash.cfg, "OPS_GUARD_TARGETS", ["trade", "dashboard"])
+    monkeypatch.setattr(dash.cfg, "TELEMETRY_SUMMARY_FILE", state_dir / "telemetry_summary.json")
+    overlay_file = tmp_path / "q_signal_overlay.json"
+    monkeypatch.setattr(dash.cfg, "EXT_SIGNAL_FILE", overlay_file)
+    monkeypatch.setattr(dash.cfg, "EXT_SIGNAL_MAX_AGE_HOURS", 12.0)
+
+    _write(log_dir / "doctor_report.json", {"ok": True, "checks": []})
+    _write(log_dir / "runtime_monitor.json", {"alerts": [], "system_events": []})
+    _write(log_dir / "performance_report.json", {"trade_metrics": {"closed_trades": 0}, "equity_metrics": {}})
+    _write(state_dir / "strategy_profile.json", {"trading_enabled": True, "adaptive_stats": {}})
+    _write(state_dir / "telemetry_summary.json", {})
+    _write(
+        ops_status,
+        {
+            "running": {
+                "trade": {"running": True, "pids": [123]},
+                "dashboard": {"running": True, "pids": [456]},
+            }
+        },
+    )
+    _write(
+        state_dir / "runtime_controls.json",
+        {
+            "aion_feedback_closed_trades": 16,
+        },
+    )
+    _write(
+        overlay_file,
+        {
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "signals": {"AAPL": {"bias": 0.2, "confidence": 0.8}},
+            "quality_gate": {"ok": True},
+            "runtime_context": {"runtime_multiplier": 0.93, "risk_flags": []},
+            "degraded_safe_mode": False,
+        },
+    )
+
+    s = dash._status_payload()
+    assert s["trade_metrics"]["closed_trades"] == 16
