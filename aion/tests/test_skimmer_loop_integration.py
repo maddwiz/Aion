@@ -41,6 +41,14 @@ class _ExecNoFillStub:
         )
 
 
+class _ExecFailIfCalledStub:
+    def __init__(self, _cfg):
+        pass
+
+    def execute(self, *, side, qty, ref_price, atr_pct, confidence, allow_partial):
+        raise AssertionError("Execution should not be called when capital gate blocks entry")
+
+
 def _bars_1m(n: int = 120) -> pd.DataFrame:
     idx = pd.date_range("2026-01-06 09:30:00", periods=n, freq="min")
     base = 100.0 + np.linspace(0.0, 1.2, n) + 0.08 * np.sin(np.arange(n) / 6.0)
@@ -460,3 +468,41 @@ def test_tick_caps_long_quantity_to_available_cash(monkeypatch, tmp_path):
     extras = entries[-1].get("extras", {})
     assert int(extras.get("requested_qty", 0)) == 1
     assert int(extras.get("sizing_qty", 0)) >= 1
+
+
+def test_tick_logs_skip_capital_when_cash_cannot_afford_one_share(monkeypatch, tmp_path):
+    _configure_cfg(monkeypatch, tmp_path)
+    monkeypatch.setattr(skl.cfg, "EQUITY_START", 50.0, raising=False)
+    bars = _bars_1m(140)
+
+    monkeypatch.setattr(skl, "SkimmerWatchlistManager", _WatchlistStub)
+    monkeypatch.setattr(skl, "ExecutionSimulator", _ExecFailIfCalledStub)
+    monkeypatch.setattr(skl, "ib", lambda: None)
+    monkeypatch.setattr(skl, "hist_bars_cached", lambda *args, **kwargs: bars.copy())
+    monkeypatch.setattr(skl, "load_external_signal_bundle", lambda **kwargs: {"signals": {"AAPL": {"bias": 0.6, "confidence": 0.9}}})
+    monkeypatch.setattr(skl, "emit_trade_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(skl, "build_trade_event", lambda **kwargs: kwargs)
+    monkeypatch.setattr(skl, "write_telemetry_summary", lambda **kwargs: None)
+    monkeypatch.setattr(skl, "log_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(skl, "log_trade", lambda *args, **kwargs: None)
+    monkeypatch.setattr(skl, "log_equity", lambda *args, **kwargs: None)
+    monkeypatch.setattr(skl, "detect_all_intraday_patterns", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        skl,
+        "score_intraday_entry",
+        lambda bundle, _cfg: SimpleNamespace(
+            score=0.90 if bundle.side == "LONG" else 0.10,
+            entry_allowed=(bundle.side == "LONG"),
+            reasons=["align"],
+            category_scores={"session_structure": 0.9},
+        ),
+    )
+
+    loop = skl.SkimmerLoop(skl.cfg)
+    loop.tick()
+
+    assert "AAPL" not in loop.open_trades
+
+    decisions = (tmp_path / "skimmer_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    actions = [json.loads(line).get("action") for line in decisions if line.strip()]
+    assert "SKIP_CAPITAL" in actions

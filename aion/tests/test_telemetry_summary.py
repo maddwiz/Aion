@@ -92,3 +92,43 @@ def test_write_telemetry_summary_creates_json_output(tmp_path):
     assert saved["closed_trade_events"] == 1
     assert saved["rolling_window"] == 5
     assert payload["closed_trade_events"] == 1
+
+
+def test_build_telemetry_summary_reads_entry_signal_categories_from_extras(tmp_path):
+    decisions = tmp_path / "trade_decisions.jsonl"
+    _write_jsonl(
+        decisions,
+        [
+            {
+                "timestamp": "2026-02-18T16:00:00Z",
+                "symbol": "NVDA",
+                "decision": "EXIT_TRAILING_STOP",
+                "regime": "trend_day",
+                "extras": {
+                    "pnl_realized": 42.0,
+                    "entry_category_scores": {
+                        "pattern_confluence": 0.92,
+                        "session_structure": 0.70,
+                    },
+                },
+            },
+            {
+                "timestamp": "2026-02-18T16:05:00Z",
+                "symbol": "QQQ",
+                "decision": "EXIT_INITIAL_STOP",
+                "regime": "range_day",
+                "extras": {
+                    "pnl_realized": -35.0,
+                    "entry_category_scores": {
+                        "multi_timeframe": 0.88,
+                        "session_structure": 0.41,
+                    },
+                },
+            },
+        ],
+    )
+
+    out = build_telemetry_summary(decisions_path=decisions, rolling_window=20)
+    assert out["closed_trade_events"] == 2
+    assert out["top_win_signal_category"] == "pattern_confluence"
+    assert out["top_loss_signal_category"] == "multi_timeframe"

@@ -41,10 +41,10 @@ Validation status:
 - Latest council-member stability run (`test_council_member_overlays.py`): `5 passed`.
 - Latest skimmer lifecycle run (`test_skimmer_loop_integration.py`): `4 passed`.
 - Latest skimmer integration hardening run (`test_skimmer_loop_integration.py`): `8 passed`.
-- Latest targeted telemetry+skimmer run (`test_skimmer_loop_integration.py` + `test_telemetry_summary.py`): `10 passed`.
+- Latest targeted telemetry+skimmer run (`test_skimmer_loop_integration.py` + `test_telemetry_summary.py`): `12 passed`.
 - Latest asymmetric-stop run (`test_partial_profit_trailing_stop.py`): `8 passed`.
 - Latest runtime-search validation run (`test_run_runtime_combo_search.py`): `21 passed`.
-- Latest CI-equivalent run (`.github/workflows/ci.yml` command + asymmetric-stop file): `558 passed`.
+- Latest CI-equivalent run (`.github/workflows/ci.yml` command + asymmetric-stop file): `560 passed`.
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
 
 ## 3) Top-Level File Map
