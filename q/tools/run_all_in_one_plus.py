@@ -134,6 +134,11 @@ def run_script(relpath: str, args=None):
         print(f"(!) {relpath} exited with code {cp.returncode} — continuing.")
     return ok, cp.returncode
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.getenv(name, "1" if default else "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
 def write_pipeline_status(failures, strict_mode: bool):
     payload = {
         "strict_mode": bool(strict_mode),
@@ -436,8 +441,14 @@ if __name__ == "__main__":
         raise SystemExit(2)
     apply_performance_defaults()
     apply_profile_env_defaults()
-    # External holdout is optional in default unattended runs unless explicitly required.
-    os.environ["Q_EXTERNAL_HOLDOUT_ALLOW_SKIP"] = "1"
+    # External holdout gating defaults:
+    # - require external holdout unless explicitly disabled
+    # - disallow skip when holdout is required
+    if "Q_EXTERNAL_HOLDOUT_REQUIRED" not in os.environ:
+        os.environ["Q_EXTERNAL_HOLDOUT_REQUIRED"] = os.getenv("Q_PROMOTION_REQUIRE_EXTERNAL_HOLDOUT", "1")
+    if "Q_EXTERNAL_HOLDOUT_ALLOW_SKIP" not in os.environ:
+        required_holdout = _env_bool("Q_EXTERNAL_HOLDOUT_REQUIRED", True)
+        os.environ["Q_EXTERNAL_HOLDOUT_ALLOW_SKIP"] = "0" if required_holdout else "1"
     failures = []
     # Reset status at run start so alert checks do not read stale failures.
     write_pipeline_status([], strict_mode=strict)
@@ -670,6 +681,9 @@ if __name__ == "__main__":
     # Cost sensitivity stress on strict OOS at higher friction assumptions.
     ok, rc = run_script("tools/run_cost_stress_validation.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_cost_stress_validation.py", "code": rc})
+    # Build/update external untouched holdout dataset from q/data source files.
+    ok, rc = run_script("tools/build_external_holdout_from_data.py")
+    if not ok and rc is not None: failures.append({"step": "tools/build_external_holdout_from_data.py", "code": rc})
     # Optional external untouched holdout validation (data_holdout or explicit returns file).
     ok, rc = run_script("tools/run_external_holdout_validation.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_external_holdout_validation.py", "code": rc})

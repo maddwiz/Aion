@@ -63,7 +63,7 @@ def _load_series(path: Path) -> np.ndarray | None:
 def _rolling_realized_vol(r: np.ndarray, lookback: int = 21) -> np.ndarray:
     s = pd.Series(np.asarray(r, float).ravel())
     rv = s.rolling(int(max(5, lookback)), min_periods=max(5, int(lookback // 2))).std(ddof=1) * np.sqrt(252.0)
-    return rv.fillna(method="ffill").fillna(method="bfill").fillna(0.0).values.astype(float)
+    return rv.ffill().bfill().fillna(0.0).values.astype(float)
 
 
 def _zscore_rolling(x: np.ndarray, window: int = 63) -> np.ndarray:

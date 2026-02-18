@@ -203,6 +203,13 @@ if [[ "$AION_MODE" == "brain" ]]; then
           echo "[AION] WARN: adaptive profile refresh failed; continuing with existing profile."
         fi
       fi
+      if [[ "${AION_ENFORCE_READINESS_PRECHECK:-1}" == "1" ]]; then
+        echo "[AION] Running paper-live readiness precheck..."
+        if ! "$PYTHON_BIN" "$ROOT/tools/paper_live_readiness.py"; then
+          echo "[AION] ERROR: paper-live readiness precheck failed."
+          exit 1
+        fi
+      fi
       echo "[AION] Starting brain paper loop..."
       exec "$PYTHON_BIN" -m aion.exec.paper_loop
       ;;
