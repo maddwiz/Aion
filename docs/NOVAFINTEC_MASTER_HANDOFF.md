@@ -19,6 +19,7 @@ Implemented and validated:
 - External untouched holdout protocol (`run_external_holdout_validation.py`) integrated into pipeline.
 - Complexity penalties in search/tuning (`run_runtime_combo_search.py`, `run_governor_param_sweep.py`).
 - Sharpe consistency patch in governor sweep metrics (`run_governor_param_sweep.py` now uses sample std `ddof=1`).
+- Extended sample-std consistency audit in `q/tools` Sharpe/vol helpers (active runtime/report scripts now use `ddof=1` where applicable).
 - Opt-in governor walk-forward validator (`run_governor_walkforward.py`) with expanding folds and OOS aggregation.
 - Class-aware execution friction in daily cost engine (`make_daily_from_weights.py`).
 - Local multi-asset bundle ingestion (`ingest_multi_asset_csv_bundle.py`).

@@ -46,7 +46,7 @@ def smart_load_returns(path: Path, prefer="auto"):
 
 def ann_sharpe(r):
     r = pd.Series(r).dropna()
-    s = r.std()
+    s = r.std(ddof=1)
     if s == 0 or pd.isna(s): return 0.0
     return float((r.mean() / s) * (252.0 ** 0.5))
 

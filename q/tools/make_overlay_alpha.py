@@ -26,7 +26,7 @@ PRICE_COLS   = ["Close","Adj Close","Adjusted Close","close","Price","Last"]
 
 def _zscore(x):
     s = pd.Series(x)
-    m, sd = s.mean(), s.std()
+    m, sd = s.mean(), s.std(ddof=1)
     if not np.isfinite(sd) or sd == 0: return pd.Series(np.zeros(len(s)), index=s.index)
     return (s - m) / sd
 
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # calmness: inverse of realized vol of main portfolio returns
     dates, port_r = _load_portfolio_returns()
     s = pd.Series(port_r, index=pd.to_datetime(dates))
-    rv = s.rolling(RET_WINDOW, min_periods=max(5,RET_WINDOW//3)).std()
+    rv = s.rolling(RET_WINDOW, min_periods=max(5,RET_WINDOW//3)).std(ddof=1)
     calm = -rv  # lower vol → higher calm (more positive)
 
     # align indexes

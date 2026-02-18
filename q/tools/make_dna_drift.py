@@ -114,7 +114,7 @@ if __name__ == "__main__":
 
     r  = df["ret"].fillna(0.0)
     eq = (1.0 + r).cumprod()
-    vol20   = r.rolling(20, min_periods=10).std() * np.sqrt(252.0)
+    vol20   = r.rolling(20, min_periods=10).std(ddof=1) * np.sqrt(252.0)
     trend63 = _trend_strength(eq, 63)
     chop21  = _choppiness(r, 21)
 
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     X = feats[cols].astype(float)
 
     # zscore per column (robust clip)
-    Xz = (X - X.rolling(W, min_periods=20).median()) / (X.rolling(W, min_periods=20).std().replace(0, np.nan))
+    Xz = (X - X.rolling(W, min_periods=20).median()) / (X.rolling(W, min_periods=20).std(ddof=1).replace(0, np.nan))
     Xz = Xz.fillna(0.0).clip(-5,5)
 
     # drift = cosine distance to rolling median vector

@@ -31,7 +31,7 @@ def smart_load(path: Path, prefer="auto"):
     return pd.DataFrame({"DATE": df[dcol], "ret": r})
 
 def ann_sharpe(r):
-    r=pd.Series(r).dropna(); s=r.std()
+    r=pd.Series(r).dropna(); s=r.std(ddof=1)
     if s==0 or pd.isna(s): return 0.0
     return float((r.mean()/s)*(252**0.5))
 

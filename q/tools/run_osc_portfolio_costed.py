@@ -43,7 +43,7 @@ def to_returns_and_level(val: pd.Series):
 
 def ann_sharpe(r):
     r = pd.Series(r).replace([np.inf,-np.inf], np.nan).dropna()
-    s = r.std()
+    s = r.std(ddof=1)
     if s == 0 or np.isnan(s): 
         return 0.0
     return float((r.mean()/s)*np.sqrt(252))

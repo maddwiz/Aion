@@ -22,7 +22,7 @@ if "def apply_postprocess(" not in txt:
         "import numpy as np\n\n"
         "def _vol_scale(series, window=20, eps=1e-8):\n"
         "    r = series.pct_change().fillna(0.0)\n"
-        "    vol = r.rolling(window).std().fillna(method='bfill').replace(0, eps)\n"
+        "    vol = r.rolling(window).std(ddof=1).fillna(method='bfill').replace(0, eps)\n"
         "    return vol\n\n"
         "def apply_postprocess(meta_signal, price_series, vix_series=None, k=2.0):\n"
         "    # shrink on storm days if VIX provided\n"

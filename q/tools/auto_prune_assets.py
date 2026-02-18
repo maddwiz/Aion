@@ -57,7 +57,7 @@ def per_asset_sharpes():
         s = df["pnl_plus"].dropna()
         if len(s) < 10: 
             continue
-        sh = (s.mean() / (s.std() + 1e-9)) * (252 ** 0.5)
+        sh = (s.mean() / (s.std(ddof=1) + 1e-9)) * (252 ** 0.5)
         sharpes[d.name] = float(sh)
     return sharpes
 

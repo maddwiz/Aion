@@ -50,7 +50,7 @@ def _load_main(portfolio_path: Path = P_PORT):
 def _zscore(x, w):
     s = pd.Series(x)
     m = s.rolling(w, min_periods=max(5, w//3)).mean()
-    v = s.rolling(w, min_periods=max(5, w//3)).std()
+    v = s.rolling(w, min_periods=max(5, w//3)).std(ddof=1)
     z = (s - m) / v.replace(0, np.nan)
     return z.fillna(0.0).clip(-5,5)
 
@@ -111,7 +111,7 @@ def _fallback_symbolic(r: np.ndarray) -> np.ndarray:
 def _fallback_reflexive(r: np.ndarray, sym: np.ndarray) -> np.ndarray:
     rr = pd.Series(np.asarray(r, float))
     s = pd.Series(np.asarray(sym, float)).shift(1).fillna(0.0)
-    vol = pd.Series(rr).rolling(21, min_periods=7).std().fillna(0.0)
+    vol = pd.Series(rr).rolling(21, min_periods=7).std(ddof=1).fillna(0.0)
     vol_z = np.tanh(_zscore(vol, 42))
     feedback = np.sign(rr) * np.clip(np.abs(rr) / (vol + 1e-6), 0.0, 2.0)
     reflex = np.tanh(0.55 * s + 0.30 * feedback - 0.15 * vol_z)
@@ -126,8 +126,8 @@ def build_min_sleeves(runs_dir: Path | None = None) -> dict:
     r = df["ret_main"].values
 
     # VOL sleeve: low realized vol -> +, high vol -> -
-    vol20 = pd.Series(r).rolling(20, min_periods=10).std()
-    vol100 = pd.Series(r).rolling(100, min_periods=30).std()
+    vol20 = pd.Series(r).rolling(20, min_periods=10).std(ddof=1)
+    vol100 = pd.Series(r).rolling(100, min_periods=30).std(ddof=1)
     vol_rel = (vol20 / vol100.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
     sig_vol = (1.0 - vol_rel).clip(-1.0, 1.0).fillna(0.0)
     ret_vol = (sig_vol * VOL_SCALE).clip(-0.05, 0.05)

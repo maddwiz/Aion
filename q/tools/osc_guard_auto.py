@@ -30,11 +30,11 @@ def sharpe_of_csv(p: Path):
         for c in ["eq_net","eq","equity","equity_curve"]:
             if c in df.columns:
                 r = pd.to_numeric(df[c], errors="coerce").pct_change().replace([np.inf,-np.inf], np.nan).fillna(0.0)
-                s=r.std(); 
+                s=r.std(ddof=1); 
                 return 0.0 if s==0 or np.isnan(s) else float((r.mean()/s)*np.sqrt(252))
         return None
     r = pd.to_numeric(df[ret_col], errors="coerce").replace([np.inf,-np.inf], np.nan).fillna(0.0)
-    s=r.std(); 
+    s=r.std(ddof=1); 
     return 0.0 if s==0 or np.isnan(s) else float((r.mean()/s)*np.sqrt(252))
 
 if __name__ == "__main__":

@@ -30,14 +30,14 @@ def sharpe_of_csv(p: Path, ret_cols=("ret_net","ret","return","ret_gross","pnl",
         if c in df.columns:
             s = pd.to_numeric(df[c], errors="coerce").replace([np.inf,-np.inf], np.nan).fillna(0.0)
             if s.notna().sum()>10:
-                mu = s.mean(); sd = s.std()
+                mu = s.mean(); sd = s.std(ddof=1)
                 return 0.0 if sd==0 or np.isnan(sd) else float((mu/sd)*np.sqrt(252))
     # Else derive from equity
     for c in eq_cols:
         if c in df.columns:
             eq = pd.to_numeric(df[c], errors="coerce")
             ret = eq.pct_change().replace([np.inf,-np.inf], np.nan).fillna(0.0)
-            sd = ret.std(); 
+            sd = ret.std(ddof=1); 
             return 0.0 if sd==0 or np.isnan(sd) else float((ret.mean()/sd)*np.sqrt(252))
     return None
 

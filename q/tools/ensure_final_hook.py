@@ -10,7 +10,7 @@ if "def apply_postprocess(" not in txt:
 def apply_postprocess(sig, close, vix=None, k=2.0):
     import numpy as np, pandas as pd
     def _vol(x, w=20):
-        r = pd.Series(x).pct_change().rolling(w).std().fillna(method='bfill').replace(0, 1e-8)
+        r = pd.Series(x).pct_change().rolling(w).std(ddof=1).fillna(method='bfill').replace(0, 1e-8)
         return r.values
     vol = _vol(close)
     s = np.tanh(k * (sig / (vol + 1e-8)))

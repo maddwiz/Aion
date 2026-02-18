@@ -63,7 +63,7 @@ def ann_sharpe_csv(pth, ret_col):
         df = df.sort_values("DATE")
     r = pd.to_numeric(df[ret_col], errors="coerce").replace([np.inf,-np.inf], np.nan).dropna()
     if len(r) < 50: return np.nan
-    s = r.std()
+    s = r.std(ddof=1)
     if not np.isfinite(s) or s == 0: return np.nan
     return float((r.mean()/s)*np.sqrt(252.0))
 

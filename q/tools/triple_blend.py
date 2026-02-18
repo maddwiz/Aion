@@ -36,7 +36,7 @@ def safe(s):
 
 def ann_sharpe(r):
     r = pd.Series(r).replace([np.inf,-np.inf], np.nan).dropna()
-    s = r.std()
+    s = r.std(ddof=1)
     if s == 0 or np.isnan(s): return 0.0
     return float((r.mean()/s)*(252.0**0.5))
 
@@ -72,7 +72,7 @@ def smart_load(path: Path, prefer="auto"):
     raise SystemExit(f"No returns/equity columns found in {path.name}")
 
 def first_active_idx(r: pd.Series, win=ROLL_STD_WIN, thresh=ROLL_STD_MIN):
-    rs = pd.Series(r).rolling(win).std()
+    rs = pd.Series(r).rolling(win).std(ddof=1)
     idx = rs[rs > thresh].index
     return int(idx[0]) if len(idx) else int(len(r) * 0.5)
 
@@ -129,10 +129,10 @@ if __name__ == "__main__":
         rm_te, rv_te, ro_te = safe(te["ret_main"]), safe(te["ret_vol"]), safe(te["ret_osc"])
 
         # scale add-ons toward target (search only)
-        target = choose_target_std([rm_tr.std(), rv_tr.std(), ro_tr.std()])
+        target = choose_target_std([rm_tr.std(ddof=1), rv_tr.std(ddof=1), ro_tr.std(ddof=1)])
         eps = 1e-12
-        kv = target / max(rv_tr.std(), eps); kv = float(np.clip(kv, SCALE_MIN, SCALE_MAX))
-        ko = target / max(ro_tr.std(), eps); ko = float(np.clip(ko, SCALE_MIN, SCALE_MAX))
+        kv = target / max(rv_tr.std(ddof=1), eps); kv = float(np.clip(kv, SCALE_MIN, SCALE_MAX))
+        ko = target / max(ro_tr.std(ddof=1), eps); ko = float(np.clip(ko, SCALE_MIN, SCALE_MAX))
 
         rm_tr_s, rv_tr_s, ro_tr_s = rm_tr, rv_tr*kv, ro_tr*ko
         rm_te_s, rv_te_s, ro_te_s = rm_te, rv_te*kv, ro_te*ko
@@ -204,7 +204,7 @@ if __name__ == "__main__":
 
     # extra realism guards
     guard_reason = ""
-    cv_std = float(cv_df["oos_sharpe"].std()) if len(cv_df) > 1 else 0.0
+    cv_std = float(cv_df["oos_sharpe"].std(ddof=1)) if len(cv_df) > 1 else 0.0
     if (oos_sh > min(OOS_SPIKE_MULT*max(is_sh,1e-6), is_sh + OOS_SPIKE_PLUS)) or (abs(oos_dd) < OOS_DD_MIN) or (cv_std > CV_STD_MAX):
         wm,wv,wo = 1.0,0.0,0.0
         r_full_gross = rm_fu

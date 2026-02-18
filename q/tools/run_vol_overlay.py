@@ -47,11 +47,11 @@ def daily_returns(price: pd.Series):
     return price.pct_change().replace([np.inf,-np.inf], np.nan).fillna(0.0)
 
 def realized_vol(r, window=21):
-    return r.rolling(window).std() * np.sqrt(252)
+    return r.rolling(window).std(ddof=1) * np.sqrt(252)
 
 def ann_sharpe(r):
     r = pd.Series(r).dropna()
-    s = r.std()
+    s = r.std(ddof=1)
     if s == 0 or np.isnan(s): return 0.0
     return float((r.mean() / s) * np.sqrt(252.0))
 
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     wide = wide.sort_values("DATE").fillna(0.0).set_index("DATE")
 
     # 2) daily equal-risk weights (risk parity via 1/vol over RP_WIN)
-    rolling_vols = wide.rolling(RP_WIN).std()
+    rolling_vols = wide.rolling(RP_WIN).std(ddof=1)
     inv = 1.0 / rolling_vols.replace(0, np.nan)
     inv = inv.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     w = inv.div(inv.abs().sum(axis=1), axis=0).fillna(0.0)
