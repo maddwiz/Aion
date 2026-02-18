@@ -40,6 +40,13 @@ def test_log_decision_writes_expected_fields(tmp_path):
     assert row["entry_price"] == 185.23
     assert row["extras"]["q_overlay_bias"] == 0.62
 
+    canonical = tmp_path / "trade_decisions.jsonl"
+    assert canonical.exists()
+    crow = json.loads(canonical.read_text(encoding="utf-8").splitlines()[0])
+    assert crow["decision"] == "ENTRY_LONG"
+    assert crow["symbol"] == "AAPL"
+    assert crow["q_overlay_bias"] == 0.62
+
 
 def test_log_decision_rotates_daily_file(tmp_path):
     cfg = SimpleNamespace(STATE_DIR=tmp_path)
@@ -69,3 +76,8 @@ def test_log_decision_rotates_daily_file(tmp_path):
     active_row = json.loads(active.read_text(encoding="utf-8").splitlines()[0])
     assert rolled_row["symbol"] == "AAPL"
     assert active_row["symbol"] == "MSFT"
+
+    canonical_rolled = tmp_path / "trade_decisions.20260110.jsonl"
+    canonical_active = tmp_path / "trade_decisions.jsonl"
+    assert canonical_rolled.exists()
+    assert canonical_active.exists()

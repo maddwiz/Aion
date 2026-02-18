@@ -303,6 +303,7 @@ def _status_payload():
         "trade_metrics": trade_metrics,
         "equity_metrics": equity_metrics,
         "signal_gate_summary": signal_gate_summary,
+        "telemetry_summary": _read_json(cfg.TELEMETRY_SUMMARY_FILE, {}),
         "adaptive_stats": profile.get("adaptive_stats", {}),
         "trading_enabled": bool(profile.get("trading_enabled", True)),
     }

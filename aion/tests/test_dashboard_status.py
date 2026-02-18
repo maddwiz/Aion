@@ -19,6 +19,7 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     monkeypatch.setattr(dash.cfg, "STATE_DIR", state_dir)
     monkeypatch.setattr(dash.cfg, "OPS_GUARD_STATUS_FILE", ops_status)
     monkeypatch.setattr(dash.cfg, "OPS_GUARD_TARGETS", ["trade", "dashboard"])
+    monkeypatch.setattr(dash.cfg, "TELEMETRY_SUMMARY_FILE", state_dir / "telemetry_summary.json")
     overlay_file = tmp_path / "q_signal_overlay.json"
     monkeypatch.setattr(dash.cfg, "EXT_SIGNAL_FILE", overlay_file)
     monkeypatch.setattr(dash.cfg, "EXT_SIGNAL_MAX_AGE_HOURS", 12.0)
@@ -40,6 +41,7 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     _write(log_dir / "runtime_monitor.json", {"alerts": [], "system_events": []})
     _write(log_dir / "performance_report.json", {"trade_metrics": {"closed_trades": 5}, "equity_metrics": {}})
     _write(state_dir / "strategy_profile.json", {"trading_enabled": True, "adaptive_stats": {}})
+    _write(state_dir / "telemetry_summary.json", {"closed_trade_events": 5, "rolling_hit_rate": 0.6})
     _write(
         ops_status,
         {
@@ -162,6 +164,7 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     assert s["signal_gate_summary"]["blocked_total"] == 1
     assert s["signal_gate_summary"]["passed"] == 1
     assert s["signal_gate_summary"]["avg_intraday_score"] is not None
+    assert s["telemetry_summary"]["closed_trade_events"] == 5
 
 
 def test_status_payload_falls_back_to_live_overlay_when_doctor_is_stale(tmp_path: Path, monkeypatch):
@@ -172,6 +175,7 @@ def test_status_payload_falls_back_to_live_overlay_when_doctor_is_stale(tmp_path
     monkeypatch.setattr(dash.cfg, "STATE_DIR", state_dir)
     monkeypatch.setattr(dash.cfg, "OPS_GUARD_STATUS_FILE", ops_status)
     monkeypatch.setattr(dash.cfg, "OPS_GUARD_TARGETS", ["trade", "dashboard"])
+    monkeypatch.setattr(dash.cfg, "TELEMETRY_SUMMARY_FILE", state_dir / "telemetry_summary.json")
     overlay_file = tmp_path / "q_signal_overlay.json"
     monkeypatch.setattr(dash.cfg, "EXT_SIGNAL_FILE", overlay_file)
     monkeypatch.setattr(dash.cfg, "EXT_SIGNAL_MAX_AGE_HOURS", 12.0)

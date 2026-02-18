@@ -5,9 +5,9 @@ Structured JSONL telemetry for day-skimmer decisions.
 from __future__ import annotations
 
 import datetime as dt
-import json
 import math
-from pathlib import Path
+
+from .telemetry import DecisionTelemetry
 
 
 def _safe_float(x, default: float = 0.0) -> float:
@@ -57,26 +57,10 @@ def _norm_category_scores(raw: dict | None) -> dict:
 
 class SkimmerTelemetry:
     def __init__(self, cfg_mod, filename: str = "skimmer_decisions.jsonl"):
-        state_dir = Path(getattr(cfg_mod, "STATE_DIR", Path.cwd()))
-        state_dir.mkdir(parents=True, exist_ok=True)
-        self.path = state_dir / str(filename)
-        self._active_day: str | None = None
-
-    def _rotate_if_needed(self, ts_utc: dt.datetime):
-        day = ts_utc.strftime("%Y%m%d")
-        if self._active_day is None:
-            self._active_day = day
-            return
-        if day == self._active_day:
-            return
-        if self.path.exists() and self.path.stat().st_size > 0:
-            archived = self.path.with_name(f"{self.path.stem}.{self._active_day}{self.path.suffix}")
-            suffix = 1
-            while archived.exists():
-                archived = self.path.with_name(f"{self.path.stem}.{self._active_day}.{suffix}{self.path.suffix}")
-                suffix += 1
-            self.path.replace(archived)
-        self._active_day = day
+        self.cfg = cfg_mod
+        self.skimmer_sink = DecisionTelemetry(cfg_mod, filename=str(filename))
+        canonical_name = str(getattr(cfg_mod, "TELEMETRY_DECISIONS_FILE", "trade_decisions.jsonl"))
+        self.trade_sink = DecisionTelemetry(cfg_mod, filename=canonical_name)
 
     def log_decision(
         self,
@@ -101,7 +85,6 @@ class SkimmerTelemetry:
             ts = ts.replace(tzinfo=dt.timezone.utc)
         else:
             ts = ts.astimezone(dt.timezone.utc)
-        self._rotate_if_needed(ts)
 
         rec = {
             "ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -120,7 +103,33 @@ class SkimmerTelemetry:
         }
         if isinstance(extras, dict) and extras:
             rec["extras"] = dict(extras)
+        self.skimmer_sink.write(rec, timestamp=ts)
 
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=True, separators=(",", ":"), default=str) + "\n")
+        x = rec.get("extras", {}) if isinstance(rec.get("extras"), dict) else {}
+        q_bias = _safe_float(x.get("q_overlay_bias", 0.0), 0.0)
+        q_conf = _safe_float(x.get("q_overlay_confidence", 0.0), 0.0)
+        risk_distance = None
+        if rec.get("entry_price") is not None and rec.get("stop_price") is not None:
+            risk_distance = abs(_safe_float(rec.get("entry_price"), 0.0) - _safe_float(rec.get("stop_price"), 0.0))
+        trade_rec = {
+            "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "symbol": rec["symbol"],
+            "decision": rec["action"],
+            "q_overlay_bias": float(q_bias),
+            "q_overlay_confidence": float(q_conf),
+            "confluence_score": float(rec["confluence_score"]),
+            "intraday_alignment_score": float(rec["confluence_score"]),
+            "regime": rec["session_type"],
+            "governor_compound_scalar": x.get("governor_compound_scalar"),
+            "entry_price": rec.get("entry_price"),
+            "stop_price": rec.get("stop_price"),
+            "risk_distance": risk_distance,
+            "position_size_shares": rec.get("shares"),
+            "book_imbalance": None,
+            "reasons": rec.get("reasons", []),
+            "pnl_realized": x.get("pnl_realized"),
+            "slippage_bps": x.get("slippage_bps"),
+            "estimated_slippage_bps": x.get("estimated_slippage_bps"),
+        }
+        self.trade_sink.write(trade_rec, timestamp=ts)
         return rec

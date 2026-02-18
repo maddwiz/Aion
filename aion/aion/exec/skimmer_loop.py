@@ -28,6 +28,7 @@ from ..brain.session_analyzer import SessionAnalyzer
 from ..brain.watchlist import SkimmerWatchlistManager
 from ..data.ib_client import disconnect, hist_bars_cached, ib
 from ..execution.simulator import ExecutionSimulator
+from .telemetry_summary import write_telemetry_summary
 from .skimmer_telemetry import SkimmerTelemetry
 from ..utils.logging_utils import log_equity, log_run, log_trade
 
@@ -57,6 +58,7 @@ class SkimmerLoop:
         self.open_trades: dict[str, TradeState] = {}
         self.last_prices: dict[str, float] = {}
         self.telemetry = SkimmerTelemetry(cfg_mod)
+        self._last_summary_ts = 0.0
         self.watchlist = SkimmerWatchlistManager(cfg_mod)
 
         self.cash = float(cfg_mod.EQUITY_START)
@@ -282,6 +284,8 @@ class SkimmerLoop:
                 "pnl_realized": float(pnl),
                 "remaining_qty": int(st.current_qty),
                 "fill_price": float(fill.avg_fill),
+                "slippage_bps": float(fill.est_slippage_bps),
+                "estimated_slippage_bps": float(fill.est_slippage_bps),
             },
         )
 
@@ -493,6 +497,8 @@ class SkimmerLoop:
                 "q_overlay_bias": float(q_bias),
                 "q_overlay_confidence": float(q_conf),
                 "minutes_to_close": int(minutes_to_close),
+                "slippage_bps": float(fill.est_slippage_bps),
+                "estimated_slippage_bps": float(fill.est_slippage_bps),
             },
         )
         self._emit_trade_event(
@@ -603,6 +609,28 @@ class SkimmerLoop:
         eq = self._equity()
         open_pnl = float(eq - self.cash - self.closed_pnl)
         log_equity(dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), float(eq), float(self.cash), float(open_pnl), float(self.closed_pnl))
+        self._maybe_update_telemetry_summary()
+
+    def _maybe_update_telemetry_summary(self):
+        if not bool(getattr(self.cfg, "TELEMETRY_ENABLED", True)):
+            return
+        now = time.monotonic()
+        if (now - float(self._last_summary_ts)) < 30.0:
+            return
+        self._last_summary_ts = now
+        try:
+            decisions_path = Path(self.cfg.STATE_DIR) / str(
+                getattr(self.cfg, "TELEMETRY_DECISIONS_FILE", "trade_decisions.jsonl")
+            )
+            output_path = Path(getattr(self.cfg, "TELEMETRY_SUMMARY_FILE", Path(self.cfg.STATE_DIR) / "telemetry_summary.json"))
+            window = int(max(1, getattr(self.cfg, "TELEMETRY_SUMMARY_WINDOW", 20)))
+            write_telemetry_summary(
+                decisions_path=decisions_path,
+                output_path=output_path,
+                rolling_window=window,
+            )
+        except Exception:
+            return
 
     def run_forever(self):
         log_run(
