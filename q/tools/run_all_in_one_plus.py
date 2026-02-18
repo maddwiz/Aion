@@ -170,7 +170,16 @@ def apply_profile_env_defaults():
         "credit_leadlag_strength": "Q_CREDIT_LEADLAG_STRENGTH",
         "cross_sectional_momentum_strength": "Q_CROSS_SECTIONAL_MOMENTUM_STRENGTH",
         "microstructure_strength": "Q_MICROSTRUCTURE_STRENGTH",
+        "calendar_mask_strength": "Q_CALENDAR_MASK_STRENGTH",
         "calendar_event_strength": "Q_CALENDAR_EVENT_STRENGTH",
+        "hive_conviction_floor": "Q_HIVE_CONVICTION_FLOOR",
+        "hive_conviction_ceil": "Q_HIVE_CONVICTION_CEIL",
+        "confirmation_floor": "Q_CONFIRMATION_FLOOR",
+        "confirmation_ramp_days": "Q_CONFIRMATION_RAMP_DAYS",
+        "confirmation_fast_confirm": "Q_CONFIRMATION_FAST_CONFIRM",
+        "regime_council_enabled": "Q_REGIME_COUNCIL_ENABLED",
+        "regime_council_lookback": "Q_REGIME_COUNCIL_LOOKBACK",
+        "regime_council_min_regime_days": "Q_REGIME_COUNCIL_MIN_REGIME_DAYS",
         "cash_yield_annual": "Q_CASH_YIELD_ANNUAL",
         "cash_exposure_target": "Q_CASH_EXPOSURE_TARGET",
     }
@@ -446,6 +455,16 @@ if __name__ == "__main__":
     if not ok and rc is not None: failures.append({"step": "tools/make_returns_and_weights.py", "code": rc})
     ok, rc = run_script("tools/make_asset_names.py")
     if not ok and rc is not None: failures.append({"step": "tools/make_asset_names.py", "code": rc})
+    # Precompute market-level signals so they can act as council members.
+    ok, rc = run_script("tools/run_credit_leadlag_signal.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_credit_leadlag_signal.py", "code": rc})
+    ok, rc = run_script("tools/run_microstructure_proxy_signal.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_microstructure_proxy_signal.py", "code": rc})
+    # Broadcast signed signals into T x N directional council member matrices.
+    ok, rc = run_script("tools/run_credit_council_member.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_credit_council_member.py", "code": rc})
+    ok, rc = run_script("tools/run_microstructure_council_member.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_microstructure_council_member.py", "code": rc})
 
     # (C) Build council votes (real if present, else sleeves or synthetic)
     ok, rc = run_script("tools/make_council_votes.py")
@@ -481,6 +500,9 @@ if __name__ == "__main__":
     # Parameter stability, turnover, disagreement gate + DD scaling + report card
     ok, rc = run_script("tools/run_guardrails.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_guardrails.py", "code": rc})
+    # Confirmation-delay scalar for post-flip ramped entry timing.
+    ok, rc = run_script("tools/run_confirmation_delay.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_confirmation_delay.py", "code": rc})
     # Disagreement heatmap (table) → report
     ok, rc = run_script("tools/run_disagreement_heatmap.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_disagreement_heatmap.py", "code": rc})
@@ -504,12 +526,18 @@ if __name__ == "__main__":
     # Per-hive transparency artifact + report card.
     ok, rc = run_script("tools/run_hive_transparency.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_hive_transparency.py", "code": rc})
+    # Hive conviction scalar (per-asset intra-hive agreement gate).
+    ok, rc = run_script("tools/run_hive_conviction_gate.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_hive_conviction_gate.py", "code": rc})
     # Ecosystem age governor (atrophy/split/fusion dynamics on hive weights)
     ok, rc = run_script("tools/run_ecosystem_age.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_ecosystem_age.py", "code": rc})
     # Tail-blender over base weights and hedges
     ok, rc = run_script("tools/run_tail_blender.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_tail_blender.py", "code": rc})
+    # Regime-conditional council weights (per-regime bandit over council votes).
+    ok, rc = run_script("tools/run_regime_council_weights.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_regime_council_weights.py", "code": rc})
 
     # ---------- PHASE 3: Refinements ----------
     # Reflex health (and optional gating of reflex signal)
@@ -567,6 +595,9 @@ if __name__ == "__main__":
     # Microstructure proxy overlay (illiquidity + close-location pressure).
     ok, rc = run_script("tools/run_microstructure_proxy_signal.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_microstructure_proxy_signal.py", "code": rc})
+    # Calendar mask governor (walk-forward calibrated calendar hit-rate effects).
+    ok, rc = run_script("tools/run_calendar_mask.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_calendar_mask.py", "code": rc})
     # Calendar/event seasonality overlay (turn-of-month + optional event impulses).
     ok, rc = run_script("tools/run_calendar_event_overlay.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_calendar_event_overlay.py", "code": rc})

@@ -43,3 +43,68 @@ def test_assemble_features_falls_back_to_return_state_when_files_missing(monkeyp
     assert X.shape[1] >= 2
     assert "ret_lag1" in names
     assert "absret_roll21" in names
+
+
+def test_adaptive_threshold_tightens_on_losing_streak():
+    r = np.array([-0.01] * 40 + [0.005] * 5, dtype=float)
+    th = rmeg._adaptive_threshold_series(
+        r,
+        base_threshold=0.53,
+        enabled=True,
+        hit_window=20,
+        tighten_step=0.04,
+        loosen_step=0.02,
+        threshold_min=0.42,
+        threshold_max=0.68,
+        ema_alpha=1.0,
+    )
+    assert float(th[-1]) > 0.53
+
+
+def test_adaptive_threshold_loosens_on_winning_streak():
+    r = np.array([0.01] * 45 + [-0.005] * 3, dtype=float)
+    th = rmeg._adaptive_threshold_series(
+        r,
+        base_threshold=0.53,
+        enabled=True,
+        hit_window=20,
+        tighten_step=0.04,
+        loosen_step=0.02,
+        threshold_min=0.42,
+        threshold_max=0.68,
+        ema_alpha=1.0,
+    )
+    assert float(th[-1]) < 0.53
+
+
+def test_adaptive_threshold_respects_bounds():
+    r = np.array([-0.01, 0.01] * 120, dtype=float)
+    th = rmeg._adaptive_threshold_series(
+        r,
+        base_threshold=0.53,
+        enabled=True,
+        hit_window=20,
+        tighten_step=0.20,
+        loosen_step=0.20,
+        threshold_min=0.42,
+        threshold_max=0.68,
+        ema_alpha=1.0,
+    )
+    assert float(np.min(th)) >= 0.42 - 1e-12
+    assert float(np.max(th)) <= 0.68 + 1e-12
+
+
+def test_adaptive_threshold_disabled_keeps_base_value():
+    r = np.array([-0.01, 0.01, -0.02, 0.03], dtype=float)
+    th = rmeg._adaptive_threshold_series(
+        r,
+        base_threshold=0.53,
+        enabled=False,
+        hit_window=20,
+        tighten_step=0.04,
+        loosen_step=0.02,
+        threshold_min=0.42,
+        threshold_max=0.68,
+        ema_alpha=0.15,
+    )
+    assert np.allclose(th, np.full_like(th, 0.53))

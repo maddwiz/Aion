@@ -68,7 +68,7 @@ def _ann_sharpe(r: np.ndarray) -> float:
     if x.size < 10:
         return 0.0
     mu = float(np.mean(x))
-    sd = float(np.std(x) + 1e-12)
+    sd = float(np.std(x, ddof=1) + 1e-12) if x.size >= 2 else 0.0
     return float((mu / sd) * np.sqrt(252.0))
 
 
@@ -86,6 +86,48 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     z = np.asarray(x, float)
     z = np.clip(z, -50.0, 50.0)
     return 1.0 / (1.0 + np.exp(-z))
+
+
+def _adaptive_threshold_series(
+    returns: np.ndarray,
+    *,
+    base_threshold: float,
+    enabled: bool,
+    hit_window: int = 20,
+    tighten_step: float = 0.04,
+    loosen_step: float = 0.02,
+    threshold_min: float = 0.42,
+    threshold_max: float = 0.68,
+    ema_alpha: float = 0.15,
+) -> np.ndarray:
+    r = np.asarray(returns, float).ravel()
+    t = int(r.size)
+    base = float(np.clip(base_threshold, threshold_min, threshold_max))
+    out = np.full(t, base, dtype=float)
+    if (not enabled) or t <= 0:
+        return out
+
+    w = int(max(5, hit_window))
+    tstep = float(max(0.0, tighten_step))
+    lstep = float(max(0.0, loosen_step))
+    lo = float(min(threshold_min, threshold_max))
+    hi = float(max(threshold_min, threshold_max))
+    alpha = float(np.clip(ema_alpha, 0.01, 1.0))
+
+    cur = base
+    for i in range(t):
+        i0 = max(0, i - w + 1)
+        seg = r[i0 : i + 1]
+        hit = float(np.mean(seg > 0.0)) if seg.size else 0.5
+        raw = cur
+        if hit < 0.45:
+            raw = min(hi, raw + tstep)
+        elif hit > 0.55:
+            raw = max(lo, raw - lstep)
+        cur = (alpha * raw) + ((1.0 - alpha) * cur)
+        cur = float(np.clip(cur, lo, hi))
+        out[i] = cur
+    return out
 
 
 def _assemble_features(returns: np.ndarray) -> tuple[np.ndarray, list[str]]:
@@ -193,14 +235,23 @@ def _ridge_walkforward_prob(
 def _prob_to_gate(
     prob: np.ndarray,
     *,
-    threshold: float = 0.53,
+    threshold: float | np.ndarray = 0.53,
     floor: float = 0.35,
     ceiling: float = 1.10,
     slope: float = 10.0,
     warmup: int = 252,
 ) -> np.ndarray:
     p = np.asarray(prob, float).ravel()
-    thr = float(np.clip(threshold, 0.45, 0.90))
+    thr = np.asarray(threshold, float)
+    if thr.ndim == 0:
+        thr = np.full(p.size, float(thr), dtype=float)
+    else:
+        thr = thr.ravel()
+        if thr.size < p.size:
+            pad = np.full(p.size - thr.size, float(thr[-1]) if thr.size else 0.53, dtype=float)
+            thr = np.concatenate([thr, pad], axis=0)
+        thr = thr[: p.size]
+    thr = np.clip(thr, 0.30, 0.90)
     lo = float(np.clip(floor, 0.0, 1.2))
     hi = float(np.clip(ceiling, max(lo, 0.2), 1.5))
     k = float(np.clip(slope, 1.0, 40.0))
@@ -244,6 +295,13 @@ def main() -> int:
     floor = float(os.getenv("Q_META_EXEC_FLOOR", "0.35"))
     ceil = float(os.getenv("Q_META_EXEC_CEIL", "1.10"))
     slope = float(os.getenv("Q_META_EXEC_SLOPE", "10.0"))
+    adaptive_enabled = str(os.getenv("Q_META_GATE_ADAPTIVE", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    adaptive_window = int(max(5, int(float(os.getenv("Q_META_GATE_HIT_RATE_WINDOW", "20")))))
+    adaptive_tighten = float(max(0.0, float(os.getenv("Q_META_GATE_ADAPTIVE_TIGHTEN_STEP", "0.04"))))
+    adaptive_loosen = float(max(0.0, float(os.getenv("Q_META_GATE_ADAPTIVE_LOOSEN_STEP", "0.02"))))
+    adaptive_min = float(os.getenv("Q_META_GATE_ADAPTIVE_THRESHOLD_MIN", "0.42"))
+    adaptive_max = float(os.getenv("Q_META_GATE_ADAPTIVE_THRESHOLD_MAX", "0.68"))
+    adaptive_ema_alpha = float(np.clip(float(os.getenv("Q_META_GATE_ADAPTIVE_EMA_ALPHA", "0.15")), 0.01, 1.0))
 
     X, names = _assemble_features(r)
     T = min(len(r), X.shape[0])
@@ -251,10 +309,22 @@ def main() -> int:
     X = X[:T]
     y = (r > 0.0).astype(float)
     prob = _ridge_walkforward_prob(X, y, min_train=min_train, l2=l2, min_prob=pmin, max_prob=pmax)
-    gate = _prob_to_gate(prob, threshold=thr, floor=floor, ceiling=ceil, slope=slope, warmup=min_train)
+    threshold_series = _adaptive_threshold_series(
+        r,
+        base_threshold=thr,
+        enabled=adaptive_enabled,
+        hit_window=adaptive_window,
+        tighten_step=adaptive_tighten,
+        loosen_step=adaptive_loosen,
+        threshold_min=adaptive_min,
+        threshold_max=adaptive_max,
+        ema_alpha=adaptive_ema_alpha,
+    )
+    gate = _prob_to_gate(prob, threshold=threshold_series, floor=floor, ceiling=ceil, slope=slope, warmup=min_train)
 
     np.savetxt(RUNS / "meta_execution_prob.csv", prob, delimiter=",")
     np.savetxt(RUNS / "meta_execution_gate.csv", gate, delimiter=",")
+    np.savetxt(RUNS / "meta_execution_threshold.csv", threshold_series, delimiter=",")
 
     base_sh = _ann_sharpe(r)
     gate_sh = _ann_sharpe(r * gate)
@@ -266,6 +336,18 @@ def main() -> int:
         "ridge_l2": float(l2),
         "prob_clip": [float(pmin), float(pmax)],
         "gate_threshold": float(thr),
+        "adaptive_enabled": bool(adaptive_enabled),
+        "adaptive_hit_rate_window": int(adaptive_window),
+        "adaptive_tighten_step": float(adaptive_tighten),
+        "adaptive_loosen_step": float(adaptive_loosen),
+        "adaptive_threshold_min": float(min(adaptive_min, adaptive_max)),
+        "adaptive_threshold_max": float(max(adaptive_min, adaptive_max)),
+        "adaptive_ema_alpha": float(adaptive_ema_alpha),
+        "adaptive_threshold_mean": float(np.mean(threshold_series)),
+        "adaptive_threshold_min_realized": float(np.min(threshold_series)),
+        "adaptive_threshold_max_realized": float(np.max(threshold_series)),
+        "adaptive_threshold_series": threshold_series.tolist(),
+        "adaptive_threshold_file": str(RUNS / "meta_execution_threshold.csv"),
         "gate_floor": float(floor),
         "gate_ceiling": float(ceil),
         "gate_slope": float(slope),
@@ -293,6 +375,7 @@ def main() -> int:
 
     print(f"✅ Wrote {RUNS/'meta_execution_prob.csv'}")
     print(f"✅ Wrote {RUNS/'meta_execution_gate.csv'}")
+    print(f"✅ Wrote {RUNS/'meta_execution_threshold.csv'}")
     print(f"✅ Wrote {RUNS/'meta_execution_info.json'}")
     print(
         "Meta execution:",

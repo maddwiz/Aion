@@ -27,7 +27,7 @@ Plus:
 ## Core run
 
 ```bash
-cd "/Users/desmondpottle/Documents/New project/aion"
+cd aion/
 AION_MODE=brain AION_TASK=trade ./run_aion.sh
 ```
 

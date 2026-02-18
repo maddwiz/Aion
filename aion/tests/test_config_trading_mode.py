@@ -26,6 +26,11 @@ def test_day_skimmer_mode_applies_intraday_defaults(monkeypatch, tmp_path):
     assert int(cfg.MAX_HOLD_CYCLES) == 6
     assert cfg.INTRADAY_CONFIRM_ENABLED is True
     assert float(cfg.INTRADAY_MIN_ALIGNMENT_SCORE) >= 0.60
+    assert cfg.PARTIAL_PROFIT_ENABLED is True
+    assert float(cfg.PARTIAL_PROFIT_R_MULTIPLE) > 0.0
+    assert float(cfg.PARTIAL_PROFIT_FRACTION) > 0.0
+    assert cfg.TRAILING_STOP_ENABLED is True
+    assert float(cfg.TRAILING_STOP_ATR_MULTIPLE) > 0.0
 
 
 def test_long_term_mode_respects_explicit_env_overrides(monkeypatch, tmp_path):

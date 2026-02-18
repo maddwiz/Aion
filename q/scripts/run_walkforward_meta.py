@@ -7,7 +7,8 @@ def walkforward(data):
     hits = (np.sign(returns) == np.sign(returns.shift(-1))).sum()
     total = returns.shape[0]
     hit_rate = hits / total if total else 0.0
-    sharpe = returns.mean() / returns.std() * np.sqrt(252) if returns.std() else 0.0
+    sd = float(returns.std(ddof=1))
+    sharpe = float(returns.mean() / sd * np.sqrt(252)) if np.isfinite(sd) and sd > 0 else 0.0
     max_dd = (data["Close"].cummax() - data["Close"]).max() / data["Close"].cummax().max()
     return {"hit_rate": float(hit_rate), "sharpe": float(sharpe), "max_dd": float(max_dd)}
 

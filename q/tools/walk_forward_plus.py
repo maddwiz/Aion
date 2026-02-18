@@ -51,7 +51,7 @@ def safe_max_drawdown(equity: pd.Series) -> float:
 def sharpe_ratio(pnl: pd.Series) -> float:
     s = pd.to_numeric(pnl, errors="coerce").dropna()
     if s.size == 0: return float("nan")
-    return float(s.mean() / (s.std() + 1e-9) * math.sqrt(252))
+    return float(s.mean() / (s.std(ddof=1) + 1e-9) * math.sqrt(252))
 
 def hit_ratio(pnl: pd.Series, ret: pd.Series) -> float:
     a = np.sign(pd.to_numeric(pnl, errors="coerce").fillna(0).values)

@@ -2,7 +2,7 @@
 import numpy as np, pandas as pd
 
 def realized_vol(returns: pd.Series, look=20, eps=1e-12):
-    return returns.rolling(look).std().fillna(0.0) + eps
+    return returns.rolling(look).std(ddof=1).fillna(0.0) + eps
 
 def vol_target_sizer(returns: pd.Series, target_annu_vol=0.20, look=20, cap=0.25):
     target_daily = target_annu_vol / (252.0 ** 0.5)

@@ -8,6 +8,8 @@ NovaFinTec is a two-layer trading stack:
 
 ## Architecture
 
+Detailed diagrams: `docs/architecture.md`
+
 ```mermaid
 flowchart LR
   D["Market + Alt Data"] --> Q["Q Research Engine"]
@@ -23,7 +25,7 @@ flowchart LR
 ### 1) Run Q pipeline
 
 ```bash
-cd "/Users/desmondpottle/Documents/New project/q"
+cd q/
 python tools/run_all_in_one_plus.py
 python tools/build_final_portfolio.py
 python tools/make_daily_from_weights.py
@@ -36,21 +38,21 @@ python tools/publish_results_snapshot.py
 ### 2) Run AION paper engine
 
 ```bash
-cd "/Users/desmondpottle/Documents/New project/aion"
+cd aion/
 AION_MODE=brain AION_TASK=trade AION_TRADING_MODE=long_term ./run_aion.sh
 ```
 
 Day-skimmer mode (minute bars):
 
 ```bash
-cd "/Users/desmondpottle/Documents/New project/aion"
+cd aion/
 AION_MODE=brain AION_TASK=trade AION_TRADING_MODE=day_skimmer ./run_aion.sh
 ```
 
 Dashboard:
 
 ```bash
-cd "/Users/desmondpottle/Documents/New project/aion"
+cd aion/
 AION_MODE=brain AION_TASK=dashboard ./run_aion.sh
 ```
 
@@ -65,12 +67,13 @@ Published artifacts live under:
 
 This gives a clear walk-forward equity/drawdown record plus SPY/QQQ benchmark context and governor-stack diagnostics.
 
+![Equity Curve](results/equity_curve.png)
+
+Dream coherence refers to the causal alignment between spectral regime state and signal quality before allowing full exposure.
+
 ## Master Handoff
 
 Canonical build handoff: `docs/NOVAFINTEC_MASTER_HANDOFF.md`
-
-Mirror copy for chat-window resets/context recovery:
-- `/Users/desmondpottle/Desktop/novafintec.md/NOVAFINTEC_MASTER_HANDOFF.md`
 
 ## Preset Profiles
 

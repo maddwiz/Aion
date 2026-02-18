@@ -20,7 +20,14 @@ except Exception:
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT/"runs_plus"; RUNS.mkdir(exist_ok=True)
 
-def save_votes(V, path, source):
+OPTIONAL_MEMBER_FILES = [
+    "council_credit_leadlag.csv",
+    "council_microstructure.csv",
+    "council_dna_convergence.csv",
+]
+
+
+def save_votes(V, path, source, extra_info=None):
     V = np.asarray(V, float)
     if V.ndim == 1:
         V = V.reshape(-1, 1)
@@ -29,6 +36,8 @@ def save_votes(V, path, source):
     V = np.tanh(zscore(V))
     np.savetxt(path, V, delimiter=",")
     info = {"source": source, "rows": int(V.shape[0]), "cols": int(V.shape[1])}
+    if isinstance(extra_info, dict):
+        info.update(extra_info)
     (RUNS / "council_votes_info.json").write_text(json.dumps(info, indent=2))
     print(f"✅ Wrote {path}  shape={V.shape}  source={source}")
 
@@ -136,58 +145,98 @@ def build_votes_from_hive():
         return None
     return piv.values
 
+
+def _augment_with_optional_members(base_votes):
+    base = np.asarray(base_votes, float)
+    if base.ndim == 1:
+        base = base.reshape(-1, 1)
+    mats = [base]
+    rows = [int(base.shape[0])]
+    members = []
+    for name in OPTIONAL_MEMBER_FILES:
+        p = RUNS / name
+        if not p.exists():
+            continue
+        m = load_csv_matrix(p)
+        if m is None or m.size == 0:
+            continue
+        if m.ndim == 1:
+            m = m.reshape(-1, 1)
+        m = np.nan_to_num(np.asarray(m, float), nan=0.0, posinf=0.0, neginf=0.0)
+        mats.append(m)
+        rows.append(int(m.shape[0]))
+        members.append(
+            {
+                "file": name,
+                "rows": int(m.shape[0]),
+                "cols": int(m.shape[1]),
+            }
+        )
+    if len(mats) <= 1:
+        return base, {"optional_member_count": 0, "optional_members": []}
+    t = int(min(rows))
+    mats = [m[-t:] for m in mats]
+    out = np.column_stack(mats)
+    return out, {"optional_member_count": int(len(members)), "optional_members": members}
+
 def main():
     out = RUNS/"council_votes.csv"
+    V = None
+    source = ""
 
     # 1) Real council predictions?
     real = load_first_match(["council_preds.csv", "council_predictions.csv"])
     if real:
         V = load_csv_matrix(real)
-        save_votes(V, out, source=Path(real).name)
-        return
+        source = Path(real).name
 
     # 2) Merge sleeve signals if present
-    sleeves = sorted(glob.glob(str(RUNS/"sleeve_*_signal.csv")))
-    if sleeves:
-        mats = [load_csv_matrix(p) for p in sleeves]
-        T = min(m.shape[0] for m in mats)
-        mats = [m[:T] for m in mats]
-        V = np.column_stack(mats)
-        save_votes(V, out, source="sleeve_signals")
-        return
+    if V is None:
+        sleeves = sorted(glob.glob(str(RUNS/"sleeve_*_signal.csv")))
+        if sleeves:
+            mats = [load_csv_matrix(p) for p in sleeves]
+            T = min(m.shape[0] for m in mats)
+            mats = [m[:T] for m in mats]
+            V = np.column_stack(mats)
+            source = "sleeve_signals"
 
     # 3) Candidate from hive signals
-    Vh = build_votes_from_hive()
+    Vh = build_votes_from_hive() if V is None else None
 
     # 4) Candidate from returns
-    ret_file = load_first_match(["daily_returns.csv","portfolio_daily_returns.csv","returns.csv"])
+    ret_file = load_first_match(["daily_returns.csv","portfolio_daily_returns.csv","returns.csv"]) if V is None else None
     Vr = None
     if ret_file:
         r = load_series(ret_file)
         Vr = build_votes_from_returns(r) if r is not None else None
 
     # Prefer richer/longer matrix when both exist.
-    if Vh is not None and Vr is not None:
+    if V is None and Vh is not None and Vr is not None:
         if Vh.shape[0] >= int(0.60 * Vr.shape[0]):
-            save_votes(Vh, out, source="hive_signals")
+            V = Vh
+            source = "hive_signals"
         else:
-            save_votes(Vr, out, source=Path(ret_file).name if ret_file else "daily_returns")
-        return
-    if Vh is not None:
-        save_votes(Vh, out, source="hive_signals")
-        return
-    if Vr is not None:
-        save_votes(Vr, out, source=Path(ret_file).name if ret_file else "daily_returns")
-        return
+            V = Vr
+            source = Path(ret_file).name if ret_file else "daily_returns"
+    if V is None and Vh is not None:
+        V = Vh
+        source = "hive_signals"
+    if V is None and Vr is not None:
+        V = Vr
+        source = Path(ret_file).name if ret_file else "daily_returns"
 
     # 5) Last resort deterministic synthetic wave channels
-    T = 600
-    t = np.linspace(0.0, 20.0, T)
-    v1 = np.sin(t)
-    v2 = np.cos(0.7 * t)
-    v3 = np.sin(0.17 * t + 1.3)
-    V = np.vstack([v1, v2, v3]).T
-    save_votes(V, out, source="deterministic_synthetic")
+    if V is None:
+        T = 600
+        t = np.linspace(0.0, 20.0, T)
+        v1 = np.sin(t)
+        v2 = np.cos(0.7 * t)
+        v3 = np.sin(0.17 * t + 1.3)
+        V = np.vstack([v1, v2, v3]).T
+        source = "deterministic_synthetic"
+
+    V_aug, extra = _augment_with_optional_members(V)
+    save_votes(V_aug, out, source=source, extra_info=extra)
 
 if __name__ == "__main__":
     main()

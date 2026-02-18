@@ -37,3 +37,9 @@ def test_compute_vol_target_scalars_lower_in_high_vol():
         smooth_alpha=0.0,
     )
     assert float(np.mean(s[-20:])) < float(np.mean(s[:20]))
+
+
+def test_base_weight_candidates_include_regime_council_when_enabled(monkeypatch):
+    monkeypatch.setenv("Q_REGIME_COUNCIL_ENABLED", "1")
+    cands = bfp._base_weight_candidates()
+    assert cands[0] == "runs_plus/weights_regime_council.csv"

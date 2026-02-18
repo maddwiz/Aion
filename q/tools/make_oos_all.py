@@ -62,7 +62,7 @@ def sharpe_ratio(pnl: pd.Series) -> float:
     s = pd.to_numeric(pnl, errors="coerce").dropna()
     if s.size == 0:
         return float("nan")
-    return float(s.mean() / (s.std() + 1e-9) * math.sqrt(252.0))
+    return float(s.mean() / (s.std(ddof=1) + 1e-9) * math.sqrt(252.0))
 
 
 def hit_ratio(pnl: pd.Series, ret: pd.Series) -> float:

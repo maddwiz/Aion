@@ -764,11 +764,12 @@ def _normalize_position(raw: dict):
         "qty": qty,
         "side": side,
         "entry": entry,
+        "entry_ts": str(raw.get("entry_ts", "")),
         "mark_price": _safe_float(raw.get("mark_price"), entry),
         "stop": _safe_float(raw.get("stop"), entry),
         "target": _safe_float(raw.get("target"), entry),
         "trail_stop": _safe_float(raw.get("trail_stop"), entry),
-        "trail_mult": max(0.1, _safe_float(raw.get("trail_mult"), cfg.TRAIL_ATR_MULT)),
+        "trail_mult": max(0.1, _safe_float(raw.get("trail_mult"), cfg.TRAILING_STOP_ATR_MULTIPLE)),
         "init_risk": max(1e-6, _safe_float(raw.get("init_risk"), entry * 0.0035)),
         "bars_held": max(0, _safe_int(raw.get("bars_held"), 0)),
         "partial_taken": bool(raw.get("partial_taken", False)),
@@ -903,6 +904,63 @@ def _equity_from_cash_and_positions(cash: float, open_positions: dict, last_pric
     return equity
 
 
+def _partial_profit_target_price(entry: float, init_risk: float, side: str, r_multiple: float) -> float:
+    r = max(1e-9, float(init_risk))
+    m = max(0.1, float(r_multiple))
+    if str(side).upper() == "LONG":
+        return float(entry + r * m)
+    return float(entry - r * m)
+
+
+def _partial_close_qty(qty: int, fraction: float) -> int:
+    q = max(0, int(qty))
+    if q <= 0:
+        return 0
+    f = max(0.05, min(0.95, float(fraction)))
+    close_qty = int(math.floor(q * f))
+    close_qty = max(1, close_qty)
+    if q > 1:
+        close_qty = min(close_qty, q - 1)
+    return max(0, close_qty)
+
+
+def _trailing_stop_candidate(side: str, extreme_price: float, atr_value: float, atr_multiple: float) -> float:
+    atr = max(1e-9, float(atr_value))
+    mult = max(0.1, float(atr_multiple))
+    if str(side).upper() == "LONG":
+        return float(extreme_price - atr * mult)
+    return float(extreme_price + atr * mult)
+
+
+def _effective_stop_price(pos: dict) -> tuple[float, bool]:
+    base = float(pos.get("stop", pos.get("entry", 0.0)))
+    side = str(pos.get("side", "")).upper()
+    trailing_active = bool(getattr(cfg, "TRAILING_STOP_ENABLED", True) and bool(pos.get("partial_taken", False)))
+    if not trailing_active:
+        return base, False
+
+    trail = float(pos.get("trail_stop", base))
+    if side == "LONG":
+        return max(base, trail), True
+    if side == "SHORT":
+        return min(base, trail), True
+    return base, False
+
+
+def _hours_since_entry(pos: dict) -> float | None:
+    raw = str(pos.get("entry_ts", "")).strip()
+    if not raw:
+        return None
+    try:
+        ts = dt.datetime.fromisoformat(raw)
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=dt.timezone.utc)
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    return max(0.0, float((now_utc - ts.astimezone(dt.timezone.utc)).total_seconds() / 3600.0))
+
+
 def _close_position(
     open_positions: dict,
     symbol: str,
@@ -931,6 +989,8 @@ def _close_position(
 
     closed_pnl += pnl
     ks.register_trade(pnl, today)
+    actual_r = float(pnl / max(1e-9, float(pos.get("init_risk", 1e-6)) * max(1, qty)))
+    hrs = _hours_since_entry(pos)
 
     log_trade(
         now(),
@@ -956,7 +1016,12 @@ def _close_position(
         "target": float(pos.get("target", 0.0)),
         "trail": float(pos.get("trail_stop", 0.0)),
         "bars_held": int(pos.get("bars_held", 0)),
+        "r_captured": float(actual_r),
+        "time_in_trade_hours": hrs,
     }
+    reason_key = str(reason).strip().lower()
+    if reason_key in {"trailing_stop", "initial_stop", "target_hit", "time_stop", "opposite_high_confidence_signal"}:
+        event_extra["type"] = reason_key
     if isinstance(memory_runtime_context, dict) and memory_runtime_context:
         event_extra["runtime_context"] = dict(memory_runtime_context)
 
@@ -991,8 +1056,7 @@ def _partial_close(
     memory_runtime_context: dict | None = None,
 ):
     qty = int(pos["qty"])
-    close_qty = max(1, int(math.floor(qty * cfg.PARTIAL_CLOSE_FRACTION)))
-    close_qty = min(close_qty, qty - 1) if qty > 1 else qty
+    close_qty = _partial_close_qty(qty, float(getattr(cfg, "PARTIAL_PROFIT_FRACTION", cfg.PARTIAL_CLOSE_FRACTION)))
     if close_qty <= 0:
         return cash, closed_pnl, False
 
@@ -1013,6 +1077,10 @@ def _partial_close(
 
     pos["qty"] -= close_qty
     pos["partial_taken"] = True
+    actual_r = float((fill.avg_fill - pos["entry"]) / max(1e-9, pos.get("init_risk", 1e-6)))
+    if str(pos["side"]).upper() == "SHORT":
+        actual_r = float((pos["entry"] - fill.avg_fill) / max(1e-9, pos.get("init_risk", 1e-6)))
+    hrs = _hours_since_entry(pos)
 
     log_trade(
         now(),
@@ -1022,7 +1090,7 @@ def _partial_close(
         pos["entry"],
         fill.avg_fill,
         pnl,
-        "Partial take-profit",
+        "partial_profit_1R",
         confidence=float(pos.get("confidence", 0.0)),
         regime=str(pos.get("regime", "")),
         stop=float(pos.get("stop", 0.0)),
@@ -1039,6 +1107,9 @@ def _partial_close(
         "trail": float(pos.get("trail_stop", 0.0)),
         "bars_held": int(pos.get("bars_held", 0)),
         "remaining_qty": int(pos.get("qty", 0)),
+        "r_captured": float(actual_r),
+        "time_in_trade_hours": hrs,
+        "type": "partial_profit",
     }
     if isinstance(memory_runtime_context, dict) and memory_runtime_context:
         event_extra["runtime_context"] = dict(memory_runtime_context)
@@ -1051,7 +1122,7 @@ def _partial_close(
         entry=float(pos["entry"]),
         exit_=float(fill.avg_fill),
         pnl=float(pnl),
-        reason="Partial take-profit",
+        reason="partial_profit_1R",
         confidence=float(pos.get("confidence", 0.0)),
         regime=str(pos.get("regime", "")),
         monitor=monitor,
@@ -1955,10 +2026,16 @@ def main() -> int:
 
                         if pos["side"] == "LONG":
                             pos["peak_price"] = max(pos["peak_price"], price)
-                            trail_candidate = pos["peak_price"] - (atr_val * pos["trail_mult"])
-                            pos["trail_stop"] = max(pos["trail_stop"], trail_candidate)
-
-                            if (not pos["partial_taken"]) and price >= (pos["entry"] + pos["init_risk"] * cfg.PARTIAL_TAKE_R):
+                            if (
+                                bool(getattr(cfg, "PARTIAL_PROFIT_ENABLED", True))
+                                and (not pos["partial_taken"])
+                                and price >= _partial_profit_target_price(
+                                    pos["entry"],
+                                    pos.get("init_risk", 0.0),
+                                    "LONG",
+                                    getattr(cfg, "PARTIAL_PROFIT_R_MULTIPLE", cfg.PARTIAL_TAKE_R),
+                                )
+                            ):
                                 cash, closed_pnl, fully_closed = _partial_close(
                                     pos,
                                     sym,
@@ -1978,14 +2055,33 @@ def main() -> int:
                                     continue
                                 pos["stop"] = max(pos["stop"], pos["entry"]) if pos["qty"] > 0 else pos["stop"]
 
-                            stop_trigger = price <= max(pos["stop"], pos["trail_stop"])
+                            if bool(getattr(cfg, "TRAILING_STOP_ENABLED", True)) and pos.get("partial_taken", False):
+                                trail_candidate = _trailing_stop_candidate(
+                                    "LONG",
+                                    pos.get("peak_price", price),
+                                    atr_val,
+                                    getattr(cfg, "TRAILING_STOP_ATR_MULTIPLE", cfg.TRAIL_ATR_MULT),
+                                )
+                                pos["trail_stop"] = max(pos["trail_stop"], trail_candidate, pos["entry"])
+
+                            stop_ref, trail_active = _effective_stop_price(pos)
+                            trailing_trigger = bool(
+                                trail_active and price <= float(pos.get("trail_stop", stop_ref)) and float(pos.get("trail_stop", stop_ref)) >= float(pos.get("stop", stop_ref))
+                            )
+                            stop_trigger = price <= stop_ref
                             target_trigger = price >= pos["target"]
                         else:
                             pos["trough_price"] = min(pos["trough_price"], price)
-                            trail_candidate = pos["trough_price"] + (atr_val * pos["trail_mult"])
-                            pos["trail_stop"] = min(pos["trail_stop"], trail_candidate)
-
-                            if (not pos["partial_taken"]) and price <= (pos["entry"] - pos["init_risk"] * cfg.PARTIAL_TAKE_R):
+                            if (
+                                bool(getattr(cfg, "PARTIAL_PROFIT_ENABLED", True))
+                                and (not pos["partial_taken"])
+                                and price <= _partial_profit_target_price(
+                                    pos["entry"],
+                                    pos.get("init_risk", 0.0),
+                                    "SHORT",
+                                    getattr(cfg, "PARTIAL_PROFIT_R_MULTIPLE", cfg.PARTIAL_TAKE_R),
+                                )
+                            ):
                                 cash, closed_pnl, fully_closed = _partial_close(
                                     pos,
                                     sym,
@@ -2005,7 +2101,20 @@ def main() -> int:
                                     continue
                                 pos["stop"] = min(pos["stop"], pos["entry"]) if pos["qty"] > 0 else pos["stop"]
 
-                            stop_trigger = price >= min(pos["stop"], pos["trail_stop"])
+                            if bool(getattr(cfg, "TRAILING_STOP_ENABLED", True)) and pos.get("partial_taken", False):
+                                trail_candidate = _trailing_stop_candidate(
+                                    "SHORT",
+                                    pos.get("trough_price", price),
+                                    atr_val,
+                                    getattr(cfg, "TRAILING_STOP_ATR_MULTIPLE", cfg.TRAIL_ATR_MULT),
+                                )
+                                pos["trail_stop"] = min(pos["trail_stop"], trail_candidate, pos["entry"])
+
+                            stop_ref, trail_active = _effective_stop_price(pos)
+                            trailing_trigger = bool(
+                                trail_active and price >= float(pos.get("trail_stop", stop_ref)) and float(pos.get("trail_stop", stop_ref)) <= float(pos.get("stop", stop_ref))
+                            )
+                            stop_trigger = price >= stop_ref
                             target_trigger = price <= pos["target"]
 
                         opposite = opposite_confidence(pos["side"], signal) >= float(signal["opposite_exit_threshold"])
@@ -2023,7 +2132,14 @@ def main() -> int:
                             )
                             monitor.record_execution(fill.est_slippage_bps)
 
-                            reason = "Stop/Trail hit" if stop_trigger else "Target hit" if target_trigger else "Opposite high-confidence signal" if opposite else "Time stop"
+                            if stop_trigger:
+                                reason = "trailing_stop" if trailing_trigger else "initial_stop"
+                            elif target_trigger:
+                                reason = "target_hit"
+                            elif opposite:
+                                reason = "opposite_high_confidence_signal"
+                            else:
+                                reason = "time_stop"
                             cash, closed_pnl = _close_position(
                                 open_positions,
                                 sym,
@@ -2180,11 +2296,12 @@ def main() -> int:
                     "qty": int(fill.filled_qty),
                     "side": c["side"],
                     "entry": float(fill.avg_fill),
+                    "entry_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
                     "mark_price": float(fill.avg_fill),
                     "stop": float(stop),
                     "target": float(target),
                     "trail_stop": float(trail_stop),
-                    "trail_mult": float(c["signal"]["trail_atr_mult"]),
+                    "trail_mult": float(getattr(cfg, "TRAILING_STOP_ATR_MULTIPLE", c["signal"]["trail_atr_mult"])),
                     "init_risk": float(init_risk),
                     "bars_held": 0,
                     "partial_taken": False,

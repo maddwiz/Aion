@@ -32,7 +32,10 @@ def parameter_stability_filter(params_history: np.ndarray, thresh: float = 0.6) 
     # params_history: [n_windows, n_params]
     if params_history.ndim != 2:
         raise ValueError("params_history must be 2D [n_windows, n_params]")
-    stds = np.std(params_history, axis=0)
+    if params_history.shape[0] > 1:
+        stds = np.std(params_history, axis=0, ddof=1)
+    else:
+        stds = np.zeros(params_history.shape[1], dtype=float)
     med = np.median(params_history, axis=0)
     keep = (stds <= (np.abs(med) + 1e-8) * (1.0 - thresh)) | (stds < 1e-3)
     score = float(np.mean(keep))
@@ -50,7 +53,7 @@ def turnover_cost_penalty(weights_t: np.ndarray, fee_bps: float = 5.0) -> float:
 def disagreement_gate(votes: np.ndarray, clamp=(0.5, 1.0)) -> float:
     # votes: [K] council outputs in [-1,1]
     v = votes.ravel()
-    dispersion = float(np.std(v))
+    dispersion = float(np.std(v, ddof=1)) if v.size > 1 else 0.0
     return max(clamp[0], clamp[1] - dispersion)
 
 
@@ -77,7 +80,10 @@ def disagreement_gate_series(
     lo = float(min(clamp))
     hi = float(max(clamp))
     T = v.shape[0]
-    disp = np.std(v, axis=1).astype(float)
+    if v.shape[1] > 1:
+        disp = np.std(v, axis=1, ddof=1).astype(float)
+    else:
+        disp = np.zeros(T, dtype=float)
     disp = np.nan_to_num(disp, nan=0.0, posinf=0.0, neginf=0.0)
     lb = int(max(8, lookback))
 
@@ -263,7 +269,7 @@ def regime_governor_from_returns(
 
     v_ok = vol[np.isfinite(vol)]
     thr = float(np.nanquantile(v_ok, 0.75)) if v_ok.size else 0.0
-    vs = float(np.nanstd(v_ok) + 1e-12) if v_ok.size else 1.0
+    vs = float(np.nanstd(v_ok, ddof=1) + 1e-12) if v_ok.size > 1 else 1.0
     z = (vol - thr) / vs
     highvol_pen = 1.0 / (1.0 + np.exp(-z))  # sigmoid in [0,1]
 
@@ -328,7 +334,10 @@ def stability_governor(
         v = np.asarray(votes_t, float)
         if v.ndim == 1:
             v = v.reshape(-1, 1)
-        d = np.std(v, axis=1)
+        if v.shape[1] > 1:
+            d = np.std(v, axis=1, ddof=1)
+        else:
+            d = np.zeros(v.shape[0], float)
         if len(d) < T:
             pad = np.zeros(T, float)
             pad[-len(d) :] = d if len(d) else 0.0

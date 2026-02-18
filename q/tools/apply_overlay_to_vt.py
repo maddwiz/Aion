@@ -22,7 +22,7 @@ DAYS      = 252.0
 def _ann_sharpe(r):
     s = pd.Series(r).replace([np.inf,-np.inf], np.nan).dropna()
     if s.empty: return 0.0
-    sd = s.std()
+    sd = s.std(ddof=1)
     if not np.isfinite(sd) or sd == 0: return 0.0
     return float((s.mean()/sd)*np.sqrt(DAYS))
 def _maxdd(r):

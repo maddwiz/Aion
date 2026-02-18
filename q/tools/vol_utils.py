@@ -22,10 +22,10 @@ def daily_returns(price: pd.Series):
     return price.pct_change().fillna(0.0)
 
 def realized_vol(r, window=21):
-    return r.rolling(window).std() * np.sqrt(252)
+    return r.rolling(window).std(ddof=1) * np.sqrt(252)
 
 def ann_sharpe(r):
     r = pd.Series(r).dropna()
-    s = r.std()
+    s = r.std(ddof=1)
     if s == 0 or np.isnan(s): return 0.0
     return float((r.mean() / s) * np.sqrt(252.0))

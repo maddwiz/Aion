@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import numpy as np
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -233,6 +234,30 @@ INTRADAY_VOLUME_REL_MIN = float(os.getenv("AION_INTRADAY_VOLUME_REL_MIN", "1.12"
 INTRADAY_RECENT_BARS = int(os.getenv("AION_INTRADAY_RECENT_BARS", "6"))
 INTRADAY_CONF_BASE = float(os.getenv("AION_INTRADAY_CONF_BASE", "0.68"))
 INTRADAY_CONF_GAIN = float(os.getenv("AION_INTRADAY_CONF_GAIN", "0.42"))
+SKIMMER_EMA_FAST = int(os.getenv("AION_SKIMMER_EMA_FAST", "9"))
+SKIMMER_EMA_SLOW = int(os.getenv("AION_SKIMMER_EMA_SLOW", "21"))
+SKIMMER_ATR_PERIOD = int(os.getenv("AION_SKIMMER_ATR_PERIOD", "14"))
+SKIMMER_RSI_PERIOD = int(os.getenv("AION_SKIMMER_RSI_PERIOD", "14"))
+SKIMMER_VOL_MA_PERIOD = int(os.getenv("AION_SKIMMER_VOL_MA_PERIOD", "20"))
+SKIMMER_OPENING_RANGE_MIN = int(os.getenv("AION_SKIMMER_OPENING_RANGE_MIN", "15"))
+SKIMMER_INITIAL_BALANCE_MIN = int(os.getenv("AION_SKIMMER_INITIAL_BALANCE_MIN", "60"))
+SKIMMER_LULL_START_HOUR = int(os.getenv("AION_SKIMMER_LULL_START_HOUR", "11"))
+SKIMMER_LULL_START_MIN = int(os.getenv("AION_SKIMMER_LULL_START_MIN", "30"))
+SKIMMER_LULL_END_HOUR = int(os.getenv("AION_SKIMMER_LULL_END_HOUR", "14"))
+SKIMMER_CLOSING_DRIVE_MIN = int(os.getenv("AION_SKIMMER_CLOSING_DRIVE_MIN", "60"))
+SKIMMER_VP_BINS = int(os.getenv("AION_SKIMMER_VP_BINS", "24"))
+SKIMMER_ENTRY_THRESHOLD = float(os.getenv("AION_SKIMMER_ENTRY_THRESHOLD", str(_mode_default(0.70, 0.58))))
+SKIMMER_RISK_PER_TRADE = float(os.getenv("AION_SKIMMER_RISK_PER_TRADE", "0.005"))
+SKIMMER_MAX_POSITION_PCT = float(os.getenv("AION_SKIMMER_MAX_POSITION_PCT", "0.03"))
+SKIMMER_STOP_ATR_MULTIPLE = float(os.getenv("AION_SKIMMER_STOP_ATR_MULTIPLE", "1.5"))
+SKIMMER_PARTIAL_PROFIT_R = float(os.getenv("AION_SKIMMER_PARTIAL_PROFIT_R", "1.0"))
+SKIMMER_PARTIAL_PROFIT_FRAC = float(os.getenv("AION_SKIMMER_PARTIAL_PROFIT_FRAC", "0.50"))
+SKIMMER_TRAILING_STOP_ATR = float(os.getenv("AION_SKIMMER_TRAILING_STOP_ATR", "1.2"))
+SKIMMER_MAX_TRADES_SESSION = int(os.getenv("AION_SKIMMER_MAX_TRADES_SESSION", "8"))
+SKIMMER_MAX_DAILY_LOSS_PCT = float(os.getenv("AION_SKIMMER_MAX_DAILY_LOSS_PCT", "0.015"))
+SKIMMER_MAX_OPEN = int(os.getenv("AION_SKIMMER_MAX_OPEN", "3"))
+SKIMMER_NO_ENTRY_BEFORE_CLOSE_MIN = int(os.getenv("AION_SKIMMER_NO_ENTRY_BEFORE_CLOSE_MIN", "45"))
+SKIMMER_FORCE_CLOSE_BEFORE_MIN = int(os.getenv("AION_SKIMMER_FORCE_CLOSE_BEFORE_MIN", "10"))
 
 EQUITY_START = float(os.getenv("AION_EQUITY_START", "5000"))
 RISK_PER_TRADE = float(os.getenv("AION_RISK_PER_TRADE", str(_mode_default(0.02, 0.008))))
@@ -306,10 +331,28 @@ REGIME_MARGIN_SHIFT_HIGH_VOL_CHOP = float(os.getenv("AION_REGIME_MARGIN_SHIFT_HI
 
 STOP_ATR_MULT = float(os.getenv("AION_STOP_ATR_MULT", str(_mode_default(1.35, 0.90))))
 TARGET_ATR_MULT = float(os.getenv("AION_TARGET_ATR_MULT", str(_mode_default(2.8, 1.2))))
-TRAIL_ATR_MULT = float(os.getenv("AION_TRAIL_ATR_MULT", str(_mode_default(1.1, 0.7))))
 BREAKEVEN_R = float(os.getenv("AION_BREAKEVEN_R", str(_mode_default(1.0, 0.55))))
-PARTIAL_TAKE_R = float(os.getenv("AION_PARTIAL_TAKE_R", str(_mode_default(1.5, 0.8))))
-PARTIAL_CLOSE_FRACTION = float(os.getenv("AION_PARTIAL_CLOSE_FRACTION", str(_mode_default(0.40, 0.55))))
+PARTIAL_PROFIT_ENABLED = _bool_env("AION_PARTIAL_PROFIT_ENABLED", _mode_default(True, True))
+PARTIAL_PROFIT_R_MULTIPLE = float(
+    np.clip(float(os.getenv("AION_PARTIAL_PROFIT_R_MULTIPLE", str(_mode_default(1.0, 0.8)))), 0.2, 5.0)
+)
+PARTIAL_PROFIT_FRACTION = float(
+    np.clip(float(os.getenv("AION_PARTIAL_PROFIT_FRACTION", str(_mode_default(0.50, 0.50)))), 0.05, 0.95)
+)
+TRAILING_STOP_ENABLED = _bool_env("AION_TRAILING_STOP_ENABLED", _mode_default(True, True))
+TRAILING_STOP_ATR_MULTIPLE = float(
+    np.clip(float(os.getenv("AION_TRAILING_STOP_ATR_MULTIPLE", str(_mode_default(2.0, 1.5)))), 0.5, 6.0)
+)
+# Backward-compatible aliases.
+TRAIL_ATR_MULT = float(
+    np.clip(float(os.getenv("AION_TRAIL_ATR_MULT", str(TRAILING_STOP_ATR_MULTIPLE))), 0.5, 6.0)
+)
+PARTIAL_TAKE_R = float(
+    np.clip(float(os.getenv("AION_PARTIAL_TAKE_R", str(PARTIAL_PROFIT_R_MULTIPLE))), 0.2, 5.0)
+)
+PARTIAL_CLOSE_FRACTION = float(
+    np.clip(float(os.getenv("AION_PARTIAL_CLOSE_FRACTION", str(PARTIAL_PROFIT_FRACTION))), 0.05, 0.95)
+)
 MAX_HOLD_CYCLES = int(os.getenv("AION_MAX_HOLD_CYCLES", str(_mode_default(18, 6))))
 
 REGIME_ADX_TREND_MIN = float(os.getenv("AION_REGIME_ADX_TREND_MIN", "20.0"))

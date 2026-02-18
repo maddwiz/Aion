@@ -31,7 +31,7 @@ TARGET_D = TARGET_ANN / np.sqrt(DAYS)
 def _ann_sharpe(r):
     s = pd.Series(r).replace([np.inf,-np.inf], np.nan).dropna()
     if s.empty: return 0.0
-    sd = s.std()
+    sd = s.std(ddof=1)
     if not np.isfinite(sd) or sd==0: return 0.0
     return float((s.mean()/sd)*np.sqrt(DAYS))
 def _maxdd(r):
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     dates, r = _load_port()
     s = pd.Series(r)
     # realized daily vol
-    rv = s.rolling(ROLL_DAYS, min_periods=max(5, ROLL_DAYS//3)).std().replace(0,np.nan)
+    rv = s.rolling(ROLL_DAYS, min_periods=max(5, ROLL_DAYS//3)).std(ddof=1).replace(0,np.nan)
     scale = (TARGET_D / rv).clip(lower=SCALE_MIN, upper=SCALE_MAX).fillna(1.0)
     r_vt = (s * scale).astype(float).values
 

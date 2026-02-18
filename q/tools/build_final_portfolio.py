@@ -2,7 +2,8 @@
 # Final portfolio assembler:
 # Picks best base weights then applies (if available):
 #   cluster caps → adaptive caps → drawdown scaler → turnover governor
-#   → council gate → council/meta leverage → heartbeat/legacy/hive/global/quality/novaspine governors
+#   → confirmation delay → council gate → council/meta leverage
+#   → heartbeat/legacy/hive/global/quality/novaspine governors
 # Outputs:
 #   runs_plus/portfolio_weights_final.csv
 # Appends a card to report_*.
@@ -26,6 +27,7 @@ TRACE_STEPS = [
     "rank_sleeve_blend",
     "low_vol_sleeve_blend",
     "turnover_governor",
+    "confirmation_delay",
     "meta_execution_gate",
     "execution_hit_gate",
     "council_gate",
@@ -39,6 +41,7 @@ TRACE_STEPS = [
     "reflex_health_governor",
     "hive_diversification",
     "hive_persistence",
+    "hive_conviction_gate",
     "global_governor",
     "quality_governor",
     "regime_fracture_governor",
@@ -48,6 +51,7 @@ TRACE_STEPS = [
     "credit_leadlag_overlay",
     "cross_sectional_momentum_overlay",
     "microstructure_overlay",
+    "calendar_mask",
     "calendar_event_overlay",
     "macro_proxy_guard",
     "novaspine_context_boost",
@@ -190,7 +194,10 @@ def _runtime_total_floor_default() -> float:
 
 
 def _base_weight_candidates() -> list[str]:
-    cands = ["runs_plus/weights_regime.csv"]
+    cands = []
+    if _env_or_profile_bool("Q_REGIME_COUNCIL_ENABLED", "regime_council_enabled", False):
+        cands.append("runs_plus/weights_regime_council.csv")
+    cands.append("runs_plus/weights_regime.csv")
     use_asset_class = _env_or_profile_bool(
         "Q_ENABLE_ASSET_CLASS_DIVERSIFICATION",
         "enable_asset_class_diversification",
@@ -334,7 +341,7 @@ def compute_vol_target_scalars(
     for t in range(T):
         i0 = max(0, t - lb + 1)
         seg = r[i0 : t + 1]
-        vol_d = float(np.std(seg)) if seg.size else 0.0
+        vol_d = float(np.std(seg, ddof=1)) if seg.size > 1 else 0.0
         vol_a = vol_d * np.sqrt(252.0)
         if vol_a > 1e-9:
             raw[t] = tgt / vol_a
@@ -627,6 +634,41 @@ if __name__ == "__main__":
         0.0,
         2.0,
     )
+    calendar_mask_strength = _env_or_profile_float(
+        "Q_CALENDAR_MASK_STRENGTH",
+        "calendar_mask_strength",
+        1.0,
+        0.0,
+        2.0,
+    )
+    calendar_mask_floor = _env_or_profile_float(
+        "Q_CALENDAR_MASK_FLOOR",
+        "calendar_mask_floor",
+        0.75,
+        0.01,
+        2.0,
+    )
+    calendar_mask_ceil = _env_or_profile_float(
+        "Q_CALENDAR_MASK_CEIL",
+        "calendar_mask_ceil",
+        1.15,
+        calendar_mask_floor,
+        2.0,
+    )
+    hive_conviction_floor = _env_or_profile_float(
+        "Q_HIVE_CONVICTION_FLOOR",
+        "hive_conviction_floor",
+        0.30,
+        0.01,
+        2.0,
+    )
+    hive_conviction_ceil = _env_or_profile_float(
+        "Q_HIVE_CONVICTION_CEIL",
+        "hive_conviction_ceil",
+        1.12,
+        hive_conviction_floor,
+        2.0,
+    )
     vol_target_strength = _env_or_profile_float(
         "Q_VOL_TARGET_STRENGTH",
         "vol_target_strength",
@@ -716,6 +758,15 @@ if __name__ == "__main__":
                 steps.append("turnover_governor")
                 steps.append(f"turnover_source={auto_tag}")
                 _trace_put("turnover_governor", auto_scale)
+
+    # 6a) Confirmation-delay governor (entry timing ramp after directional flips).
+    cds = load_series("runs_plus/confirmation_delay_scalar.csv")
+    if _gov_enabled("confirmation_delay") and cds is not None:
+        L = min(len(cds), W.shape[0])
+        cd_raw = np.clip(cds[:L], 0.0, 1.0).reshape(-1, 1)
+        W[:L] = W[:L] * cd_raw
+        steps.append("confirmation_delay")
+        _trace_put("confirmation_delay", cd_raw.ravel())
 
     # 6) Meta execution gate (trade selectivity multiplier).
     meg = load_series("runs_plus/meta_execution_gate.csv")
@@ -860,6 +911,14 @@ if __name__ == "__main__":
         steps.append("hive_persistence")
         _trace_put("hive_persistence", hp.ravel())
 
+    # 16b) Hive conviction gate (per-asset scalar from intra-hive agreement).
+    hcg = load_mat("runs_plus/hive_conviction_scalar.csv")
+    if _gov_enabled("hive_conviction_gate") and hcg is not None and hcg.shape[:2] == W.shape:
+        hc = np.clip(hcg, hive_conviction_floor, hive_conviction_ceil)
+        W = W * hc
+        steps.append("hive_conviction_gate")
+        _trace_put("hive_conviction_gate", np.mean(hc, axis=1))
+
     # 17) Global governor (regime * stability) from guardrails.
     gg = load_series("runs_plus/global_governor.csv")
     if gg is None:
@@ -959,7 +1018,17 @@ if __name__ == "__main__":
         steps.append("microstructure_overlay")
         _trace_put("microstructure_overlay", ms.ravel())
 
-    # 26) Calendar/event overlay.
+    # 26) Calendar mask governor (validated calendar hit-rate modulation).
+    cms = load_series("runs_plus/calendar_mask_scalar.csv")
+    if _gov_enabled("calendar_mask") and cms is not None:
+        L = min(len(cms), W.shape[0])
+        cm_raw = np.clip(cms[:L], calendar_mask_floor, calendar_mask_ceil)
+        cm = _apply_governor_strength(cm_raw, calendar_mask_strength, lo=0.0, hi=2.0).reshape(-1, 1)
+        W[:L] = W[:L] * cm
+        steps.append("calendar_mask")
+        _trace_put("calendar_mask", cm.ravel())
+
+    # 27) Calendar/event overlay.
     ceo = load_series("runs_plus/calendar_event_overlay.csv")
     if _gov_enabled("calendar_event_overlay") and ceo is not None:
         L = min(len(ceo), W.shape[0])
@@ -969,7 +1038,7 @@ if __name__ == "__main__":
         steps.append("calendar_event_overlay")
         _trace_put("calendar_event_overlay", ce.ravel())
 
-    # 27) Macro proxy guard (forward-looking stress proxies).
+    # 28) Macro proxy guard (forward-looking stress proxies).
     mps = load_series("runs_plus/macro_risk_scalar.csv")
     if _gov_enabled("macro_proxy_guard") and mps is not None:
         L = min(len(mps), W.shape[0])
@@ -1156,7 +1225,12 @@ if __name__ == "__main__":
                     "credit_leadlag_strength": credit_leadlag_strength,
                     "cross_sectional_momentum_strength": cross_sectional_momentum_strength,
                     "microstructure_strength": microstructure_strength,
+                    "calendar_mask_strength": calendar_mask_strength,
+                    "calendar_mask_floor": calendar_mask_floor,
+                    "calendar_mask_ceil": calendar_mask_ceil,
                     "calendar_event_strength": calendar_event_strength,
+                    "hive_conviction_floor": hive_conviction_floor,
+                    "hive_conviction_ceil": hive_conviction_ceil,
                     "macro_proxy_strength": macro_proxy_strength,
                     "vol_target_strength": vol_target_strength,
                     "vol_target_annual": vol_target_annual,

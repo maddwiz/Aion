@@ -32,7 +32,7 @@ def eval_one(asset: str, df: pd.DataFrame, out_dir: Path):
     df["equity"] = (1.0 + df["pnl"]).cumprod()
 
     hit = (np.sign(df["pnl"]) == np.sign(df["ret"])).mean()
-    sharpe = df["pnl"].mean() / (df["pnl"].std() + 1e-9) * np.sqrt(252)
+    sharpe = df["pnl"].mean() / (df["pnl"].std(ddof=1) + 1e-9) * np.sqrt(252)
     mdd = max_drawdown(df["equity"])
 
     out = {

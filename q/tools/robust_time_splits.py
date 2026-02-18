@@ -18,7 +18,7 @@ SPLITS = [0.65, 0.70, 0.75, 0.80]
 def _ann_sharpe(r):
     s = pd.Series(r).replace([np.inf,-np.inf], np.nan).dropna()
     if s.empty: return np.nan
-    sd = s.std()
+    sd = s.std(ddof=1)
     if not np.isfinite(sd) or sd==0: return np.nan
     return float((s.mean()/sd) * np.sqrt(252.0))
 def _maxdd(r):

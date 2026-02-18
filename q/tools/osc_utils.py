@@ -49,7 +49,7 @@ def daily_returns(price: pd.Series):
 
 def ann_sharpe(ret: pd.Series):
     m = ret.mean()
-    s = ret.std()
+    s = ret.std(ddof=1)
     if s == 0 or np.isnan(s):
         return 0.0
     return float((m / s) * np.sqrt(252.0))

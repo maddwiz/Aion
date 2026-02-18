@@ -84,7 +84,12 @@ def max_drawdown(eq):
 
 def sharpe(pnl):
     s=pnl.dropna()
-    return float((s.mean()/(s.std()+1e-9))*np.sqrt(252)) if len(s) else float("nan")
+    if len(s) < 2:
+        return float("nan")
+    sd = float(s.std(ddof=1))
+    if not np.isfinite(sd) or sd <= 1e-12:
+        return 0.0
+    return float((s.mean()/(sd+1e-9))*np.sqrt(252))
 
 if __name__=="__main__":
     tuned=load_tuned_defaults()
@@ -111,7 +116,7 @@ if __name__=="__main__":
     pnl_df=merged[pnl_cols].fillna(0.0)
 
     # base asset inverse-vol
-    roll_vol=pnl_df.rolling(LOOKBACK).std()*np.sqrt(252)
+    roll_vol=pnl_df.rolling(LOOKBACK).std(ddof=1)*np.sqrt(252)
     inv_vol=1.0/(roll_vol+1e-6)
     w=inv_vol.copy()
     w=w.div(w.sum(axis=1).replace(0,np.nan), axis=0).fillna(0.0)
@@ -129,7 +134,7 @@ if __name__=="__main__":
             hive_pnl[h]=pnl_df[[f"{m}_pnl" for m in mems]].mean(axis=1)
         hive_vol={}
         for h, series in hive_pnl.items():
-            hv=series.rolling(HIVE_VOL_LOOKBACK).std()*np.sqrt(252)
+            hv=series.rolling(HIVE_VOL_LOOKBACK).std(ddof=1)*np.sqrt(252)
             hive_vol[h]=hv
         # per-date scaling for each symbol based on its hive vol
         w_sym_cols=[c[:-4] for c in w.columns] if w.columns[0].endswith("_pnl")==False else [c for c in symbols]
