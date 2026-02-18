@@ -378,6 +378,8 @@ def _html_template():
       <div class="card kpi"><div class="k">Win/Loss Ratio</div><div class="v" id="telemetry_wlr">-</div></div>
       <div class="card kpi"><div class="k">Best Regime</div><div class="v" id="telemetry_best_regime">-</div></div>
       <div class="card kpi"><div class="k">Worst Regime</div><div class="v" id="telemetry_worst_regime">-</div></div>
+      <div class="card kpi"><div class="k">Top Win Signal</div><div class="v" id="telemetry_win_signal">-</div></div>
+      <div class="card kpi"><div class="k">Top Loss Signal</div><div class="v" id="telemetry_loss_signal">-</div></div>
 
       <div class="card wide">
         <div class="k">System Snapshot</div>
@@ -454,6 +456,10 @@ def _html_template():
       cls('telemetry_best_regime', true);
       txt('telemetry_worst_regime', tel.worst_regime || '-');
       cls('telemetry_worst_regime', false);
+      txt('telemetry_win_signal', tel.top_win_signal_category || '-');
+      cls('telemetry_win_signal', !!tel.top_win_signal_category);
+      txt('telemetry_loss_signal', tel.top_loss_signal_category || '-');
+      cls('telemetry_loss_signal', false);
       txt('snapshot', JSON.stringify({
         ib: s.ib,
         external_overlay_ok: s.external_overlay_ok,

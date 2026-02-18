@@ -20,6 +20,7 @@ Implemented and validated:
 - Asymmetric stop logic has dedicated regression tests (`test_partial_profit_trailing_stop.py`) covering long-vs-short ATR stop distance, high-vol expansion activation, and disabled adaptive mode fallback.
 - Canonical decision telemetry + summary refresh in long-term `paper_loop.py` (`trade_decisions.jsonl`, `telemetry_summary.json`).
 - Telemetry summary now reports top winning/losing signal categories (`top_win_signal_category`, `top_loss_signal_category`) using entry category-score attribution carried into exit events.
+- Dashboard telemetry KPIs now display `Top Win Signal` and `Top Loss Signal` from `telemetry_summary.json`.
 - Cross-sectional momentum overlay in Q runtime stack.
 - External untouched holdout protocol (`run_external_holdout_validation.py`) integrated into pipeline.
 - Complexity penalties in search/tuning (`run_runtime_combo_search.py`, `run_governor_param_sweep.py`).
