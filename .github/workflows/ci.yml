@@ -49,4 +49,5 @@ jobs:
             aion/tests/test_paper_loop_day_skimmer_dispatch.py \
             aion/tests/test_skimmer_loop_integration.py \
             aion/tests/test_skimmer_telemetry.py \
-            aion/tests/test_paper_loop_telemetry.py
+            aion/tests/test_paper_loop_telemetry.py \
+            aion/tests/test_partial_profit_trailing_stop.py

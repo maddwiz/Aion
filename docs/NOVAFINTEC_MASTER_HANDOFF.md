@@ -17,6 +17,7 @@ Implemented and validated:
 - `day_skimmer` position-lifecycle coverage extended in `test_skimmer_loop_integration.py` for partial-profit execution and trailing-stop activation ordering.
 - `day_skimmer` integration coverage now also enforces session-end flattening and risk-gate entry blocking behavior in `test_skimmer_loop_integration.py`.
 - `day_skimmer` entry handling is cash-aware for longs (pre-caps requested size by available cash and emits explicit `SKIP_CAPITAL` decisions), with integration coverage for `NO_FILL` and cash-cap sizing.
+- Asymmetric stop logic has dedicated regression tests (`test_partial_profit_trailing_stop.py`) covering long-vs-short ATR stop distance, high-vol expansion activation, and disabled adaptive mode fallback.
 - Canonical decision telemetry + summary refresh in long-term `paper_loop.py` (`trade_decisions.jsonl`, `telemetry_summary.json`).
 - Telemetry summary now reports top winning/losing signal categories (`top_win_signal_category`, `top_loss_signal_category`) using entry category-score attribution carried into exit events.
 - Cross-sectional momentum overlay in Q runtime stack.
@@ -41,9 +42,9 @@ Validation status:
 - Latest skimmer lifecycle run (`test_skimmer_loop_integration.py`): `4 passed`.
 - Latest skimmer integration hardening run (`test_skimmer_loop_integration.py`): `8 passed`.
 - Latest targeted telemetry+skimmer run (`test_skimmer_loop_integration.py` + `test_telemetry_summary.py`): `10 passed`.
+- Latest asymmetric-stop run (`test_partial_profit_trailing_stop.py`): `8 passed`.
 - Latest runtime-search validation run (`test_run_runtime_combo_search.py`): `21 passed`.
-- Latest CI-equivalent run (`.github/workflows/ci.yml` command): `546 passed`.
-- Latest CI-equivalent run including skimmer-loop integration file: `550 passed`.
+- Latest CI-equivalent run (`.github/workflows/ci.yml` command + asymmetric-stop file): `558 passed`.
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
 
 ## 3) Top-Level File Map
