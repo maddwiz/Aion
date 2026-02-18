@@ -16,11 +16,13 @@ Implemented and validated:
 - Cross-sectional momentum overlay in Q runtime stack.
 - External untouched holdout protocol (`run_external_holdout_validation.py`) integrated into pipeline.
 - Complexity penalties in search/tuning (`run_runtime_combo_search.py`, `run_governor_param_sweep.py`).
+- Opt-in governor walk-forward validator (`run_governor_walkforward.py`) with expanding folds and OOS aggregation.
 - Class-aware execution friction in daily cost engine (`make_daily_from_weights.py`).
 - Local multi-asset bundle ingestion (`ingest_multi_asset_csv_bundle.py`).
 
 Validation status:
-- CI-equivalent local tests: `488 passed`.
+- Latest full local run: `529 passed`.
+- Latest targeted run (new governor walk-forward batch): `24 passed`.
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
 
 ## 3) Top-Level File Map
@@ -73,6 +75,7 @@ Validation/gates:
 Search/tuning:
 - `run_runtime_combo_search.py` (now with complexity penalty)
 - `run_governor_param_sweep.py` (now with complexity penalty)
+- `run_governor_walkforward.py` (opt-in expanding walk-forward for governor params)
 - `tune_legacy_knobs.py`, `tune_micro_all.py`
 
 Alpha overlays:
@@ -139,6 +142,7 @@ Q artifacts (`q/runs_plus`):
 - `q_promotion_gate.json`
 - `runtime_combo_search.json`
 - `governor_params_profile.json`
+- `governor_walkforward_metrics.json`
 - `final_governor_trace.csv`
 - `q_signal_overlay.json`
 

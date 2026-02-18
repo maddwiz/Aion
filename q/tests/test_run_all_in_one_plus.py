@@ -223,6 +223,13 @@ def test_should_force_runtime_combo_search_with_env(monkeypatch, tmp_path: Path)
     assert raip.should_run_runtime_combo_search() is True
 
 
+def test_should_run_governor_walkforward_only_with_env(monkeypatch):
+    monkeypatch.delenv("Q_GOVERNOR_WALKFORWARD_ENABLED", raising=False)
+    assert raip.should_run_governor_walkforward() is False
+    monkeypatch.setenv("Q_GOVERNOR_WALKFORWARD_ENABLED", "1")
+    assert raip.should_run_governor_walkforward() is True
+
+
 def test_should_run_asset_class_diversification_only_with_env(monkeypatch):
     monkeypatch.delenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", raising=False)
     assert raip.should_run_asset_class_diversification() is False

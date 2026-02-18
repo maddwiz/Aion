@@ -392,6 +392,15 @@ def should_run_runtime_combo_search() -> bool:
     return not (RUNS / "runtime_profile_active.json").exists()
 
 
+def should_run_governor_walkforward() -> bool:
+    return str(os.getenv("Q_GOVERNOR_WALKFORWARD_ENABLED", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def should_run_asset_class_diversification() -> bool:
     return str(os.getenv("Q_ENABLE_ASSET_CLASS_DIVERSIFICATION", "0")).strip().lower() in {
         "1",
@@ -648,6 +657,12 @@ if __name__ == "__main__":
         if not ok and rc is not None: failures.append({"step": "tools/run_runtime_combo_search.py", "code": rc})
     else:
         print("… skip (stable mode): tools/run_runtime_combo_search.py [set Q_ENABLE_RUNTIME_COMBO_SEARCH=1 to run]")
+    # Optional heavy expanding walk-forward for governor parameter validation.
+    if should_run_governor_walkforward():
+        ok, rc = run_script("tools/run_governor_walkforward.py")
+        if not ok and rc is not None: failures.append({"step": "tools/run_governor_walkforward.py", "code": rc})
+    else:
+        print("… skip (disabled): tools/run_governor_walkforward.py [set Q_GOVERNOR_WALKFORWARD_ENABLED=1 to run]")
     # Apply execution constraints for live realism
     ok, rc = run_script("tools/run_execution_constraints.py", ["--replace-final"])
     if not ok and rc is not None: failures.append({"step": "tools/run_execution_constraints.py", "code": rc})
