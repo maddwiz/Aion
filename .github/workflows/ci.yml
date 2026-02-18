@@ -44,5 +44,6 @@ jobs:
             aion/tests/test_operator.py \
             aion/tests/test_ib_client.py \
             aion/tests/test_watchlist.py \
+            aion/tests/test_backtest_skimmer.py \
             aion/tests/test_paper_loop_day_skimmer_dispatch.py \
             aion/tests/test_skimmer_telemetry.py
