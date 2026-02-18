@@ -3005,8 +3005,21 @@ def main() -> int:
                             stop_trigger = price >= stop_ref
                             target_trigger = price <= pos["target"]
 
-                        opposite = opposite_confidence(pos["side"], signal) >= float(signal["opposite_exit_threshold"])
-                        timeout = pos["bars_held"] >= cfg.MAX_HOLD_CYCLES
+                        bars_held = int(max(0, int(pos.get("bars_held", 0))))
+                        min_hold_cycles = int(max(0, int(getattr(cfg, "MIN_HOLD_CYCLES", 0))))
+                        effective_max_hold = int(
+                            max(
+                                min_hold_cycles,
+                                round(float(cfg.MAX_HOLD_CYCLES) * float(getattr(cfg, "TIME_STOP_MULT", 1.0))),
+                            )
+                        )
+                        opposite_threshold = float(signal["opposite_exit_threshold"]) + float(
+                            getattr(cfg, "OPPOSITE_EXIT_BUFFER", 0.0)
+                        )
+                        opposite_threshold = float(np.clip(opposite_threshold, 0.0, 0.99))
+                        opposite_raw = float(opposite_confidence(pos["side"], signal))
+                        opposite = bool(bars_held >= min_hold_cycles and opposite_raw >= opposite_threshold)
+                        timeout = bool(bars_held >= effective_max_hold and bars_held >= min_hold_cycles)
 
                         if stop_trigger or target_trigger or opposite or timeout:
                             side = "SELL" if pos["side"] == "LONG" else "BUY"

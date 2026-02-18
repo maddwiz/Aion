@@ -412,6 +412,11 @@ PARTIAL_CLOSE_FRACTION = float(
     np.clip(float(os.getenv("AION_PARTIAL_CLOSE_FRACTION", str(PARTIAL_PROFIT_FRACTION))), 0.05, 0.95)
 )
 MAX_HOLD_CYCLES = int(os.getenv("AION_MAX_HOLD_CYCLES", str(_mode_default(18, 6))))
+MIN_HOLD_CYCLES = int(np.clip(int(float(os.getenv("AION_MIN_HOLD_CYCLES", str(_mode_default(6, 2))))), 0, 240))
+TIME_STOP_MULT = float(np.clip(float(os.getenv("AION_TIME_STOP_MULT", str(_mode_default(2.0, 1.25)))), 1.0, 6.0))
+OPPOSITE_EXIT_BUFFER = float(
+    np.clip(float(os.getenv("AION_OPPOSITE_EXIT_BUFFER", str(_mode_default(0.10, 0.05)))), 0.0, 0.40)
+)
 
 REGIME_ADX_TREND_MIN = float(os.getenv("AION_REGIME_ADX_TREND_MIN", "20.0"))
 REGIME_ATR_PCT_HIGH = float(os.getenv("AION_REGIME_ATR_PCT_HIGH", "0.045"))
