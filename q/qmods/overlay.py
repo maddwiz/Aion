@@ -10,7 +10,7 @@ def _latent(x: np.ndarray, w: int = 64) -> np.ndarray:
     if x.size < w + 2:
         x = np.pad(x, (0, max(0, w + 2 - x.size)), mode='edge')
     r = np.diff(np.log(np.maximum(x, 1e-12)))
-    r = (r - r.mean()) / (r.std() + 1e-8)
+    r = (r - r.mean()) / (r.std(ddof=1) + 1e-8)
     spec = np.fft.rfft(r)
     mag = np.abs(spec)
     h = 64; k = min(len(mag), 64)

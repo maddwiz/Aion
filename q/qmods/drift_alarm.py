@@ -13,7 +13,7 @@ def find_drift_alarms(drift_series: pd.Series, z=2.0, min_segs=100):
     if s.dropna().shape[0] < min_segs:
         return []
     mu = s.rolling(63, min_periods=20).mean()
-    sd = s.rolling(63, min_periods=20).std()
+    sd = s.rolling(63, min_periods=20).std(ddof=1)
     zsc = (s - mu) / (sd.replace(0, np.nan))
     out = []
     for idx, val in s.items():

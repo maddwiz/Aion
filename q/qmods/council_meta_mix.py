@@ -40,7 +40,7 @@ def _rolling_quality_from_pnl(
         if len(seg) < mp:
             continue
         mu = float(np.mean(seg))
-        sd = float(np.std(seg)) + 1e-12
+        sd = float(np.std(seg, ddof=1)) + 1e-12
         sh = mu / sd
         q[t] = float(np.clip(0.5 + 0.5 * np.tanh(sh / max(1e-6, scale)), 0.0, 1.0))
     return q

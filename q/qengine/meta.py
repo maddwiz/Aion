@@ -7,7 +7,7 @@ from .bandit import ExpWeightsBandit
 def _roll_z(s: pd.Series, w:int=60):
     s = s.astype(float)
     m = s.rolling(w, min_periods=max(10, w//5)).mean()
-    sd = s.rolling(w, min_periods=max(10, w//5)).std().replace(0, np.nan)
+    sd = s.rolling(w, min_periods=max(10, w//5)).std(ddof=1).replace(0, np.nan)
     z = (s - m) / (sd + 1e-9)
     return z.clip(-3, 3).fillna(0.0)
 

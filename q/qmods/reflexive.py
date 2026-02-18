@@ -148,7 +148,7 @@ def _compress_latents_to_1d(df):
 def _rolling_tanh_norm(s, win=63):
     s = pd.Series(pd.to_numeric(s, errors="coerce")).replace([np.inf,-np.inf], np.nan)
     m = s.rolling(win, min_periods=max(5, win//3)).mean()
-    v = s.rolling(win, min_periods=max(5, win//3)).std()
+    v = s.rolling(win, min_periods=max(5, win//3)).std(ddof=1)
     z = (s - m) / v.replace(0, np.nan)
     z = z.replace([np.inf,-np.inf], np.nan).fillna(0.0)
     return np.tanh(z)
@@ -172,7 +172,7 @@ def _load_market_feedback():
     if ret_col is None:
         return pd.DataFrame(columns=["DATE", "feedback"])
     r = pd.to_numeric(df[ret_col], errors="coerce").fillna(0.0).clip(-0.5, 0.5)
-    fb = np.tanh((r.rolling(5, min_periods=2).mean() / (r.rolling(20, min_periods=5).std().replace(0, np.nan))).fillna(0.0))
+    fb = np.tanh((r.rolling(5, min_periods=2).mean() / (r.rolling(20, min_periods=5).std(ddof=1).replace(0, np.nan))).fillna(0.0))
     return pd.DataFrame({"DATE": df["DATE"].dt.normalize(), "feedback": fb})
 
 def run_reflexive():

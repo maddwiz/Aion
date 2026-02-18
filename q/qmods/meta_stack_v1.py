@@ -16,7 +16,7 @@ def _annualized_sharpe(r):
     if r.size < 4:
         return -1e9
     mu = float(np.mean(r))
-    sd = float(np.std(r) + 1e-12)
+    sd = float(np.std(r, ddof=1) + 1e-12)
     return (mu / sd) * np.sqrt(252.0)
 
 

@@ -182,7 +182,7 @@ def run_regime():
     r = pd.Series(df["ret"]).fillna(0.0)
     eq = (1.0 + r).cumprod()
 
-    vol20   = r.rolling(20, min_periods=10).std() * np.sqrt(252.0)
+    vol20   = r.rolling(20, min_periods=10).std(ddof=1) * np.sqrt(252.0)
     trend63 = _trend_strength(eq, 63)
     chop21  = _choppiness(r, 21)
     sym_s   = pd.Series(df["sym_signal"]) if "sym_signal" in df.columns else pd.Series([np.nan]*len(df))

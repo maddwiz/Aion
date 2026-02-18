@@ -168,7 +168,7 @@ def aggregate(votes: list[CouncilVote], qualities: dict[str, float] | None = Non
     raw = (df.values * w.reshape(1, -1)).sum(axis=1)
     raw = pd.Series(raw, index=df.index).clip(-1.0, 1.0)
 
-    disagreement = float(df.std(axis=1).mean()) if df.shape[1] > 1 else 0.0
+    disagreement = float(df.std(axis=1, ddof=1).mean()) if df.shape[1] > 1 else 0.0
     confidence = float(np.clip(1.0 - disagreement, 0.35, 1.0))
     raw = raw * confidence
 

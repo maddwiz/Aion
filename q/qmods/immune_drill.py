@@ -9,7 +9,7 @@ def annualized_sharpe(r: np.ndarray) -> float:
     if len(x) < 4:
         return 0.0
     mu = float(np.mean(x))
-    sd = float(np.std(x) + 1e-12)
+    sd = float(np.std(x, ddof=1) + 1e-12)
     return float((mu / sd) * np.sqrt(252.0))
 
 

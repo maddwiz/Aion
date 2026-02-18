@@ -20,7 +20,7 @@ Implemented and validated:
 - External untouched holdout protocol (`run_external_holdout_validation.py`) integrated into pipeline.
 - Complexity penalties in search/tuning (`run_runtime_combo_search.py`, `run_governor_param_sweep.py`).
 - Sharpe consistency patch in governor sweep metrics (`run_governor_param_sweep.py` now uses sample std `ddof=1`).
-- Extended sample-std consistency audit in `q/tools` Sharpe/vol helpers (active runtime/report scripts now use `ddof=1` where applicable).
+- Extended sample-std consistency audit in `q/tools`, `q/qengine`, and `q/qmods` Sharpe/vol helpers (explicit `ddof=1` where applicable; remaining non-`ddof=1` std calls are intentional non-Sharpe dispersion/normalization paths).
 - Regime-council anti-leakage hardening: optional walk-forward dynamic regime classifier calibrates thresholds on classifier-only windows with explicit fold diagnostics (`classifier_start/end`, thresholds, embargo gap).
 - Runtime combo-search validation hardening: governor holdout quality is now explicit (`governor_validation_min_rows`, `governor_validation_ok`) and can gate candidate selection.
 - Opt-in governor walk-forward validator (`run_governor_walkforward.py`) with expanding folds and OOS aggregation.
@@ -29,6 +29,7 @@ Implemented and validated:
 
 Validation status:
 - Latest full local run (`q/tests` + `aion/tests`): `615 passed`.
+- Latest Q suite run after qengine/qmods std audit: `395 passed`.
 - Latest targeted run (new governor walk-forward batch): `24 passed`.
 - Latest AION suite run after telemetry wiring: `216 passed`.
 - Latest skimmer wiring run (`test_skimmer_loop_integration.py` + dispatch): `3 passed`.

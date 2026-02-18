@@ -15,7 +15,7 @@ def make_event_notes(drift: pd.Series, bpm: pd.Series,
     d = pd.Series(drift).astype(float)
     b = pd.Series(bpm).astype(float)
     mu = d.rolling(63, min_periods=20).mean()
-    sd = d.rolling(63, min_periods=20).std()
+    sd = d.rolling(63, min_periods=20).std(ddof=1)
     z  = (d - mu) / (sd.replace(0, np.nan))
 
     for idx in d.index:
