@@ -25,6 +25,7 @@ from ..brain.intraday_patterns import detect_all_intraday_patterns
 from ..brain.intraday_risk import IntradayRiskManager, IntradayRiskParams, compute_position_size
 from ..brain.novaspine_bridge import build_trade_event, emit_trade_event
 from ..brain.session_analyzer import SessionAnalyzer
+from ..brain.watchlist import SkimmerWatchlistManager
 from ..data.ib_client import disconnect, hist_bars_cached, ib
 from ..execution.simulator import ExecutionSimulator
 from .skimmer_telemetry import SkimmerTelemetry
@@ -56,6 +57,7 @@ class SkimmerLoop:
         self.open_trades: dict[str, TradeState] = {}
         self.last_prices: dict[str, float] = {}
         self.telemetry = SkimmerTelemetry(cfg_mod)
+        self.watchlist = SkimmerWatchlistManager(cfg_mod)
 
         self.cash = float(cfg_mod.EQUITY_START)
         self.closed_pnl = 0.0
@@ -77,19 +79,13 @@ class SkimmerLoop:
             ),
         )
 
-    @staticmethod
-    def _watchlist_path() -> Path:
-        return Path(cfg.STATE_DIR) / "watchlist.txt"
-
-    def _active_symbols(self) -> list[str]:
-        p = self._watchlist_path()
-        if p.exists():
-            try:
-                syms = [str(x).strip().upper() for x in p.read_text(encoding="utf-8").splitlines() if str(x).strip()]
-                if syms:
-                    return syms
-            except Exception:
-                pass
+    def _active_symbols(self, overlay_bundle: dict | None = None) -> list[str]:
+        try:
+            syms = self.watchlist.get_active_symbols(overlay_bundle=overlay_bundle)
+            if syms:
+                return syms
+        except Exception as exc:
+            log_run(f"skimmer watchlist refresh failed: {exc}")
         return ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "AMD", "GOOGL"]
 
     @staticmethod
@@ -555,7 +551,7 @@ class SkimmerLoop:
             max_age_hours=float(getattr(self.cfg, "EXT_SIGNAL_MAX_AGE_HOURS", 12.0)),
         )
 
-        symbols = self._active_symbols()
+        symbols = self._active_symbols(overlay_bundle=overlay_bundle)
         for symbol in symbols:
             try:
                 bars_raw = hist_bars_cached(

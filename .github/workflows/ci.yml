@@ -42,4 +42,7 @@ jobs:
             aion/tests/test_promotion_gate.py \
             aion/tests/test_runtime_decision.py \
             aion/tests/test_operator.py \
-            aion/tests/test_ib_client.py
+            aion/tests/test_ib_client.py \
+            aion/tests/test_watchlist.py \
+            aion/tests/test_paper_loop_day_skimmer_dispatch.py \
+            aion/tests/test_skimmer_telemetry.py
