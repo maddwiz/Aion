@@ -1021,6 +1021,7 @@ def _normalize_position(raw: dict):
         "atr_pct": max(0.0, _safe_float(raw.get("atr_pct"), 0.0)),
         "stop_atr_mult": max(0.1, _safe_float(raw.get("stop_atr_mult"), getattr(cfg, "STOP_ATR_LONG", 1.0))),
         "stop_vol_expanded": bool(raw.get("stop_vol_expanded", False)),
+        "last_bar_ts": str(raw.get("last_bar_ts", "")),
     }
     return out
 
@@ -2003,6 +2004,12 @@ def main() -> int:
                 send_alert("AION KILL SWITCH triggered - flattening all positions", level="CRITICAL")
                 for sym in list(open_positions.keys()):
                     pos = open_positions.get(sym)
+                    current_bar_ts = ""
+                    try:
+                        if hasattr(df, "index") and len(df.index) > 0:
+                            current_bar_ts = str(df.index[-1])
+                    except Exception:
+                        current_bar_ts = ""
                     if not isinstance(pos, dict):
                         continue
                     qty = int(max(0, _safe_int(pos.get("qty"), 0)))
@@ -2883,7 +2890,13 @@ def main() -> int:
 
                     # Manage open positions
                     if pos:
-                        pos["bars_held"] += 1
+                        # Hold duration should advance per new source bar, not per loop tick.
+                        prev_bar_ts = str(pos.get("last_bar_ts", ""))
+                        if current_bar_ts and current_bar_ts != prev_bar_ts:
+                            pos["bars_held"] = int(max(0, int(pos.get("bars_held", 0))) + 1)
+                            pos["last_bar_ts"] = current_bar_ts
+                        elif not prev_bar_ts and current_bar_ts:
+                            pos["last_bar_ts"] = current_bar_ts
                         pos["mark_price"] = price
 
                         if pos["side"] == "LONG":
@@ -3156,6 +3169,7 @@ def main() -> int:
                                 _safe_float(ext_sig.get("confidence"), 0.0) if isinstance(ext_sig, dict) else 0.0
                             ),
                             "intraday_score": float(intraday_score),
+                            "bar_ts": current_bar_ts,
                         }
                     )
 
@@ -3356,6 +3370,7 @@ def main() -> int:
                     "q_overlay_bias": float(_safe_float(c.get("q_overlay_bias"), 0.0)),
                     "q_overlay_confidence": float(_safe_float(c.get("q_overlay_confidence"), 0.0)),
                     "intraday_score": float(_safe_float(c.get("intraday_score"), 0.0)),
+                    "last_bar_ts": str(c.get("bar_ts", "")),
                 }
                 trades_today += 1
 
