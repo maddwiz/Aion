@@ -328,6 +328,9 @@ def compute_vol_target_scalars(
     min_scalar: float = 0.40,
     max_scalar: float = 1.80,
     smooth_alpha: float = 0.20,
+    forecast_annual_vol: np.ndarray | None = None,
+    forecast_blend: float = 0.65,
+    forecast_lag: int = 1,
 ) -> np.ndarray:
     w = np.asarray(weights, float)
     a = np.asarray(asset_returns, float)
@@ -340,13 +343,32 @@ def compute_vol_target_scalars(
     lo = float(np.clip(float(min_scalar), 0.01, 5.0))
     hi = float(np.clip(float(max_scalar), lo, 5.0))
     alpha = float(np.clip(float(smooth_alpha), 0.0, 1.0))
+    fb = float(np.clip(float(forecast_blend), 0.0, 1.0))
+    f_lag = int(max(0, int(forecast_lag)))
+    fcast = None
+    if forecast_annual_vol is not None:
+        f = np.asarray(forecast_annual_vol, float).ravel()
+        if f.size > 0:
+            if f.size < T:
+                fill = float(f[-1]) if np.isfinite(f[-1]) else 0.0
+                f = np.concatenate([f, np.full(T - f.size, fill, dtype=float)], axis=0)
+            fcast = np.nan_to_num(f[:T], nan=0.0, posinf=0.0, neginf=0.0)
 
     raw = np.ones(T, dtype=float)
     for t in range(T):
         i0 = max(0, t - lb + 1)
         seg = r[i0 : t + 1]
         vol_d = float(np.std(seg, ddof=1)) if seg.size > 1 else 0.0
-        vol_a = vol_d * np.sqrt(252.0)
+        vol_a_real = vol_d * np.sqrt(252.0)
+        vol_a = vol_a_real
+        if fcast is not None and fb > 0.0:
+            tf = max(0, t - f_lag)
+            fv = float(max(0.0, fcast[tf]))
+            if fv > 1e-9:
+                if vol_a_real > 1e-9:
+                    vol_a = (1.0 - fb) * vol_a_real + fb * fv
+                else:
+                    vol_a = fv
         if vol_a > 1e-9:
             raw[t] = tgt / vol_a
         else:
@@ -756,6 +778,20 @@ if __name__ == "__main__":
         0.20,
         0.0,
         1.0,
+    )
+    vol_target_forecast_blend = _env_or_profile_float(
+        "Q_VOL_TARGET_FORECAST_BLEND",
+        "vol_target_forecast_blend",
+        0.65,
+        0.0,
+        1.0,
+    )
+    vol_target_forecast_lag = _env_or_profile_int(
+        "Q_VOL_TARGET_FORECAST_LAG",
+        "vol_target_forecast_lag",
+        1,
+        0,
+        5,
     )
 
     # 2) Cross-sectional rank sleeve blend.
@@ -1175,6 +1211,7 @@ if __name__ == "__main__":
     if _gov_enabled("vol_target") and vol_target_strength > 0.0:
         Aret = load_mat("runs_plus/asset_returns.csv")
         if Aret is not None and Aret.shape[1] == W.shape[1]:
+            vfcast = load_series("runs_plus/vol_forecast.csv")
             scalars_raw = compute_vol_target_scalars(
                 W,
                 Aret,
@@ -1183,6 +1220,9 @@ if __name__ == "__main__":
                 min_scalar=vol_target_min_scalar,
                 max_scalar=vol_target_max_scalar,
                 smooth_alpha=vol_target_smooth_alpha,
+                forecast_annual_vol=vfcast,
+                forecast_blend=vol_target_forecast_blend,
+                forecast_lag=vol_target_forecast_lag,
             )
             L = min(len(scalars_raw), W.shape[0])
             sv = _apply_governor_strength(scalars_raw[:L], vol_target_strength, lo=0.0, hi=3.0).reshape(-1, 1)
@@ -1198,6 +1238,9 @@ if __name__ == "__main__":
                         "min_scalar": float(vol_target_min_scalar),
                         "max_scalar": float(vol_target_max_scalar),
                         "smooth_alpha": float(vol_target_smooth_alpha),
+                        "forecast_blend": float(vol_target_forecast_blend),
+                        "forecast_lag": int(vol_target_forecast_lag),
+                        "forecast_available": bool(vfcast is not None and len(np.asarray(vfcast).ravel()) > 0),
                         "strength": float(vol_target_strength),
                         "scalar_mean": float(np.mean(sv)),
                         "scalar_min": float(np.min(sv)),
@@ -1358,6 +1401,8 @@ if __name__ == "__main__":
                     "vol_target_min_scalar": vol_target_min_scalar,
                     "vol_target_max_scalar": vol_target_max_scalar,
                     "vol_target_smooth_alpha": vol_target_smooth_alpha,
+                    "vol_target_forecast_blend": vol_target_forecast_blend,
+                    "vol_target_forecast_lag": vol_target_forecast_lag,
                     "use_concentration_governor": bool(use_conc),
                     "concentration_top1_cap": conc_top1,
                     "concentration_top3_cap": conc_top3,

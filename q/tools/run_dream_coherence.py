@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from qmods.dream_coherence import build_dream_coherence_governor
+from qengine.bandit_v2 import ThompsonBandit
 
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
@@ -122,11 +124,11 @@ def _append_card(title, html):
         p.write_text(txt, encoding="utf-8")
 
 
-if __name__ == "__main__":
+def main() -> int:
     returns = _load_series(RUNS / "daily_returns.csv")
     if returns is None or len(returns) == 0:
         print("(!) Missing runs_plus/daily_returns.csv; cannot build dream coherence governor.")
-        raise SystemExit(0)
+        return 0
 
     sig = {
         "reflex_latent": _load_series(RUNS / "reflex_latent.csv", ["reflex_latent"]),
@@ -138,10 +140,26 @@ if __name__ == "__main__":
     }
 
     aligned, ret, idx = _align_tail(sig, returns)
+    keys = list(aligned.keys())
     bandit_widths = None
-    bw = _load_series(RUNS / "bandit_confidence_widths.csv")
-    if bw is not None and len(bw) >= len(aligned):
-        bandit_widths = np.asarray(bw[: len(aligned)], float)
+    use_bandit_certainty = str(os.getenv("Q_DREAM_USE_BANDIT_CERTAINTY", "1")).strip().lower() not in {"0", "false", "off", "no"}
+    if use_bandit_certainty and keys:
+        try:
+            b = ThompsonBandit(
+                n_arms=len(keys),
+                decay=float(np.clip(float(os.getenv("Q_THOMPSON_DECAY", "0.995")), 0.90, 1.0)),
+                magnitude_scaling=str(os.getenv("Q_THOMPSON_MAGNITUDE_SCALING", "1")).strip().lower() not in {"0", "false", "off", "no"},
+                prior_file=os.getenv("Q_BANDIT_PRIOR_FILE", "").strip() or None,
+            ).fit(aligned, pd.Series(ret))
+            bandit_widths = np.asarray(b.confidence_intervals(percentile=0.90), float).ravel()
+            if bandit_widths.size >= len(keys):
+                np.savetxt(RUNS / "bandit_confidence_widths.csv", bandit_widths[: len(keys)].reshape(-1, 1), delimiter=",")
+        except Exception:
+            bandit_widths = None
+    if bandit_widths is None:
+        bw = _load_series(RUNS / "bandit_confidence_widths.csv")
+        if bw is not None and len(bw) >= len(keys):
+            bandit_widths = np.asarray(bw[: len(keys)], float)
     gov, info = build_dream_coherence_governor(
         aligned,
         ret,
@@ -152,7 +170,7 @@ if __name__ == "__main__":
     )
     if len(gov) == 0:
         print("(!) Dream coherence alignment failed; skipping.")
-        raise SystemExit(0)
+        return 0
 
     comp = pd.DataFrame(
         {
@@ -181,6 +199,8 @@ if __name__ == "__main__":
         "per_signal_consensus_corr": info.get("per_signal_consensus_corr", {}),
         "bandit_certainty_used": bool(info.get("bandit_certainty_used", False)),
         "bandit_certainty_mean": info.get("bandit_certainty_mean", None),
+        "bandit_confidence_width_count": int(len(np.asarray(bandit_widths).ravel())) if bandit_widths is not None else 0,
+        "bandit_confidence_width_mean": float(np.mean(np.asarray(bandit_widths).ravel())) if bandit_widths is not None else None,
     }
     (RUNS / "dream_coherence_info.json").write_text(json.dumps(comp_info, indent=2))
 
@@ -203,3 +223,8 @@ if __name__ == "__main__":
     print(f"✅ Wrote {RUNS/'dream_coherence_governor.csv'}")
     print(f"✅ Wrote {RUNS/'dream_coherence_components.csv'}")
     print(f"✅ Wrote {RUNS/'dream_coherence_info.json'}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
