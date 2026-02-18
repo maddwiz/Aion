@@ -41,7 +41,15 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     _write(log_dir / "runtime_monitor.json", {"alerts": [], "system_events": []})
     _write(log_dir / "performance_report.json", {"trade_metrics": {"closed_trades": 5}, "equity_metrics": {}})
     _write(state_dir / "strategy_profile.json", {"trading_enabled": True, "adaptive_stats": {}})
-    _write(state_dir / "telemetry_summary.json", {"closed_trade_events": 5, "rolling_hit_rate": 0.6})
+    _write(
+        state_dir / "telemetry_summary.json",
+        {
+            "closed_trade_events": 5,
+            "rolling_hit_rate": 0.6,
+            "top_win_signal_category": "session_structure",
+            "top_loss_signal_category": "multi_timeframe",
+        },
+    )
     _write(
         ops_status,
         {
@@ -165,6 +173,8 @@ def test_status_payload_includes_external_overlay_fields(tmp_path: Path, monkeyp
     assert s["signal_gate_summary"]["passed"] == 1
     assert s["signal_gate_summary"]["avg_intraday_score"] is not None
     assert s["telemetry_summary"]["closed_trade_events"] == 5
+    assert s["telemetry_summary"]["top_win_signal_category"] == "session_structure"
+    assert s["telemetry_summary"]["top_loss_signal_category"] == "multi_timeframe"
 
 
 def test_status_payload_falls_back_to_live_overlay_when_doctor_is_stale(tmp_path: Path, monkeypatch):
