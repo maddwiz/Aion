@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -990,8 +991,10 @@ def main() -> int:
     if degrade:
         global_overlay = {"bias": 0.0, "confidence": 0.0}
     payload = {
+        "version": str(os.getenv("Q_SIGNAL_PACK_VERSION", "2026.02")),
         "generated_at": ts,
         "generated_at_utc": ts,
+        "generator": "export_aion_signal_pack.py",
         "source": "q.walk_forward_plus",
         "global": global_overlay,
         "signals": {
@@ -1010,6 +1013,8 @@ def main() -> int:
         "degraded_safe_mode": bool(degrade),
         "source_mode": "wf_table" if not used_fallback else "final_weights_fallback",
     }
+    sig_bytes = json.dumps(payload["signals"], sort_keys=True, separators=(",", ":")).encode()
+    payload["checksum"] = hashlib.sha256(sig_bytes).hexdigest()
 
     out_json = Path(args.out_json)
     out_json.parent.mkdir(parents=True, exist_ok=True)

@@ -1185,6 +1185,25 @@ if __name__ == "__main__":
         header=",".join(trace_cols),
         comments="",
     )
+    governor_diagnostics = []
+    for idx, step_name in enumerate(TRACE_STEPS):
+        g_raw = np.asarray(trace_mat[:, idx], float).ravel()
+        governor_diagnostics.append(
+            {
+                "name": str(step_name),
+                "score": float(np.mean(g_raw)) if g_raw.size else 1.0,
+                "min": float(np.min(g_raw)) if g_raw.size else 1.0,
+                "max": float(np.max(g_raw)) if g_raw.size else 1.0,
+                "threshold": None,
+                "action": "scale",
+                "reason": "trace_scalar",
+                "pct_below_floor": float(np.mean(g_raw < 0.0)) if g_raw.size else 0.0,
+            }
+        )
+    (RUNS / "governor_diagnostics.json").write_text(
+        json.dumps(governor_diagnostics, indent=2),
+        encoding="utf-8",
+    )
 
     # 35) Save final
     outp = RUNS/"portfolio_weights_final.csv"

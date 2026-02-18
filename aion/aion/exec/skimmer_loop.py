@@ -33,6 +33,7 @@ from ..risk.exposure_gate import check_exposure
 from .alerting import send_alert
 from .audit_log import audit_log
 from .kill_switch import KillSwitchWatcher
+from .health_aggregator import write_system_health
 from .order_state import save_order_state
 from .reconciliation import reconcile_on_startup
 from .telemetry_summary import write_telemetry_summary
@@ -990,6 +991,10 @@ class SkimmerLoop:
             self._force_close_all("kill_switch")
             self.kill_switch.acknowledge()
             _persist_ib_order_state(ib_client)
+            try:
+                write_system_health(state_dir=Path(self.cfg.STATE_DIR), log_dir=Path(self.cfg.LOG_DIR))
+            except Exception:
+                pass
             return False
 
         overlay_poll_sec = max(5.0, float(getattr(self.cfg, "EXT_SIGNAL_POLL_SECONDS", 300)))
@@ -1066,6 +1071,10 @@ class SkimmerLoop:
         open_pnl = float(eq - self.cash - self.closed_pnl)
         log_equity(dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), float(eq), float(self.cash), float(open_pnl), float(self.closed_pnl))
         self._maybe_update_telemetry_summary()
+        try:
+            write_system_health(state_dir=Path(self.cfg.STATE_DIR), log_dir=Path(self.cfg.LOG_DIR))
+        except Exception:
+            pass
         return True
 
     def _maybe_update_telemetry_summary(self):

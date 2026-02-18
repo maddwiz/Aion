@@ -32,7 +32,7 @@ INNER_MIN = int(os.environ.get("NWF_INNER_MIN", "252"))
 INNER_STEP = int(os.environ.get("NWF_INNER_STEP", "21"))
 INNER_FOLDS = int(os.environ.get("NWF_INNER_FOLDS", "4"))
 EMBARGO = int(os.environ.get("NWF_EMBARGO", "5"))
-PURGE = int(os.environ.get("NWF_PURGE", "3"))
+PURGE = int(os.environ.get("Q_PURGE_BARS", os.environ.get("NWF_PURGE", "3")))
 MIN_ROWS = int(os.environ.get("NWF_MIN_ROWS", "900"))
 MAX_ROWS = int(os.environ.get("NWF_MAX_ROWS", "3000"))
 COST_BPS = float(os.environ.get("NWF_COST_BPS", "1.0"))
@@ -254,6 +254,7 @@ def run_asset_nested(ret: np.ndarray, pos: np.ndarray) -> tuple[dict, list[str]]
 
 
 if __name__ == "__main__":
+    print(f"Walk-forward PURGE_BARS={PURGE}")
     rows = []
     cfg_counter = Counter()
 

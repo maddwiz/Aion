@@ -347,6 +347,57 @@ if __name__ == "__main__":
         ),
         encoding="utf-8",
     )
+
+    # Per-trade cost decomposition for audit/debugging.
+    gross_traded = float(np.sum(turnover))
+    fee_total = float(fixed_daily_fee * T)
+    total_cost = float(np.sum(cost))
+    var_cost_total = max(0.0, float(total_cost - fee_total))
+    spread_share = float(np.clip(float(os.getenv("Q_COST_SPREAD_SHARE", "0.45")), 0.0, 1.0))
+    impact_share = float(np.clip(float(os.getenv("Q_COST_IMPACT_SHARE", "0.35")), 0.0, 1.0))
+    comm_share = float(np.clip(float(os.getenv("Q_COST_COMMISSION_SHARE", "0.20")), 0.0, 1.0))
+    shares_sum = max(1e-9, spread_share + impact_share + comm_share)
+    spread_share /= shares_sum
+    impact_share /= shares_sum
+    comm_share /= shares_sum
+
+    spread_cost_total = var_cost_total * spread_share
+    impact_cost_total = var_cost_total * impact_share
+    commission_total = var_cost_total * comm_share
+
+    if gross_traded > 1e-12:
+        spread_cost_bps = float(spread_cost_total / gross_traded * 10000.0)
+        impact_cost_bps = float(impact_cost_total / gross_traded * 10000.0)
+        commission_bps = float(commission_total / gross_traded * 10000.0)
+        total_cost_bps = float(total_cost / gross_traded * 10000.0)
+    else:
+        spread_cost_bps = 0.0
+        impact_cost_bps = 0.0
+        commission_bps = 0.0
+        total_cost_bps = 0.0
+
+    initial_equity = float(np.clip(float(os.getenv("Q_INITIAL_EQUITY", "1.0")), 1e-6, 1e12))
+    n_days = max(1, int(T))
+    cost_drag_ann_pct = float((total_cost / initial_equity) * (252.0 / n_days) * 100.0)
+    (RUNS / "cost_breakdown.json").write_text(
+        json.dumps(
+            {
+                "spread_cost_bps": float(spread_cost_bps),
+                "market_impact_bps": float(impact_cost_bps),
+                "commission_bps": float(commission_bps),
+                "total_cost_bps": float(total_cost_bps),
+                "gross_traded_total": float(gross_traded),
+                "cost_drag_ann_pct": float(cost_drag_ann_pct),
+                "spread_cost_total": float(spread_cost_total),
+                "market_impact_total": float(impact_cost_total),
+                "commission_total": float(commission_total),
+                "fixed_fee_total": float(fee_total),
+                "total_cost": float(total_cost),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     if clip_events > 0:
         print(f"(!) Clipped {clip_events} extreme asset-return values with |r|>{clip_abs:.3f}")
     print(

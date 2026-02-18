@@ -33,6 +33,7 @@ from ..risk.position_sizing import gross_leverage_ok, risk_qty
 from .alerting import send_alert
 from .audit_log import audit_log
 from .kill_switch import KillSwitchWatcher
+from .health_aggregator import write_system_health
 from .order_state import save_order_state
 from .reconciliation import reconcile_on_startup
 from .telemetry import DecisionTelemetry
@@ -1920,6 +1921,10 @@ def main() -> int:
                 kill_switch.acknowledge()
                 save_runtime_state(day_key, cash, closed_pnl, trades_today, open_positions, cooldown)
                 try:
+                    write_system_health(state_dir=Path(cfg.STATE_DIR), log_dir=Path(cfg.LOG_DIR))
+                except Exception:
+                    pass
+                try:
                     _persist_ib_order_state(ib_client)
                 except Exception:
                     pass
@@ -3177,6 +3182,10 @@ def main() -> int:
             log_equity(now(), equity, cash, open_pnl, closed_pnl)
             save_runtime_state(day_key, cash, closed_pnl, trades_today, open_positions, cooldown)
             last_telemetry_summary_ts = _maybe_update_telemetry_summary(last_telemetry_summary_ts)
+            try:
+                write_system_health(state_dir=Path(cfg.STATE_DIR), log_dir=Path(cfg.LOG_DIR))
+            except Exception:
+                pass
 
             if cfg.MONITORING_ENABLED:
                 avg_conf = float(sum(cycle_conf) / len(cycle_conf)) if cycle_conf else 0.0

@@ -191,6 +191,16 @@ def main() -> int:
     latest_n = _latest_holdout_window(T, requested=latest_holdout_req, min_window=latest_holdout_min)
     latest = r[-latest_n:] if latest_n > 0 else np.asarray([], float)
     latest_metrics = _metrics(latest)
+    oos_horizons = [63, 126, 252]
+    horizon_metrics = {}
+    for h in oos_horizons:
+        if len(oos) >= int(h):
+            subset = oos[-int(h) :]
+            horizon_metrics[f"oos_{int(h)}d"] = _metrics(subset)
+    all_horizons_pass = bool(horizon_metrics) and all(
+        float(m.get("sharpe", 0.0)) > 0.30 and float(m.get("hit_rate", 0.0)) > 0.45
+        for m in horizon_metrics.values()
+    )
 
     gross = _load_series(RUNS / "daily_returns_gross.csv")
     costs = _load_series(RUNS / "daily_costs.csv")
@@ -219,6 +229,8 @@ def main() -> int:
         "metrics_oos_net": _metrics(oos),
         "metrics_oos_robust": robust,
         "metrics_oos_latest": latest_metrics,
+        "oos_horizons": horizon_metrics,
+        "all_horizons_pass": bool(all_horizons_pass),
         "latest_holdout_days_requested": int(latest_holdout_req),
         "latest_holdout_days_used": int(latest_n),
         "robust_oos_splits_file": str(RUNS / "strict_oos_splits.json"),
@@ -237,6 +249,8 @@ def main() -> int:
         f"Hit={mr['hit_rate']:.3f}, MaxDD={mr['max_drawdown']:.3f}.</p>"
         f"<p>Latest holdout ({latest_n} rows): Sharpe={ml['sharpe']:.3f}, "
         f"Hit={ml['hit_rate']:.3f}, MaxDD={ml['max_drawdown']:.3f}.</p>"
+        f"<p>Horizon gate: pass={str(bool(all_horizons_pass)).lower()} "
+        f"(evaluated={len(horizon_metrics)} horizons).</p>"
     )
     _append_card("Strict OOS Validation ✔", html)
 
