@@ -465,6 +465,9 @@ if __name__ == "__main__":
     if not ok and rc is not None: failures.append({"step": "tools/run_credit_council_member.py", "code": rc})
     ok, rc = run_script("tools/run_microstructure_council_member.py")
     if not ok and rc is not None: failures.append({"step": "tools/run_microstructure_council_member.py", "code": rc})
+    # Cross-sectional DNA convergence alpha as a council member.
+    ok, rc = run_script("tools/run_dna_convergence.py")
+    if not ok and rc is not None: failures.append({"step": "tools/run_dna_convergence.py", "code": rc})
 
     # (C) Build council votes (real if present, else sleeves or synthetic)
     ok, rc = run_script("tools/make_council_votes.py")
