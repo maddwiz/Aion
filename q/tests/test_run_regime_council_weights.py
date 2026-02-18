@@ -115,3 +115,59 @@ def test_output_dimensions_match_signal_matrix():
     assert int(info["rows"]) == t
     assert int(info["cols"]) == k
 
+
+def test_dynamic_regime_classifier_emits_fold_thresholds():
+    rng = np.random.default_rng(31)
+    t = 260
+    k = 4
+    votes = np.tanh(rng.normal(size=(t, k)))
+    # Deliberate volatility regime shift so fold thresholds adapt.
+    ret = np.concatenate(
+        [
+            rng.normal(0.0, 0.004, size=t // 2),
+            rng.normal(0.0, 0.030, size=t - (t // 2)),
+        ]
+    )
+
+    w, info = rrcw.compute_regime_council_weights(
+        votes,
+        ret,
+        labels=None,
+        min_regime_days=15,
+        train_min=100,
+        test_step=20,
+        embargo=5,
+        eta=0.6,
+        dynamic_regime_classifier=True,
+    )
+
+    assert w.shape == (t, k)
+    assert bool(info.get("dynamic_regime_classifier", False))
+    folds = info.get("folds", [])
+    assert len(folds) > 1
+    assert all("classifier_thresholds" in f for f in folds)
+
+    sqv = [float(f["classifier_thresholds"]["squeeze_vol_z_max"]) for f in folds]
+    assert max(sqv) - min(sqv) > 1e-6
+
+
+def test_missing_labels_can_fallback_without_dynamic_classifier():
+    rng = np.random.default_rng(41)
+    t = 190
+    k = 3
+    votes = np.tanh(rng.normal(size=(t, k)))
+    ret = rng.normal(0.0, 0.01, size=t)
+
+    w, info = rrcw.compute_regime_council_weights(
+        votes,
+        ret,
+        labels=None,
+        min_regime_days=15,
+        train_min=90,
+        test_step=18,
+        embargo=5,
+        dynamic_regime_classifier=False,
+    )
+
+    assert w.shape == (t, k)
+    assert not bool(info.get("dynamic_regime_classifier", True))

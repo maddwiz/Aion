@@ -180,6 +180,7 @@ def apply_profile_env_defaults():
         "regime_council_enabled": "Q_REGIME_COUNCIL_ENABLED",
         "regime_council_lookback": "Q_REGIME_COUNCIL_LOOKBACK",
         "regime_council_min_regime_days": "Q_REGIME_COUNCIL_MIN_REGIME_DAYS",
+        "regime_council_dynamic_classifier": "Q_REGIME_COUNCIL_DYNAMIC_CLASSIFIER",
         "cash_yield_annual": "Q_CASH_YIELD_ANNUAL",
         "cash_exposure_target": "Q_CASH_EXPOSURE_TARGET",
     }

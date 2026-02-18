@@ -125,6 +125,78 @@ def classify_regimes_from_returns(returns: np.ndarray, lookback: int = 63) -> np
     return labels
 
 
+def _regime_features(returns: np.ndarray, lookback: int = 63) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    r = np.asarray(returns, float).ravel()
+    if r.size == 0:
+        z = np.asarray([], dtype=float)
+        return z, z, z
+    lb = int(max(10, lookback))
+    ret_lb = pd.Series(r).rolling(lb, min_periods=max(10, lb // 3)).sum().fillna(0.0).values
+    vol_lb = pd.Series(r).rolling(lb, min_periods=max(10, lb // 3)).std(ddof=1).fillna(0.0).values
+    ret_z = _zscore_rolling(ret_lb, max(63, lb))
+    vol_z = _zscore_rolling(vol_lb, max(63, lb))
+    ac21 = _rolling_lag1_autocorr(r, window=21)
+    return ret_z, vol_z, ac21
+
+
+def _fit_regime_thresholds(ret_z: np.ndarray, vol_z: np.ndarray, ac21: np.ndarray) -> dict[str, float]:
+    rz = np.asarray(ret_z, float).ravel()
+    vz = np.asarray(vol_z, float).ravel()
+    ac = np.asarray(ac21, float).ravel()
+    rz = rz[np.isfinite(rz)]
+    vz = vz[np.isfinite(vz)]
+    ac = ac[np.isfinite(ac)]
+
+    if rz.size < 12 or vz.size < 12 or ac.size < 12:
+        return {
+            "trend_ret_z_min": 1.0,
+            "squeeze_vol_z_max": -0.5,
+            "squeeze_abs_ret_z_max": 0.35,
+            "mean_reverting_ac_max": -0.15,
+        }
+
+    trend = float(np.clip(np.nanquantile(rz, 0.80), 0.8, 2.5))
+    sq_vol = float(np.clip(np.nanquantile(vz, 0.30), -2.5, -0.1))
+    sq_abs_ret = float(np.clip(np.nanquantile(np.abs(rz), 0.45), 0.15, 0.75))
+    mr_ac = float(np.clip(np.nanquantile(ac, 0.20), -0.9, -0.05))
+    return {
+        "trend_ret_z_min": trend,
+        "squeeze_vol_z_max": sq_vol,
+        "squeeze_abs_ret_z_max": sq_abs_ret,
+        "mean_reverting_ac_max": mr_ac,
+    }
+
+
+def _classify_with_thresholds(
+    ret_z: np.ndarray,
+    vol_z: np.ndarray,
+    ac21: np.ndarray,
+    thresholds: dict[str, float],
+) -> np.ndarray:
+    rz = np.asarray(ret_z, float).ravel()
+    vz = np.asarray(vol_z, float).ravel()
+    ac = np.asarray(ac21, float).ravel()
+    n = int(min(rz.size, vz.size, ac.size))
+    if n <= 0:
+        return np.asarray([], dtype=object)
+    rz = rz[:n]
+    vz = vz[:n]
+    ac = ac[:n]
+
+    tr = float(thresholds.get("trend_ret_z_min", 1.0))
+    sqv = float(thresholds.get("squeeze_vol_z_max", -0.5))
+    sqr = float(thresholds.get("squeeze_abs_ret_z_max", 0.35))
+    mr = float(thresholds.get("mean_reverting_ac_max", -0.15))
+
+    labels = np.full(n, "choppy", dtype=object)
+    labels[rz > tr] = "trending"
+    squeeze_mask = (vz < sqv) & (np.abs(rz) < sqr)
+    labels[squeeze_mask] = "squeeze"
+    labels[ac < mr] = "mean_reverting"
+    labels[rz > tr] = "trending"
+    return labels
+
+
 def _normalize_labels(raw: np.ndarray) -> np.ndarray:
     vals = np.asarray(raw).ravel()
     out = np.full(vals.size, "choppy", dtype=object)
@@ -194,7 +266,7 @@ def _fit_bandit_weights(signals: np.ndarray, returns: np.ndarray, eta: float) ->
 def compute_regime_council_weights(
     council_votes: np.ndarray,
     returns: np.ndarray,
-    labels: np.ndarray,
+    labels: np.ndarray | None = None,
     *,
     min_regime_days: int = 60,
     lookback: int = 63,
@@ -202,24 +274,30 @@ def compute_regime_council_weights(
     test_step: int = 21,
     embargo: int = 5,
     eta: float = 0.6,
+    dynamic_regime_classifier: bool = False,
 ) -> tuple[np.ndarray, dict]:
     v = np.asarray(council_votes, float)
     if v.ndim == 1:
         v = v.reshape(-1, 1)
     y = np.asarray(returns, float).ravel()
-    lab = _normalize_labels(labels)
-    t = min(v.shape[0], y.size, lab.size)
+    has_labels = labels is not None
+    lab_in = _normalize_labels(labels) if has_labels else None
+    t = min(v.shape[0], y.size, int(lab_in.size) if lab_in is not None else y.size)
     if t <= 0:
         return np.ones((0, 0), dtype=float), {
             "rows": 0,
             "cols": 0,
             "folds": [],
             "regime_fallback_counts": {r: 0 for r in REGIMES},
+            "dynamic_regime_classifier": bool(dynamic_regime_classifier),
         }
 
     v = np.nan_to_num(v[:t], nan=0.0, posinf=0.0, neginf=0.0)
     y = np.nan_to_num(y[:t], nan=0.0, posinf=0.0, neginf=0.0)
-    lab = lab[:t]
+    if lab_in is not None:
+        lab = lab_in[:t].copy()
+    else:
+        lab = classify_regimes_from_returns(y, lookback=lookback).astype(object)
 
     k = v.shape[1]
     min_days = int(max(10, min_regime_days))
@@ -231,11 +309,28 @@ def compute_regime_council_weights(
     out = np.full((t, k), np.nan, dtype=float)
     fallback_counts = {r: 0 for r in REGIMES}
     fold_info: list[dict] = []
+    dyn_cls = bool(dynamic_regime_classifier)
+    ret_z, vol_z, ac21 = _regime_features(y, lookback=lb) if dyn_cls else (None, None, None)
 
     # Seed very-early rows with global train weights.
     seed_end = min(t, train_min)
     seed = _fit_bandit_weights(v[:seed_end], y[:seed_end], eta=eta)
     out[:seed_end] = seed.reshape(1, -1)
+    if dyn_cls and ret_z is not None and vol_z is not None and ac21 is not None and seed_end > 0:
+        seed_cls_end = min(t, max(lb + 10, seed_end))
+        cls_win = max(126, 4 * lb)
+        seed_cls_start = max(0, seed_cls_end - cls_win)
+        seed_th = _fit_regime_thresholds(
+            ret_z[seed_cls_start:seed_cls_end],
+            vol_z[seed_cls_start:seed_cls_end],
+            ac21[seed_cls_start:seed_cls_end],
+        )
+        lab[:seed_end] = _classify_with_thresholds(
+            ret_z[:seed_end],
+            vol_z[:seed_end],
+            ac21[:seed_end],
+            seed_th,
+        )
 
     for train_end in range(train_min, t, test_step):
         test_end = min(t, train_end + test_step)
@@ -250,11 +345,39 @@ def compute_regime_council_weights(
         if signal_idx.size < 8:
             signal_idx = np.arange(max(0, train_end - max(min_days, 40)), train_end, dtype=int)
 
+        fold_thresholds = None
+        signal_labels = None
+        test_labels = None
+        classifier_start = None
+        if dyn_cls and ret_z is not None and vol_z is not None and ac21 is not None:
+            cls_win = max(126, 4 * lb)
+            classifier_start = max(0, classifier_end - cls_win)
+            fold_thresholds = _fit_regime_thresholds(
+                ret_z[classifier_start:classifier_end],
+                vol_z[classifier_start:classifier_end],
+                ac21[classifier_start:classifier_end],
+            )
+            signal_labels = _classify_with_thresholds(
+                ret_z[signal_idx],
+                vol_z[signal_idx],
+                ac21[signal_idx],
+                fold_thresholds,
+            )
+            test_labels = _classify_with_thresholds(
+                ret_z[train_end:test_end],
+                vol_z[train_end:test_end],
+                ac21[train_end:test_end],
+                fold_thresholds,
+            )
+
         global_w = _fit_bandit_weights(v[signal_idx], y[signal_idx], eta=eta)
         by_regime: dict[str, np.ndarray] = {}
         counts: dict[str, int] = {}
         for rg in REGIMES:
-            ridx = signal_idx[lab[signal_idx] == rg]
+            if signal_labels is None:
+                ridx = signal_idx[lab[signal_idx] == rg]
+            else:
+                ridx = signal_idx[np.asarray(signal_labels) == rg]
             counts[rg] = int(ridx.size)
             if ridx.size >= min_days:
                 by_regime[rg] = _fit_bandit_weights(v[ridx], y[ridx], eta=eta)
@@ -263,22 +386,29 @@ def compute_regime_council_weights(
                 fallback_counts[rg] += 1
 
         for i in range(train_end, test_end):
-            rg = str(lab[i]).strip().lower()
+            if test_labels is None:
+                rg = str(lab[i]).strip().lower()
+            else:
+                rg = str(test_labels[i - train_end]).strip().lower()
+                lab[i] = rg if rg in REGIMES else "choppy"
             if rg not in by_regime:
                 out[i] = global_w
             else:
                 out[i] = by_regime[rg]
 
-        fold_info.append(
-            {
-                "train_end": int(train_end),
-                "test_end": int(test_end),
-                "classifier_end": int(classifier_end),
-                "signal_start": int(signal_start),
-                "embargo_gap": int(max(0, signal_start - classifier_end)),
-                "regime_counts_signal_train": counts,
-            }
-        )
+        row = {
+            "train_end": int(train_end),
+            "test_end": int(test_end),
+            "classifier_end": int(classifier_end),
+            "signal_start": int(signal_start),
+            "embargo_gap": int(max(0, signal_start - classifier_end)),
+            "regime_counts_signal_train": counts,
+        }
+        if classifier_start is not None:
+            row["classifier_start"] = int(classifier_start)
+        if isinstance(fold_thresholds, dict):
+            row["classifier_thresholds"] = {k: float(v) for k, v in fold_thresholds.items()}
+        fold_info.append(row)
 
     # Fill any holes with nearest previous row, then uniform fallback.
     for i in range(t):
@@ -313,6 +443,7 @@ def compute_regime_council_weights(
         "regime_fallback_counts": fallback_counts,
         "folds": fold_info,
         "regime_mean_weights": regime_means,
+        "dynamic_regime_classifier": bool(dyn_cls),
     }
     return out, info
 
@@ -364,6 +495,12 @@ def main() -> int:
     test_step = int(np.clip(int(float(os.getenv("Q_REGIME_COUNCIL_TEST_STEP", "21"))), 5, 252))
     embargo = int(np.clip(int(float(os.getenv("Q_REGIME_COUNCIL_EMBARGO", "5"))), 5, 30))
     eta = float(np.clip(float(os.getenv("Q_REGIME_COUNCIL_BANDIT_ETA", "0.6")), 0.05, 2.0))
+    dyn_cls_enabled = str(os.getenv("Q_REGIME_COUNCIL_DYNAMIC_CLASSIFIER", "1")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     votes = _load_matrix(RUNS / "council_votes.csv")
     if votes is None:
@@ -385,9 +522,13 @@ def main() -> int:
     y = y[:t]
 
     labels, label_source = _load_regime_labels(RUNS / "regime_labels.csv", t=t)
-    if labels is None:
+    use_dynamic_classifier = False
+    if labels is None and dyn_cls_enabled:
+        label_source = "walkforward_fallback"
+        use_dynamic_classifier = True
+    elif labels is None:
         labels = classify_regimes_from_returns(y, lookback=lookback)
-        label_source = "fallback"
+        label_source = "fallback_static"
 
     regime_w, info = compute_regime_council_weights(
         votes,
@@ -399,6 +540,7 @@ def main() -> int:
         test_step=test_step,
         embargo=embargo,
         eta=eta,
+        dynamic_regime_classifier=use_dynamic_classifier,
     )
 
     np.savetxt(RUNS / "regime_council_weights.csv", regime_w, delimiter=",")
