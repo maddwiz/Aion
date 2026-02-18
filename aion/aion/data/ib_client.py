@@ -5,6 +5,7 @@ import pandas as pd
 from ib_insync import Contract, IB, Stock, util
 
 from .. import config as cfg
+from ..exec.order_state import load_order_state, merge_safe_req_id
 
 
 _ib: Optional[IB] = None
@@ -14,6 +15,39 @@ _last_hist_req_ts: float = 0.0
 _resolved_port: Optional[int] = None
 _resolved_host: Optional[str] = None
 _resolved_client_id: Optional[int] = None
+
+
+def _client_req_id(client) -> int:
+    try:
+        getter = getattr(client, "getReqId", None)
+        if callable(getter):
+            return int(getter())
+    except Exception:
+        pass
+    return 0
+
+
+def _set_client_req_id(client, req_id: int) -> None:
+    rid = int(max(0, int(req_id)))
+    try:
+        setter = getattr(client, "setReqId", None)
+        if callable(setter):
+            setter(rid)
+            return
+    except Exception:
+        pass
+    try:
+        updater = getattr(client, "updateReqId", None)
+        if callable(updater):
+            updater(rid)
+            return
+    except Exception:
+        pass
+    try:
+        # Fallback for older clients where internal sequence is exposed.
+        setattr(client, "_reqIdSeq", rid)
+    except Exception:
+        return
 
 
 def _candidate_ports() -> list[int]:
@@ -150,6 +184,13 @@ def ib() -> IB:
         cfg.IB_PORT = _resolved_port
     if int(cfg.IB_CLIENT_ID) != _resolved_client_id:
         cfg.IB_CLIENT_ID = _resolved_client_id
+    saved = load_order_state(cfg.STATE_DIR)
+    if isinstance(saved, dict):
+        saved_id = int(saved.get("next_valid_id", 0))
+        live_id = _client_req_id(_ib.client)
+        safe_id = merge_safe_req_id(saved_id, live_id)
+        if safe_id > 0:
+            _set_client_req_id(_ib.client, safe_id)
     _ib.reqMarketDataType(cfg.IB_MARKET_DATA_TYPE)
     return _ib
 

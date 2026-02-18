@@ -3,6 +3,27 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+SAFETY="${AION_SAFETY_MODE:-paper-only}"
+if [[ "${1:-}" == "paper-only" || "${1:-}" == "live" ]]; then
+  SAFETY="$1"
+  shift || true
+fi
+
+if [[ "$SAFETY" == "paper-only" ]]; then
+  export AION_PAPER_MODE="${AION_PAPER_MODE:-1}"
+  export AION_BLOCK_LIVE_ORDERS="${AION_BLOCK_LIVE_ORDERS:-1}"
+  echo "[SAFETY] Paper-only mode: live order submission BLOCKED"
+elif [[ "$SAFETY" == "live" ]]; then
+  export AION_PAPER_MODE="${AION_PAPER_MODE:-0}"
+  export AION_BLOCK_LIVE_ORDERS="${AION_BLOCK_LIVE_ORDERS:-0}"
+  echo "[SAFETY] LIVE mode: orders WILL be submitted to IBKR"
+  echo "[SAFETY] Press Ctrl+C within 5 seconds to abort..."
+  sleep 5
+else
+  echo "Usage: ./run_aion.sh [paper-only|live]"
+  exit 1
+fi
+
 export AION_HOME="${AION_HOME:-$ROOT}"
 export AION_STATE_DIR="${AION_STATE_DIR:-$ROOT/state}"
 export AION_LOG_DIR="${AION_LOG_DIR:-$ROOT/logs}"

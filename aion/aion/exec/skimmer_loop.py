@@ -9,6 +9,7 @@ and intraday risk) as the primary execution path.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import math
 import time
 from dataclasses import dataclass
@@ -28,6 +29,12 @@ from ..brain.session_analyzer import SessionAnalyzer
 from ..brain.watchlist import SkimmerWatchlistManager
 from ..data.ib_client import disconnect, hist_bars_cached, ib
 from ..execution.simulator import ExecutionSimulator
+from ..risk.exposure_gate import check_exposure
+from .alerting import send_alert
+from .audit_log import audit_log
+from .kill_switch import KillSwitchWatcher
+from .order_state import save_order_state
+from .reconciliation import reconcile_on_startup
 from .telemetry_summary import write_telemetry_summary
 from .skimmer_telemetry import SkimmerTelemetry
 from ..utils.logging_utils import log_equity, log_run, log_trade
@@ -48,6 +55,135 @@ class TradeState:
     stop_price: float
     r_target_1: float
     entry_category_scores: dict[str, float] | None = None
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    tmp.replace(p)
+
+
+def _extract_open_orders(client) -> list[dict]:
+    out: list[dict] = []
+    try:
+        trades = client.openTrades() or []
+    except Exception:
+        trades = []
+    for t in trades:
+        try:
+            out.append(
+                {
+                    "order_id": int(getattr(getattr(t, "order", None), "orderId", 0)),
+                    "symbol": str(getattr(getattr(t, "contract", None), "symbol", "")).upper(),
+                    "action": str(getattr(getattr(t, "order", None), "action", "")).upper(),
+                    "qty": int(getattr(getattr(t, "order", None), "totalQuantity", 0)),
+                    "status": str(getattr(getattr(t, "orderStatus", None), "status", "")),
+                }
+            )
+        except Exception:
+            continue
+    return out
+
+
+def _ib_req_id(client) -> int:
+    try:
+        c = getattr(client, "client", None)
+        getter = getattr(c, "getReqId", None)
+        if callable(getter):
+            return int(getter())
+    except Exception:
+        pass
+    return 0
+
+
+def _persist_ib_order_state(client) -> None:
+    save_order_state(
+        state_dir=Path(cfg.STATE_DIR),
+        next_valid_id=_ib_req_id(client),
+        open_orders=_extract_open_orders(client),
+    )
+
+
+def _ib_positions_market_value(client) -> dict[str, float]:
+    out: dict[str, float] = {}
+    try:
+        positions = client.positions() or []
+    except Exception:
+        return out
+    for p in positions:
+        try:
+            sym = str(getattr(getattr(p, "contract", None), "symbol", "")).upper()
+            if not sym:
+                continue
+            if hasattr(p, "marketValue"):
+                mv = float(getattr(p, "marketValue"))
+            elif hasattr(p, "avgCost"):
+                mv = float(getattr(p, "position", 0.0)) * float(getattr(p, "avgCost", 0.0))
+            else:
+                mv = float(getattr(p, "position", 0.0)) * float(getattr(p, "marketPrice", 0.0))
+            out[sym] = float(mv)
+        except Exception:
+            continue
+    return out
+
+
+def _ib_net_liquidation(client, fallback: float) -> float:
+    try:
+        rows = client.accountSummary() or []
+    except Exception:
+        rows = []
+    for row in rows:
+        try:
+            if str(getattr(row, "tag", "")).strip().lower() == "netliquidation":
+                v = float(getattr(row, "value", 0.0))
+                if math.isfinite(v) and v > 0:
+                    return float(v)
+        except Exception:
+            continue
+    return float(max(0.0, float(fallback)))
+
+
+def _run_exposure_gate(client, symbol: str, side: str, qty: int, price: float, fallback_nlv: float) -> tuple[bool, str, dict]:
+    if client is None:
+        return True, "ib_unavailable", {
+            "current_exposure_pct": 0.0,
+            "proposed_exposure_pct": 0.0,
+            "limit_pct": float(cfg.MAX_GROSS_EXPOSURE_PCT),
+        }
+    positions = _ib_positions_market_value(client)
+    nlv = _ib_net_liquidation(client, fallback=fallback_nlv)
+    sym = str(symbol).upper()
+    signed_notional = (1.0 if str(side).upper() == "BUY" else -1.0) * max(0, int(qty)) * max(0.0, float(price))
+    existing = float(positions.get(sym, 0.0))
+    projected = existing + signed_notional
+
+    if abs(projected) <= abs(existing):
+        gross = sum(abs(v) for v in positions.values())
+        pct = gross / max(1e-9, nlv if nlv > 0 else 1.0)
+        return True, "reduces_existing_exposure", {
+            "current_exposure_pct": float(pct),
+            "proposed_exposure_pct": float(pct),
+            "limit_pct": float(cfg.MAX_GROSS_EXPOSURE_PCT),
+        }
+
+    incremental = abs(projected) - abs(existing)
+    gate = check_exposure(
+        current_positions=positions,
+        proposed_symbol=sym,
+        proposed_value=float(incremental),
+        net_liquidation=float(nlv),
+        max_gross_exposure_pct=float(getattr(cfg, "MAX_GROSS_EXPOSURE_PCT", 0.95)),
+        max_single_position_pct=float(getattr(cfg, "MAX_SINGLE_POSITION_PCT", 0.20)),
+        max_correlated_exposure_pct=float(getattr(cfg, "MAX_CORRELATED_EXPOSURE_PCT", 0.40)),
+        correlated_symbols=None,
+    )
+    return bool(gate.allowed), str(gate.reason), {
+        "current_exposure_pct": float(gate.current_exposure_pct),
+        "proposed_exposure_pct": float(gate.proposed_exposure_pct),
+        "limit_pct": float(gate.limit_pct),
+    }
 
 
 class SkimmerLoop:
@@ -81,6 +217,72 @@ class SkimmerLoop:
                 force_close_all_at_min=int(cfg_mod.SKIMMER_FORCE_CLOSE_BEFORE_MIN),
             ),
         )
+        self.kill_switch = KillSwitchWatcher(state_dir=Path(cfg_mod.STATE_DIR), poll_seconds=5.0)
+        self._last_order_state_save_ts = 0.0
+        self._order_state_save_interval_sec = 300.0
+        self._canary_start_time = dt.datetime.now(dt.timezone.utc)
+        self._canary_timeout_checked = False
+        self._startup_safety_done = False
+        self._overlay_bundle_cache: dict | None = None
+        self._last_overlay_check_ts = 0.0
+        self._ib_client = None
+
+    def _startup_safety_bootstrap(self, ib_client) -> None:
+        if self._startup_safety_done:
+            return
+        if ib_client is None:
+            self._startup_safety_done = True
+            return
+
+        if bool(getattr(self.cfg, "AION_BLOCK_LIVE_ORDERS", True)) and (not bool(getattr(self.cfg, "AION_PAPER_MODE", True))):
+            def _blocked_place_order(*_args, **_kwargs):
+                log_run("PAPER-ONLY GUARD: placeOrder blocked")
+                audit_log(
+                    {"event": "LIVE_ORDER_BLOCKED", "reason": "AION_BLOCK_LIVE_ORDERS active"},
+                    log_dir=Path(self.cfg.STATE_DIR),
+                )
+                return None
+
+            try:
+                setattr(ib_client, "placeOrder", _blocked_place_order)
+                log_run("PAPER-ONLY GUARD enabled (skimmer): IB placeOrder patched")
+            except Exception:
+                pass
+
+        rec = reconcile_on_startup(
+            ib_client=ib_client,
+            shadow_path=Path(self.cfg.STATE_DIR) / "shadow_trades.json",
+            auto_fix=bool(getattr(self.cfg, "RECONCILE_AUTO_FIX", True)),
+            max_auto_fix_value=float(getattr(self.cfg, "RECONCILE_MAX_AUTO_FIX_VALUE", 5000.0)),
+        )
+        _write_json_atomic(
+            Path(self.cfg.STATE_DIR) / "reconciliation_result.json",
+            {
+                "passed": bool(rec.passed),
+                "mismatches": list(rec.mismatches),
+                "ibkr_positions": dict(rec.ibkr_positions),
+                "shadow_positions": dict(rec.shadow_positions),
+                "action_taken": str(rec.action_taken),
+                "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+            },
+        )
+        if rec.mismatches:
+            for mm in rec.mismatches:
+                audit_log(
+                    {"event": "RECONCILIATION_MISMATCH", **mm, "action_taken": str(rec.action_taken)},
+                    log_dir=Path(self.cfg.STATE_DIR),
+                )
+            send_alert(
+                f"AION skimmer reconciliation mismatches={len(rec.mismatches)} action={rec.action_taken}",
+                level="WARNING",
+            )
+            log_run(f"skimmer reconciliation mismatches={len(rec.mismatches)} action={rec.action_taken}")
+        if (not rec.passed) and str(rec.action_taken) == "manual_review_required":
+            raise RuntimeError("reconciliation requires manual review")
+
+        _persist_ib_order_state(ib_client)
+        self._last_order_state_save_ts = float(time.monotonic())
+        self._startup_safety_done = True
 
     def _active_symbols(self, overlay_bundle: dict | None = None) -> list[str]:
         try:
@@ -230,6 +432,50 @@ class SkimmerLoop:
             return 0.0
 
         side_exec = "SELL" if st.side == "LONG" else "BUY"
+        audit_log(
+            {
+                "event": "ORDER_INTENT",
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty": int(q),
+                "reason": str(reason),
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
+        allowed, gate_reason, gate_diag = _run_exposure_gate(
+            self._ib_client,
+            symbol=symbol,
+            side=side_exec,
+            qty=q,
+            price=float(price),
+            fallback_nlv=max(1.0, float(self._equity())),
+        )
+        audit_log(
+            {
+                "event": ("EXPOSURE_GATE_PASS" if allowed else "EXPOSURE_GATE_VETO"),
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty": int(q),
+                "reason": str(gate_reason),
+                **gate_diag,
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
+        if not allowed:
+            log_run(f"EXPOSURE GATE VETO: {symbol} {side_exec} qty={q} reason={gate_reason}")
+            send_alert(f"Exposure gate vetoed skimmer close {symbol}: {gate_reason}", level="WARNING")
+            return 0.0
+
+        audit_log(
+            {
+                "event": "ORDER_SUBMITTED",
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty": int(q),
+                "reason": str(reason),
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
         fill = self.exe.execute(
             side=side_exec,
             qty=q,
@@ -240,7 +486,29 @@ class SkimmerLoop:
         )
         fq = int(max(0, min(fill.filled_qty, st.current_qty)))
         if fq <= 0:
+            audit_log(
+                {
+                    "event": "ORDER_REJECTED",
+                    "symbol": str(symbol).upper(),
+                    "side": str(side_exec).upper(),
+                    "qty": int(q),
+                    "reason": str(reason),
+                },
+                log_dir=Path(self.cfg.STATE_DIR),
+            )
             return 0.0
+        audit_log(
+            {
+                "event": "ORDER_PARTIAL_FILL" if fq < q else "ORDER_FILLED",
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty_requested": int(q),
+                "qty_filled": int(fq),
+                "avg_fill_price": float(fill.avg_fill),
+                "reason": str(reason),
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
 
         if st.side == "LONG":
             self.cash += float(fill.avg_fill) * fq
@@ -455,6 +723,66 @@ class SkimmerLoop:
         if requested_qty <= 0:
             return
 
+        audit_log(
+            {
+                "event": "ORDER_INTENT",
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty": int(requested_qty),
+                "reason": "intraday_entry",
+                "confidence": float(best_result.score),
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
+        allowed, gate_reason, gate_diag = _run_exposure_gate(
+            self._ib_client,
+            symbol=symbol,
+            side=side_exec,
+            qty=int(requested_qty),
+            price=float(px),
+            fallback_nlv=max(1.0, float(self._equity())),
+        )
+        audit_log(
+            {
+                "event": ("EXPOSURE_GATE_PASS" if allowed else "EXPOSURE_GATE_VETO"),
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty": int(requested_qty),
+                "reason": str(gate_reason),
+                **gate_diag,
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
+        if not allowed:
+            self.telemetry.log_decision(
+                symbol=symbol,
+                action="SKIP_EXPOSURE_GATE",
+                confluence_score=float(best_result.score),
+                category_scores=best_result.category_scores,
+                session_phase=str(getattr(getattr(session_state, "phase", None), "value", "unknown")),
+                session_type=str(getattr(getattr(session_state, "session_type", None), "value", "unknown")),
+                patterns_detected=detected_patterns,
+                entry_price=float(px),
+                stop_price=float(sizing.stop_price),
+                shares=int(requested_qty),
+                risk_amount=float(requested_qty * max(1e-9, float(sizing.risk_distance))),
+                reasons=[f"Exposure gate veto: {gate_reason}"],
+                extras={"candidate_side": str(best_side)},
+            )
+            log_run(f"EXPOSURE GATE VETO: {symbol} {side_exec} qty={requested_qty} reason={gate_reason}")
+            send_alert(f"Exposure gate vetoed skimmer entry {symbol}: {gate_reason}", level="WARNING")
+            return
+
+        audit_log(
+            {
+                "event": "ORDER_SUBMITTED",
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty": int(requested_qty),
+                "reason": "intraday_entry",
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
         fill = self.exe.execute(
             side=side_exec,
             qty=int(requested_qty),
@@ -464,6 +792,16 @@ class SkimmerLoop:
             allow_partial=True,
         )
         if fill.filled_qty <= 0:
+            audit_log(
+                {
+                    "event": "ORDER_REJECTED",
+                    "symbol": str(symbol).upper(),
+                    "side": str(side_exec).upper(),
+                    "qty": int(requested_qty),
+                    "reason": "intraday_entry",
+                },
+                log_dir=Path(self.cfg.STATE_DIR),
+            )
             self.telemetry.log_decision(
                 symbol=symbol,
                 action="NO_FILL",
@@ -484,6 +822,18 @@ class SkimmerLoop:
                 },
             )
             return
+        audit_log(
+            {
+                "event": "ORDER_PARTIAL_FILL" if int(fill.filled_qty) < int(requested_qty) else "ORDER_FILLED",
+                "symbol": str(symbol).upper(),
+                "side": str(side_exec).upper(),
+                "qty_requested": int(requested_qty),
+                "qty_filled": int(fill.filled_qty),
+                "avg_fill_price": float(fill.avg_fill),
+                "reason": "intraday_entry",
+            },
+            log_dir=Path(self.cfg.STATE_DIR),
+        )
 
         notional = float(fill.avg_fill) * int(fill.filled_qty)
         if side_exec == "BUY":
@@ -600,15 +950,67 @@ class SkimmerLoop:
             px = float(self.last_prices.get(sym, st.entry_price))
             self._close_qty(sym, st.current_qty, reason, px, 0.0)
 
-    def tick(self):
-        ib()
+    def tick(self) -> bool:
+        ib_client = ib()
+        self._ib_client = ib_client
+        self._startup_safety_bootstrap(ib_client)
+        now_mono = float(time.monotonic())
+        if (now_mono - float(self._last_order_state_save_ts)) >= float(self._order_state_save_interval_sec):
+            _persist_ib_order_state(ib_client)
+            self._last_order_state_save_ts = now_mono
 
-        overlay_bundle = load_external_signal_bundle(
-            path=Path(self.cfg.EXT_SIGNAL_FILE),
-            min_confidence=0.0,
-            max_bias=float(getattr(self.cfg, "EXT_SIGNAL_MAX_BIAS", 0.90)),
-            max_age_hours=float(getattr(self.cfg, "EXT_SIGNAL_MAX_AGE_HOURS", 12.0)),
-        )
+        canary_block_new_entries = False
+        if not self._canary_timeout_checked:
+            canary_age_minutes = (dt.datetime.now(dt.timezone.utc) - self._canary_start_time).total_seconds() / 60.0
+            if canary_age_minutes > float(getattr(self.cfg, "CANARY_MAX_LIFETIME_MINUTES", 45)):
+                action = str(getattr(self.cfg, "CANARY_TIMEOUT_ACTION", "pass")).strip().lower() or "pass"
+                result = "TIMEOUT_PASSED" if action == "pass" else "TIMEOUT_FAILED"
+                audit_log(
+                    {"event": "CANARY_TIMEOUT", "age_minutes": float(canary_age_minutes), "result": str(result)},
+                    log_dir=Path(self.cfg.STATE_DIR),
+                )
+                log_run(
+                    f"skimmer canary timeout age={canary_age_minutes:.0f}m "
+                    f"limit={int(getattr(self.cfg, 'CANARY_MAX_LIFETIME_MINUTES', 45))}m result={result}"
+                )
+                send_alert(
+                    f"AION skimmer canary timeout {canary_age_minutes:.0f}m result={result}",
+                    level=("WARNING" if result == "TIMEOUT_PASSED" else "CRITICAL"),
+                )
+                canary_block_new_entries = (result == "TIMEOUT_FAILED")
+                self._canary_timeout_checked = True
+
+        if self.kill_switch.check():
+            audit_log(
+                {"event": "KILL_SWITCH_TRIGGERED", "open_positions": int(len(self.open_trades))},
+                log_dir=Path(self.cfg.STATE_DIR),
+            )
+            log_run("KILL SWITCH (skimmer): flattening all positions and stopping")
+            send_alert("AION skimmer KILL SWITCH triggered - flattening all positions", level="CRITICAL")
+            self._force_close_all("kill_switch")
+            self.kill_switch.acknowledge()
+            _persist_ib_order_state(ib_client)
+            return False
+
+        overlay_poll_sec = max(5.0, float(getattr(self.cfg, "EXT_SIGNAL_POLL_SECONDS", 300)))
+        if (self._overlay_bundle_cache is None) or ((now_mono - float(self._last_overlay_check_ts)) >= overlay_poll_sec):
+            overlay_bundle = load_external_signal_bundle(
+                path=Path(self.cfg.EXT_SIGNAL_FILE),
+                min_confidence=0.0,
+                max_bias=float(getattr(self.cfg, "EXT_SIGNAL_MAX_BIAS", 0.90)),
+                max_age_hours=float(getattr(self.cfg, "EXT_SIGNAL_MAX_AGE_HOURS", 12.0)),
+            )
+            self._overlay_bundle_cache = overlay_bundle if isinstance(overlay_bundle, dict) else {}
+            self._last_overlay_check_ts = now_mono
+            log_run("Overlay refreshed (skimmer)")
+        overlay_bundle = self._overlay_bundle_cache if isinstance(self._overlay_bundle_cache, dict) else {}
+        if isinstance(overlay_bundle, dict) and bool(overlay_bundle.get("overlay_rejected", False)):
+            reason = str(overlay_bundle.get("overlay_rejection_reason", "invalid_overlay"))
+            log_run(f"OVERLAY REJECTED (skimmer): {reason}")
+            audit_log(
+                {"event": "OVERLAY_REJECTED", "reason": reason, "path": str(self.cfg.EXT_SIGNAL_FILE)},
+                log_dir=Path(self.cfg.STATE_DIR),
+            )
 
         symbols = self._active_symbols(overlay_bundle=overlay_bundle)
         for symbol in symbols:
@@ -643,7 +1045,8 @@ class SkimmerLoop:
                 self._manage_position(symbol, frames, float(price))
                 if symbol not in self.open_trades:
                     ts = bars.index[-1] if isinstance(bars.index, pd.DatetimeIndex) and len(bars.index) else None
-                    self._evaluate_entry(symbol, frames, session_state, overlay_bundle, ts)
+                    if not canary_block_new_entries:
+                        self._evaluate_entry(symbol, frames, session_state, overlay_bundle, ts)
             except Exception as exc:
                 log_run(f"{symbol}: skimmer tick error: {exc}")
                 continue
@@ -663,6 +1066,7 @@ class SkimmerLoop:
         open_pnl = float(eq - self.cash - self.closed_pnl)
         log_equity(dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), float(eq), float(self.cash), float(open_pnl), float(self.closed_pnl))
         self._maybe_update_telemetry_summary()
+        return True
 
     def _maybe_update_telemetry_summary(self):
         if not bool(getattr(self.cfg, "TELEMETRY_ENABLED", True)):
@@ -693,11 +1097,20 @@ class SkimmerLoop:
         try:
             while True:
                 try:
-                    self.tick()
+                    keep_running = self.tick()
+                    if keep_running is False:
+                        break
                 except Exception as exc:
                     log_run(f"skimmer loop cycle error: {exc}")
+                    if "reconciliation requires manual review" in str(exc).lower():
+                        send_alert("AION skimmer startup blocked: reconciliation requires manual review.", level="CRITICAL")
+                        break
                 time.sleep(max(1, int(self.cfg.LOOP_SECONDS)))
         finally:
+            try:
+                _persist_ib_order_state(ib())
+            except Exception:
+                pass
             disconnect()
 
 

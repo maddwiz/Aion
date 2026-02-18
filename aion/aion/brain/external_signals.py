@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -120,6 +122,43 @@ def _as_signal_map_from_payload(payload, min_confidence: float, max_bias: float)
     return out
 
 
+REQUIRED_FIELDS = {"version", "generated_at", "checksum", "signals"}
+
+
+def validate_overlay(data: dict) -> tuple[bool, str]:
+    """Validate overlay schema, checksum and age constraints."""
+    if not isinstance(data, dict):
+        return False, "overlay is not a dict"
+
+    missing = REQUIRED_FIELDS - set(data.keys())
+    if missing:
+        return False, f"missing_fields={sorted(missing)}"
+
+    try:
+        sig_bytes = json.dumps(data["signals"], sort_keys=True, separators=(",", ":")).encode()
+        computed = hashlib.sha256(sig_bytes).hexdigest()
+    except Exception as exc:
+        return False, f"checksum_compute_error={exc}"
+    if computed != str(data.get("checksum", "")):
+        return False, "checksum_mismatch"
+
+    try:
+        gen_raw = str(data.get("generated_at", "")).strip()
+        if gen_raw.endswith("Z"):
+            gen_raw = gen_raw[:-1] + "+00:00"
+        gen_time = datetime.fromisoformat(gen_raw)
+        if gen_time.tzinfo is None:
+            gen_time = gen_time.replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - gen_time.astimezone(timezone.utc)).total_seconds() / 3600.0
+        max_age = float(os.getenv("AION_EXT_SIGNAL_MAX_AGE_HOURS", "24"))
+        if age_hours > max_age:
+            return False, f"overlay_too_old age={age_hours:.1f}h max={max_age:.1f}h"
+    except Exception as exc:
+        return False, f"invalid_generated_at={exc}"
+
+    return True, "passed"
+
+
 def load_external_signal_bundle(
     path: Path,
     min_confidence: float = 0.55,
@@ -187,6 +226,8 @@ def load_external_signal_bundle(
             "reasons": [],
             "path": "",
         },
+        "overlay_rejected": False,
+        "overlay_rejection_reason": "",
     }
     try:
         p = Path(path)
@@ -201,6 +242,18 @@ def load_external_signal_bundle(
         return dict(empty)
 
     out = dict(empty)
+    strict_schema = str(os.getenv("AION_EXT_SIGNAL_REQUIRE_SCHEMA", "1")).strip().lower() not in {"0", "false", "no", "off"}
+    has_versioned_fields = isinstance(payload, dict) and any(
+        k in payload for k in ("version", "generated_at", "checksum")
+    )
+    if strict_schema and has_versioned_fields:
+        valid, reason = validate_overlay(payload)
+        if not valid:
+            out["overlay_rejected"] = True
+            out["overlay_rejection_reason"] = str(reason)
+            out["risk_flags"] = _canonicalize_flags(list(out.get("risk_flags", [])) + ["overlay_invalid"])
+            out["signals"] = {}
+            return out
     out["signals"] = _as_signal_map_from_payload(payload, min_confidence=min_confidence, max_bias=max_bias)
     age_mtime_h = None
     try:

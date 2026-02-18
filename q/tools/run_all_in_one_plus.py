@@ -19,6 +19,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs_plus"
 RUNS.mkdir(exist_ok=True)
+SEED = int(os.getenv("Q_RANDOM_SEED", "42"))
+np.random.seed(SEED)
+print(f"Random seed: {SEED}")
 
 PY = sys.executable  # may be overridden by dependency-aware selector.
 

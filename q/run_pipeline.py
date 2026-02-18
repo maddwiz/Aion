@@ -1,4 +1,4 @@
-import argparse, json, pathlib
+import argparse, json, os, pathlib
 import numpy as np
 from qmods.io import load_close
 from qmods.meta_council import meta_council
@@ -26,6 +26,10 @@ def strategy_metrics(close, meta_score, cost_bps: float):
     return float(hit), float(sh), mdd
 
 def main():
+    seed = int(os.getenv("Q_RANDOM_SEED", "42"))
+    np.random.seed(seed)
+    print(f"Random seed: {seed}")
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
     ap.add_argument("--asset", required=True)

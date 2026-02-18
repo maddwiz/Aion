@@ -27,8 +27,14 @@ from ..monitoring.runtime_monitor import RuntimeMonitor
 from ..portfolio.optimizer import allocate_candidates
 from ..risk.event_filter import EventRiskFilter
 from ..risk.kill_switch import KillSwitch
+from ..risk.exposure_gate import check_exposure
 from ..risk.policy import apply_policy_caps, load_policy, symbol_allowed
 from ..risk.position_sizing import gross_leverage_ok, risk_qty
+from .alerting import send_alert
+from .audit_log import audit_log
+from .kill_switch import KillSwitchWatcher
+from .order_state import save_order_state
+from .reconciliation import reconcile_on_startup
 from .telemetry import DecisionTelemetry
 from .telemetry_summary import write_telemetry_summary
 from ..utils.logging_utils import log_alert, log_equity, log_run, log_signal, log_trade
@@ -37,6 +43,150 @@ WATCHLIST_TXT = cfg.STATE_DIR / "watchlist.txt"
 PROFILE_JSON = cfg.STATE_DIR / "strategy_profile.json"
 RUNTIME_STATE_FILE = cfg.RUNTIME_STATE_FILE
 RUNTIME_CONTROLS_FILE = cfg.STATE_DIR / "runtime_controls.json"
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    tmp.replace(p)
+
+
+def _extract_open_orders(client) -> list[dict]:
+    rows: list[dict] = []
+    try:
+        trades = client.openTrades() or []
+    except Exception:
+        trades = []
+    for t in trades:
+        try:
+            rows.append(
+                {
+                    "order_id": int(getattr(getattr(t, "order", None), "orderId", 0)),
+                    "symbol": str(getattr(getattr(t, "contract", None), "symbol", "")).upper(),
+                    "action": str(getattr(getattr(t, "order", None), "action", "")).upper(),
+                    "qty": int(getattr(getattr(t, "order", None), "totalQuantity", 0)),
+                    "status": str(getattr(getattr(t, "orderStatus", None), "status", "")),
+                }
+            )
+        except Exception:
+            continue
+    return rows
+
+
+def _ib_positions_market_value(client) -> dict[str, float]:
+    out: dict[str, float] = {}
+    try:
+        positions = client.positions() or []
+    except Exception:
+        return out
+    for p in positions:
+        try:
+            sym = str(getattr(getattr(p, "contract", None), "symbol", "")).upper()
+            if not sym:
+                continue
+            if hasattr(p, "marketValue"):
+                mv = float(getattr(p, "marketValue"))
+            elif hasattr(p, "avgCost"):
+                mv = float(getattr(p, "position", 0.0)) * float(getattr(p, "avgCost", 0.0))
+            else:
+                mv = float(getattr(p, "position", 0.0)) * float(getattr(p, "marketPrice", 0.0))
+            out[sym] = float(mv)
+        except Exception:
+            continue
+    return out
+
+
+def _ib_net_liquidation(client, fallback: float) -> float:
+    try:
+        rows = client.accountSummary() or []
+    except Exception:
+        rows = []
+    for row in rows:
+        try:
+            if str(getattr(row, "tag", "")).strip().lower() == "netliquidation":
+                v = float(getattr(row, "value", 0.0))
+                if math.isfinite(v) and v > 0:
+                    return float(v)
+        except Exception:
+            continue
+    v = float(fallback)
+    return float(v) if math.isfinite(v) and v > 0 else 0.0
+
+
+def _order_signed_notional(side: str, qty: int, price: float) -> float:
+    q = max(0, int(qty))
+    px = max(0.0, float(price))
+    sign = 1.0 if str(side).upper() == "BUY" else -1.0
+    return sign * q * px
+
+
+def _run_exposure_gate(
+    *,
+    client,
+    symbol: str,
+    side: str,
+    qty: int,
+    price: float,
+    fallback_nlv: float,
+) -> tuple[bool, str, dict]:
+    if client is None:
+        return True, "ib_unavailable", {
+            "current_exposure_pct": 0.0,
+            "proposed_exposure_pct": 0.0,
+            "limit_pct": float(cfg.MAX_GROSS_EXPOSURE_PCT),
+        }
+    positions = _ib_positions_market_value(client)
+    nlv = _ib_net_liquidation(client, fallback=fallback_nlv)
+    sym = str(symbol).upper()
+    signed_notional = _order_signed_notional(side=side, qty=qty, price=price)
+    existing = float(positions.get(sym, 0.0))
+    projected = existing + signed_notional
+
+    # If trade reduces absolute exposure in symbol, allow by construction.
+    if abs(projected) <= abs(existing):
+        return True, "reduces_existing_exposure", {
+            "current_exposure_pct": float(sum(abs(v) for v in positions.values()) / max(1e-9, nlv if nlv > 0 else 1.0)),
+            "proposed_exposure_pct": float(sum(abs(v) for v in positions.values()) / max(1e-9, nlv if nlv > 0 else 1.0)),
+            "limit_pct": float(cfg.MAX_GROSS_EXPOSURE_PCT),
+        }
+
+    incremental = abs(projected) - abs(existing)
+    gate = check_exposure(
+        current_positions=positions,
+        proposed_symbol=sym,
+        proposed_value=float(incremental),
+        net_liquidation=float(nlv),
+        max_gross_exposure_pct=float(getattr(cfg, "MAX_GROSS_EXPOSURE_PCT", 0.95)),
+        max_single_position_pct=float(getattr(cfg, "MAX_SINGLE_POSITION_PCT", 0.20)),
+        max_correlated_exposure_pct=float(getattr(cfg, "MAX_CORRELATED_EXPOSURE_PCT", 0.40)),
+        correlated_symbols=None,
+    )
+    return bool(gate.allowed), str(gate.reason), {
+        "current_exposure_pct": float(gate.current_exposure_pct),
+        "proposed_exposure_pct": float(gate.proposed_exposure_pct),
+        "limit_pct": float(gate.limit_pct),
+    }
+
+
+def _ib_req_id(client) -> int:
+    try:
+        c = getattr(client, "client", None)
+        getter = getattr(c, "getReqId", None)
+        if callable(getter):
+            return int(getter())
+    except Exception:
+        pass
+    return 0
+
+
+def _persist_ib_order_state(client) -> None:
+    save_order_state(
+        state_dir=Path(cfg.STATE_DIR),
+        next_valid_id=_ib_req_id(client),
+        open_orders=_extract_open_orders(client),
+    )
 
 
 def now() -> str:
@@ -1125,9 +1275,13 @@ def _close_position(
     memory_runtime_context: dict | None = None,
     telemetry_sink: DecisionTelemetry | None = None,
     governor_compound_scalar: float | None = None,
+    filled_qty: int | None = None,
 ):
     pos = open_positions[symbol]
-    qty = int(pos["qty"])
+    prev_qty = int(pos["qty"])
+    qty = int(prev_qty if filled_qty is None else max(0, min(prev_qty, int(filled_qty))))
+    if qty <= 0:
+        return cash, closed_pnl
 
     if pos["side"] == "LONG":
         pnl = (fill_price - pos["entry"]) * qty
@@ -1212,8 +1366,14 @@ def _close_position(
             "fill_ratio": float(fill_ratio),
             "r_captured": float(actual_r),
             "time_in_trade_hours": hrs,
+            "remaining_qty": int(max(0, prev_qty - qty)),
         },
     )
+    remaining = max(0, prev_qty - qty)
+    if remaining > 0:
+        pos["qty"] = int(remaining)
+        return cash, closed_pnl
+
     del open_positions[symbol]
     return cash, closed_pnl
 
@@ -1231,6 +1391,7 @@ def _partial_close(
     memory_runtime_context: dict | None = None,
     telemetry_sink: DecisionTelemetry | None = None,
     governor_compound_scalar: float | None = None,
+    ib_client=None,
 ):
     qty = int(pos["qty"])
     close_qty = _partial_close_qty(qty, float(getattr(cfg, "PARTIAL_PROFIT_FRACTION", cfg.PARTIAL_CLOSE_FRACTION)))
@@ -1238,21 +1399,85 @@ def _partial_close(
         return cash, closed_pnl, False
 
     side = "SELL" if pos["side"] == "LONG" else "BUY"
-    fill = exe.execute(side=side, qty=close_qty, ref_price=price, atr_pct=float(pos.get("atr_pct", 0.0)), confidence=float(pos.get("confidence", 0.5)), allow_partial=False)
+    intent = {
+        "event": "ORDER_INTENT",
+        "symbol": str(symbol).upper(),
+        "side": str(side).upper(),
+        "qty": int(close_qty),
+        "ref_price": float(price),
+        "reason": "partial_profit_1R",
+    }
+    audit_log(intent, log_dir=Path(cfg.STATE_DIR))
+    allowed, gate_reason, gate_diag = _run_exposure_gate(
+        client=ib_client,
+        symbol=symbol,
+        side=side,
+        qty=close_qty,
+        price=float(price),
+        fallback_nlv=max(1.0, float(abs(cash) + abs(pos.get("qty", 0)) * abs(price))),
+    )
+    gate_event = "EXPOSURE_GATE_PASS" if allowed else "EXPOSURE_GATE_VETO"
+    audit_log(
+        {
+            "event": gate_event,
+            "symbol": str(symbol).upper(),
+            "side": str(side).upper(),
+            "qty": int(close_qty),
+            "reason": str(gate_reason),
+            **gate_diag,
+        },
+        log_dir=Path(cfg.STATE_DIR),
+    )
+    if not allowed:
+        log_run(f"EXPOSURE GATE VETO: {symbol} {side} qty={close_qty} reason={gate_reason}")
+        send_alert(f"Exposure gate vetoed {symbol} partial close: {gate_reason}", level="WARNING")
+        return cash, closed_pnl, False
+
+    audit_log(
+        {
+            "event": "ORDER_SUBMITTED",
+            "symbol": str(symbol).upper(),
+            "side": str(side).upper(),
+            "qty": int(close_qty),
+            "reason": "partial_profit_1R",
+        },
+        log_dir=Path(cfg.STATE_DIR),
+    )
+    fill = exe.execute(
+        side=side,
+        qty=close_qty,
+        ref_price=price,
+        atr_pct=float(pos.get("atr_pct", 0.0)),
+        confidence=float(pos.get("confidence", 0.5)),
+        allow_partial=False,
+    )
+    filled_qty = int(max(0, min(close_qty, int(getattr(fill, "filled_qty", 0)))))
+    if filled_qty <= 0:
+        audit_log(
+            {
+                "event": "ORDER_REJECTED",
+                "symbol": str(symbol).upper(),
+                "side": str(side).upper(),
+                "qty": int(close_qty),
+                "reason": "partial_profit_1R",
+            },
+            log_dir=Path(cfg.STATE_DIR),
+        )
+        return cash, closed_pnl, False
 
     if pos["side"] == "LONG":
-        pnl = (fill.avg_fill - pos["entry"]) * close_qty
-        cash += close_qty * fill.avg_fill
+        pnl = (fill.avg_fill - pos["entry"]) * filled_qty
+        cash += filled_qty * fill.avg_fill
         event = "PARTIAL_SELL"
     else:
-        pnl = (pos["entry"] - fill.avg_fill) * close_qty
-        cash -= close_qty * fill.avg_fill
+        pnl = (pos["entry"] - fill.avg_fill) * filled_qty
+        cash -= filled_qty * fill.avg_fill
         event = "PARTIAL_BUY"
 
     closed_pnl += pnl
     ks.register_trade(pnl, today)
 
-    pos["qty"] -= close_qty
+    pos["qty"] -= filled_qty
     pos["partial_taken"] = True
     actual_r = float((fill.avg_fill - pos["entry"]) / max(1e-9, pos.get("init_risk", 1e-6)))
     if str(pos["side"]).upper() == "SHORT":
@@ -1263,7 +1488,7 @@ def _partial_close(
         now(),
         symbol,
         event,
-        close_qty,
+        filled_qty,
         pos["entry"],
         fill.avg_fill,
         pnl,
@@ -1295,7 +1520,7 @@ def _partial_close(
         event_type="trade.partial_exit",
         symbol=symbol,
         side=str(pos["side"]),
-        qty=int(close_qty),
+        qty=int(filled_qty),
         entry=float(pos["entry"]),
         exit_=float(fill.avg_fill),
         pnl=float(pnl),
@@ -1318,7 +1543,7 @@ def _partial_close(
         entry_price=float(pos.get("entry", 0.0)),
         stop_price=float(pos.get("stop", 0.0)),
         risk_distance=float(pos.get("init_risk", 0.0)),
-        position_size_shares=int(close_qty),
+        position_size_shares=int(filled_qty),
         reasons=["partial_profit_1R"],
         pnl_realized=float(pnl),
         slippage_bps=float(fill.est_slippage_bps),
@@ -1329,6 +1554,18 @@ def _partial_close(
             "r_captured": float(actual_r),
             "time_in_trade_hours": hrs,
         },
+    )
+    audit_log(
+        {
+            "event": "ORDER_PARTIAL_FILL" if filled_qty < close_qty else "ORDER_FILLED",
+            "symbol": str(symbol).upper(),
+            "side": str(side).upper(),
+            "qty_requested": int(close_qty),
+            "qty_filled": int(filled_qty),
+            "avg_fill_price": float(fill.avg_fill),
+            "reason": "partial_profit_1R",
+        },
+        log_dir=Path(cfg.STATE_DIR),
     )
 
     fully_closed = pos["qty"] <= 0
@@ -1405,6 +1642,13 @@ def main() -> int:
         "remaining_files": 0,
         "error": None,
     }
+    kill_switch = KillSwitchWatcher(state_dir=Path(cfg.STATE_DIR), poll_seconds=5.0)
+    order_state_save_interval_sec = 300.0
+    last_order_state_save_ts = 0.0
+    canary_start_time = dt.datetime.now(dt.timezone.utc)
+    canary_timeout_checked = False
+    cached_ext_bundle = None
+    last_overlay_poll_ts = 0.0
 
     if cfg.META_LABEL_ENABLED:
         samples = meta_model.fit_from_trades(cfg.LOG_DIR / "shadow_trades.csv")
@@ -1416,16 +1660,78 @@ def main() -> int:
         f"[trading_mode={cfg.TRADING_MODE} bar={cfg.HIST_BAR_SIZE} loop={cfg.LOOP_SECONDS}s "
         f"max_trades={cfg.MAX_TRADES_PER_DAY} max_hold={cfg.MAX_HOLD_CYCLES}]"
     )
+    try:
+        ib_client_boot = ib()
+        if bool(getattr(cfg, "AION_BLOCK_LIVE_ORDERS", True)) and (not bool(getattr(cfg, "AION_PAPER_MODE", True))):
+            def _blocked_place_order(*_args, **_kwargs):
+                log_run("PAPER-ONLY GUARD: placeOrder blocked")
+                audit_log(
+                    {"event": "LIVE_ORDER_BLOCKED", "reason": "AION_BLOCK_LIVE_ORDERS active"},
+                    log_dir=Path(cfg.STATE_DIR),
+                )
+                return None
+
+            try:
+                setattr(ib_client_boot, "placeOrder", _blocked_place_order)
+                log_run("PAPER-ONLY GUARD enabled: IB placeOrder patched")
+            except Exception:
+                pass
+
+        rec = reconcile_on_startup(
+            ib_client=ib_client_boot,
+            shadow_path=Path(cfg.STATE_DIR) / "shadow_trades.json",
+            auto_fix=bool(getattr(cfg, "RECONCILE_AUTO_FIX", True)),
+            max_auto_fix_value=float(getattr(cfg, "RECONCILE_MAX_AUTO_FIX_VALUE", 5000.0)),
+        )
+        _write_json_atomic(
+            Path(cfg.STATE_DIR) / "reconciliation_result.json",
+            {
+                "passed": bool(rec.passed),
+                "mismatches": list(rec.mismatches),
+                "ibkr_positions": dict(rec.ibkr_positions),
+                "shadow_positions": dict(rec.shadow_positions),
+                "action_taken": str(rec.action_taken),
+                "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+            },
+        )
+        if rec.mismatches:
+            for mm in rec.mismatches:
+                audit_log(
+                    {"event": "RECONCILIATION_MISMATCH", **mm, "action_taken": str(rec.action_taken)},
+                    log_dir=Path(cfg.STATE_DIR),
+                )
+            log_run(f"RECONCILIATION: {len(rec.mismatches)} mismatch(es), action={rec.action_taken}")
+            send_alert(
+                f"AION reconciliation mismatch count={len(rec.mismatches)} action={rec.action_taken}",
+                level="WARNING",
+            )
+        if (not rec.passed) and str(rec.action_taken) == "manual_review_required":
+            log_run("Startup halted: reconciliation requires manual review.")
+            send_alert("AION startup blocked: reconciliation requires manual review.", level="CRITICAL")
+            return 2
+
+        _persist_ib_order_state(ib_client_boot)
+        last_order_state_save_ts = float(time.monotonic())
+    except Exception as exc:
+        log_run(f"Startup safety bootstrap warning: {exc}")
+        audit_log(
+            {"event": "STARTUP_BOOTSTRAP_WARNING", "error": str(exc)},
+            log_dir=Path(cfg.STATE_DIR),
+        )
 
     try:
         while True:
             try:
-                ib()
+                ib_client = ib()
                 if ib_fail_streak > 0:
                     log_run(f"IB reconnected after {ib_fail_streak} failed cycle(s).")
                     if cfg.MONITORING_ENABLED:
                         monitor.record_system_event("ib_reconnected", f"recovered_after={ib_fail_streak}")
                 ib_fail_streak = 0
+                now_mono = float(time.monotonic())
+                if (now_mono - float(last_order_state_save_ts)) >= order_state_save_interval_sec:
+                    _persist_ib_order_state(ib_client)
+                    last_order_state_save_ts = now_mono
             except Exception as exc:
                 ib_fail_streak += 1
                 if ib_fail_streak == 1 or (ib_fail_streak % max(1, cfg.IB_RECONNECT_LOG_EVERY) == 0):
@@ -1528,9 +1834,96 @@ def main() -> int:
                     if samples > 0:
                         log_run(f"Meta-label model refreshed on day change ({samples} samples).")
 
+            canary_block_new_entries = False
+            if not canary_timeout_checked:
+                canary_age_minutes = (dt.datetime.now(dt.timezone.utc) - canary_start_time).total_seconds() / 60.0
+                if canary_age_minutes > float(getattr(cfg, "CANARY_MAX_LIFETIME_MINUTES", 45)):
+                    action = str(getattr(cfg, "CANARY_TIMEOUT_ACTION", "pass")).strip().lower() or "pass"
+                    result = "TIMEOUT_PASSED" if action == "pass" else "TIMEOUT_FAILED"
+                    audit_log(
+                        {
+                            "event": "CANARY_TIMEOUT",
+                            "age_minutes": float(canary_age_minutes),
+                            "result": str(result),
+                        },
+                        log_dir=Path(cfg.STATE_DIR),
+                    )
+                    log_run(
+                        "CANARY TIMEOUT: "
+                        f"{canary_age_minutes:.0f} min > {int(getattr(cfg, 'CANARY_MAX_LIFETIME_MINUTES', 45))} min limit"
+                    )
+                    send_alert(
+                        f"Canary timeout after {canary_age_minutes:.0f} min result={result}",
+                        level=("WARNING" if result == "TIMEOUT_PASSED" else "CRITICAL"),
+                    )
+                    canary_block_new_entries = (result == "TIMEOUT_FAILED")
+                    canary_timeout_checked = True
+
             killswitch_block_new_entries = not ks.check(today, equity)
+            if canary_block_new_entries:
+                killswitch_block_new_entries = True
+                ks.last_reason = "canary_timeout_failed"
             if killswitch_block_new_entries:
                 log_run(f"KillSwitch tripped: {ks.last_reason}")
+
+            if kill_switch.check():
+                log_run("KILL SWITCH: Flattening all positions and shutting down")
+                audit_log(
+                    {"event": "KILL_SWITCH_TRIGGERED", "open_positions": int(len(open_positions))},
+                    log_dir=Path(cfg.STATE_DIR),
+                )
+                send_alert("AION KILL SWITCH triggered - flattening all positions", level="CRITICAL")
+                for sym in list(open_positions.keys()):
+                    pos = open_positions.get(sym)
+                    if not isinstance(pos, dict):
+                        continue
+                    qty = int(max(0, _safe_int(pos.get("qty"), 0)))
+                    if qty <= 0:
+                        open_positions.pop(sym, None)
+                        continue
+                    px = float(_safe_float(pos.get("mark_price", pos.get("entry", 0.0)), 0.0))
+                    if px <= 0:
+                        px = float(_safe_float(pos.get("entry", 0.0), 0.0))
+                    side = "SELL" if str(pos.get("side", "")).upper() == "LONG" else "BUY"
+                    fill = exe.execute(
+                        side=side,
+                        qty=qty,
+                        ref_price=px,
+                        atr_pct=float(_safe_float(pos.get("atr_pct"), 0.0)),
+                        confidence=1.0,
+                        allow_partial=False,
+                    )
+                    fq = int(max(0, min(qty, _safe_int(getattr(fill, "filled_qty", 0), 0))))
+                    if fq <= 0:
+                        continue
+                    monitor.record_execution(float(_safe_float(getattr(fill, "est_slippage_bps", 0.0), 0.0)))
+                    cash, closed_pnl = _close_position(
+                        open_positions,
+                        sym,
+                        float(fill.avg_fill),
+                        "kill_switch",
+                        cash,
+                        closed_pnl,
+                        ks,
+                        today,
+                        fill_ratio=float(_safe_float(getattr(fill, "fill_ratio", 1.0), 1.0)),
+                        slippage_bps=float(_safe_float(getattr(fill, "est_slippage_bps", 0.0), 0.0)),
+                        monitor=monitor,
+                        memory_runtime_context=None,
+                        telemetry_sink=telemetry_sink,
+                        governor_compound_scalar=None,
+                        filled_qty=fq,
+                    )
+                    fully_closed = sym not in open_positions
+                    if fully_closed:
+                        cooldown[sym] = cfg.REENTRY_COOLDOWN_CYCLES
+                kill_switch.acknowledge()
+                save_runtime_state(day_key, cash, closed_pnl, trades_today, open_positions, cooldown)
+                try:
+                    _persist_ib_order_state(ib_client)
+                except Exception:
+                    pass
+                return 0
 
             for sym in list(cooldown.keys()):
                 cooldown[sym] = max(0, cooldown[sym] - 1)
@@ -1585,12 +1978,26 @@ def main() -> int:
             aion_feedback_path = ""
             aion_feedback_block_new_entries = False
             if cfg.EXT_SIGNAL_ENABLED:
-                ext_bundle = load_external_signal_bundle(
-                    path=cfg.EXT_SIGNAL_FILE,
-                    min_confidence=cfg.EXT_SIGNAL_MIN_CONFIDENCE,
-                    max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
-                    max_age_hours=cfg.EXT_SIGNAL_MAX_AGE_HOURS,
-                )
+                now_mono_overlay = float(time.monotonic())
+                overlay_poll_sec = max(5.0, float(getattr(cfg, "EXT_SIGNAL_POLL_SECONDS", 300)))
+                if (cached_ext_bundle is None) or ((now_mono_overlay - float(last_overlay_poll_ts)) >= overlay_poll_sec):
+                    ext_bundle = load_external_signal_bundle(
+                        path=cfg.EXT_SIGNAL_FILE,
+                        min_confidence=cfg.EXT_SIGNAL_MIN_CONFIDENCE,
+                        max_bias=cfg.EXT_SIGNAL_MAX_BIAS,
+                        max_age_hours=cfg.EXT_SIGNAL_MAX_AGE_HOURS,
+                    )
+                    cached_ext_bundle = ext_bundle if isinstance(ext_bundle, dict) else {}
+                    last_overlay_poll_ts = now_mono_overlay
+                    log_run("Overlay refreshed")
+                ext_bundle = cached_ext_bundle if isinstance(cached_ext_bundle, dict) else {}
+                if isinstance(ext_bundle, dict) and bool(ext_bundle.get("overlay_rejected", False)):
+                    reason = str(ext_bundle.get("overlay_rejection_reason", "invalid_overlay"))
+                    log_run(f"OVERLAY REJECTED: {reason}")
+                    audit_log(
+                        {"event": "OVERLAY_REJECTED", "reason": reason, "path": str(cfg.EXT_SIGNAL_FILE)},
+                        log_dir=Path(cfg.STATE_DIR),
+                    )
                 ext_overlay_age_hours = (
                     _safe_float(ext_bundle.get("overlay_age_hours", None), None)
                     if isinstance(ext_bundle, dict)
@@ -2274,6 +2681,7 @@ def main() -> int:
                                     memory_runtime_context=memory_runtime_context,
                                     telemetry_sink=telemetry_sink,
                                     governor_compound_scalar=governor_compound_scalar,
+                                    ib_client=ib_client,
                                 )
                                 monitor.record_execution(cfg.SLIPPAGE_BPS)
                                 if fully_closed:
@@ -2322,6 +2730,7 @@ def main() -> int:
                                     memory_runtime_context=memory_runtime_context,
                                     telemetry_sink=telemetry_sink,
                                     governor_compound_scalar=governor_compound_scalar,
+                                    ib_client=ib_client,
                                 )
                                 monitor.record_execution(cfg.SLIPPAGE_BPS)
                                 if fully_closed:
@@ -2351,16 +2760,6 @@ def main() -> int:
 
                         if stop_trigger or target_trigger or opposite or timeout:
                             side = "SELL" if pos["side"] == "LONG" else "BUY"
-                            fill = exe.execute(
-                                side=side,
-                                qty=int(pos["qty"]),
-                                ref_price=price,
-                                atr_pct=atr_pct,
-                                confidence=float(pos.get("confidence", 0.5)),
-                                allow_partial=False,
-                            )
-                            monitor.record_execution(fill.est_slippage_bps)
-
                             if stop_trigger:
                                 reason = "trailing_stop" if trailing_trigger else "initial_stop"
                             elif target_trigger:
@@ -2369,6 +2768,87 @@ def main() -> int:
                                 reason = "opposite_high_confidence_signal"
                             else:
                                 reason = "time_stop"
+
+                            req_qty = int(max(0, int(pos.get("qty", 0))))
+                            audit_log(
+                                {
+                                    "event": "ORDER_INTENT",
+                                    "symbol": str(sym).upper(),
+                                    "side": str(side).upper(),
+                                    "qty": int(req_qty),
+                                    "reason": str(reason),
+                                },
+                                log_dir=Path(cfg.STATE_DIR),
+                            )
+                            allowed, gate_reason, gate_diag = _run_exposure_gate(
+                                client=ib_client,
+                                symbol=sym,
+                                side=side,
+                                qty=req_qty,
+                                price=float(price),
+                                fallback_nlv=max(1.0, float(equity)),
+                            )
+                            audit_log(
+                                {
+                                    "event": ("EXPOSURE_GATE_PASS" if allowed else "EXPOSURE_GATE_VETO"),
+                                    "symbol": str(sym).upper(),
+                                    "side": str(side).upper(),
+                                    "qty": int(req_qty),
+                                    "reason": str(gate_reason),
+                                    **gate_diag,
+                                },
+                                log_dir=Path(cfg.STATE_DIR),
+                            )
+                            if not allowed:
+                                log_run(f"EXPOSURE GATE VETO: {sym} {side} qty={req_qty} reason={gate_reason}")
+                                send_alert(f"Exposure gate vetoed {sym} exit: {gate_reason}", level="WARNING")
+                                continue
+
+                            audit_log(
+                                {
+                                    "event": "ORDER_SUBMITTED",
+                                    "symbol": str(sym).upper(),
+                                    "side": str(side).upper(),
+                                    "qty": int(req_qty),
+                                    "reason": str(reason),
+                                },
+                                log_dir=Path(cfg.STATE_DIR),
+                            )
+                            fill = exe.execute(
+                                side=side,
+                                qty=req_qty,
+                                ref_price=price,
+                                atr_pct=atr_pct,
+                                confidence=float(pos.get("confidence", 0.5)),
+                                allow_partial=False,
+                            )
+                            filled_qty = int(max(0, min(req_qty, int(getattr(fill, "filled_qty", 0)))))
+                            if filled_qty <= 0:
+                                audit_log(
+                                    {
+                                        "event": "ORDER_REJECTED",
+                                        "symbol": str(sym).upper(),
+                                        "side": str(side).upper(),
+                                        "qty": int(req_qty),
+                                        "reason": str(reason),
+                                    },
+                                    log_dir=Path(cfg.STATE_DIR),
+                                )
+                                continue
+
+                            monitor.record_execution(fill.est_slippage_bps)
+                            audit_log(
+                                {
+                                    "event": "ORDER_PARTIAL_FILL" if filled_qty < req_qty else "ORDER_FILLED",
+                                    "symbol": str(sym).upper(),
+                                    "side": str(side).upper(),
+                                    "qty_requested": int(req_qty),
+                                    "qty_filled": int(filled_qty),
+                                    "avg_fill_price": float(fill.avg_fill),
+                                    "reason": str(reason),
+                                },
+                                log_dir=Path(cfg.STATE_DIR),
+                            )
                             cash, closed_pnl = _close_position(
                                 open_positions,
                                 sym,
@@ -2384,8 +2864,11 @@ def main() -> int:
                                 memory_runtime_context=memory_runtime_context,
                                 telemetry_sink=telemetry_sink,
                                 governor_compound_scalar=governor_compound_scalar,
+                                filled_qty=filled_qty,
                             )
-                            cooldown[sym] = cfg.REENTRY_COOLDOWN_CYCLES
+                            fully_closed = sym not in open_positions
+                            if fully_closed:
+                                cooldown[sym] = cfg.REENTRY_COOLDOWN_CYCLES
                             continue
 
                         continue
@@ -2491,6 +2974,50 @@ def main() -> int:
                     continue
 
                 entry_side = "BUY" if c["side"] == "LONG" else "SELL"
+                audit_log(
+                    {
+                        "event": "ORDER_INTENT",
+                        "symbol": str(sym).upper(),
+                        "side": str(entry_side).upper(),
+                        "qty": int(qty),
+                        "reason": "entry_signal",
+                        "confidence": float(c.get("confidence", 0.0)),
+                    },
+                    log_dir=Path(cfg.STATE_DIR),
+                )
+                allowed, gate_reason, gate_diag = _run_exposure_gate(
+                    client=ib_client,
+                    symbol=sym,
+                    side=entry_side,
+                    qty=int(qty),
+                    price=float(c["price"]),
+                    fallback_nlv=max(1.0, float(equity)),
+                )
+                audit_log(
+                    {
+                        "event": ("EXPOSURE_GATE_PASS" if allowed else "EXPOSURE_GATE_VETO"),
+                        "symbol": str(sym).upper(),
+                        "side": str(entry_side).upper(),
+                        "qty": int(qty),
+                        "reason": str(gate_reason),
+                        **gate_diag,
+                    },
+                    log_dir=Path(cfg.STATE_DIR),
+                )
+                if not allowed:
+                    log_run(f"EXPOSURE GATE VETO: {sym} {entry_side} qty={qty} reason={gate_reason}")
+                    send_alert(f"Exposure gate vetoed {sym} entry: {gate_reason}", level="WARNING")
+                    continue
+                audit_log(
+                    {
+                        "event": "ORDER_SUBMITTED",
+                        "symbol": str(sym).upper(),
+                        "side": str(entry_side).upper(),
+                        "qty": int(qty),
+                        "reason": "entry_signal",
+                    },
+                    log_dir=Path(cfg.STATE_DIR),
+                )
                 fill = exe.execute(
                     side=entry_side,
                     qty=qty,
@@ -2501,7 +3028,29 @@ def main() -> int:
                 )
                 monitor.record_execution(fill.est_slippage_bps)
                 if fill.filled_qty <= 0:
+                    audit_log(
+                        {
+                            "event": "ORDER_REJECTED",
+                            "symbol": str(sym).upper(),
+                            "side": str(entry_side).upper(),
+                            "qty": int(qty),
+                            "reason": "entry_signal",
+                        },
+                        log_dir=Path(cfg.STATE_DIR),
+                    )
                     continue
+                audit_log(
+                    {
+                        "event": "ORDER_PARTIAL_FILL" if int(fill.filled_qty) < int(qty) else "ORDER_FILLED",
+                        "symbol": str(sym).upper(),
+                        "side": str(entry_side).upper(),
+                        "qty_requested": int(qty),
+                        "qty_filled": int(fill.filled_qty),
+                        "avg_fill_price": float(fill.avg_fill),
+                        "reason": "entry_signal",
+                    },
+                    log_dir=Path(cfg.STATE_DIR),
+                )
 
                 notional = fill.filled_qty * fill.avg_fill
                 if not gross_leverage_ok(
@@ -2640,6 +3189,10 @@ def main() -> int:
             time.sleep(cfg.LOOP_SECONDS)
 
     finally:
+        try:
+            _persist_ib_order_state(ib())
+        except Exception:
+            pass
         disconnect()
 
 

@@ -1,53 +1,31 @@
-name: NovaFinTec CI
+name: CI
 
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}/q:${{ github.workspace }}/aion
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r q/requirements.txt -r aion/requirements.txt pytest
-
-      - name: Compile check
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -r q/requirements.txt
+          pip install -r aion/requirements.txt
+      - name: Lint with ruff
+        run: ruff check q/ aion/
+      - name: Type check (non-blocking)
+        run: mypy q/qengine/ q/qmods/ --ignore-missing-imports || true
+      - name: Run tests with coverage
         run: |
-          python -m compileall -q q/qengine q/qmods q/tools aion/aion
-
-      - name: Run unit tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}/q:${{ github.workspace }}/aion
+          pytest q/tests/ aion/tests/ --cov=q --cov=aion --cov-report=term-missing -x
+      - name: Check for secrets
         run: |
-          python -m pytest -q \
-            q/tests \
-            aion/tests/test_external_signals_runtime.py \
-            aion/tests/test_doctor_external_overlay.py \
-            aion/tests/test_dashboard_status.py \
-            aion/tests/test_config_external_overlay_path.py \
-            aion/tests/test_novaspine_bridge.py \
-            aion/tests/test_runtime_risk_caps.py \
-            aion/tests/test_risk_policy.py \
-            aion/tests/test_ops_guard.py \
-            aion/tests/test_promotion_gate.py \
-            aion/tests/test_runtime_decision.py \
-            aion/tests/test_operator.py \
-            aion/tests/test_ib_client.py \
-            aion/tests/test_watchlist.py \
-            aion/tests/test_backtest_skimmer.py \
-            aion/tests/test_telemetry_summary.py \
-            aion/tests/test_paper_loop_day_skimmer_dispatch.py \
-            aion/tests/test_skimmer_loop_integration.py \
-            aion/tests/test_skimmer_telemetry.py \
-            aion/tests/test_paper_loop_telemetry.py \
-            aion/tests/test_partial_profit_trailing_stop.py
+          ! grep -rn "password\\|api_key\\|secret" q/ aion/ --include="*.py" | grep -v "test_\\|\\.env\\|example\\|getenv\\|environ"
