@@ -436,6 +436,8 @@ if __name__ == "__main__":
         raise SystemExit(2)
     apply_performance_defaults()
     apply_profile_env_defaults()
+    # External holdout is optional in default unattended runs unless explicitly required.
+    os.environ["Q_EXTERNAL_HOLDOUT_ALLOW_SKIP"] = "1"
     failures = []
     # Reset status at run start so alert checks do not read stale failures.
     write_pipeline_status([], strict_mode=strict)

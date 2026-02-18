@@ -149,6 +149,8 @@ def main() -> int:
         ext_metrics = ext.get("metrics_external_holdout_net", {}) if isinstance(ext.get("metrics_external_holdout_net"), dict) else {}
         ext_summary = {
             "ok": bool(ext.get("ok", False)),
+            "skipped": bool(ext.get("skipped", False)),
+            "required": bool(ext.get("required", False)),
             "path": str(ext_path),
             "method": str(ext.get("method", "")),
             "rows": int(ext.get("rows", ext_metrics.get("n", 0))),
@@ -163,6 +165,8 @@ def main() -> int:
     if require_external_holdout:
         if not isinstance(ext, dict) or not ext:
             reasons.append("external_holdout_missing")
+        elif bool(ext.get("skipped", False)):
+            reasons.append("external_holdout_skipped")
         elif not bool(ext.get("ok", False)):
             reasons.append("external_holdout_fail")
         else:

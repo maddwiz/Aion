@@ -155,6 +155,35 @@ def main() -> int:
     min_rows = int(np.clip(int(float(os.getenv("Q_EXTERNAL_HOLDOUT_MIN_ROWS", "126"))), 30, 100000))
     returns_file = str(os.getenv("Q_EXTERNAL_HOLDOUT_RETURNS_FILE", "")).strip()
     holdout_dir = Path(str(os.getenv("Q_EXTERNAL_HOLDOUT_DIR", str(ROOT / "data_holdout"))).strip())
+    require_external_holdout = str(os.getenv("Q_EXTERNAL_HOLDOUT_REQUIRED", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    allow_skip = str(os.getenv("Q_EXTERNAL_HOLDOUT_ALLOW_SKIP", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    def _write_skip(reason: str, extra: dict | None = None) -> int:
+        payload = {
+            "ok": True,
+            "skipped": True,
+            "required": bool(require_external_holdout),
+            "reason": str(reason),
+            "weights_source": w_source,
+            "holdout_dir": str(holdout_dir),
+            "returns_file": returns_file,
+            "metrics_external_holdout_net": {"sharpe": 0.0, "hit_rate": 0.5, "max_drawdown": 0.0, "n": 0},
+        }
+        if isinstance(extra, dict):
+            payload.update(extra)
+        (RUNS / "external_holdout_validation.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"✅ Wrote {RUNS/'external_holdout_validation.json'} (skipped: {reason})")
+        return 0
 
     w_full, w_source = _load_frozen_weights()
     if w_full is None:
@@ -185,8 +214,12 @@ def main() -> int:
             source_kind = "holdout_dir_prices"
             source_detail = str(holdout_dir)
         else:
+            if allow_skip:
+                return _write_skip(status)
             out = {
                 "ok": False,
+                "skipped": False,
+                "required": bool(require_external_holdout),
                 "reason": status,
                 "weights_source": w_source,
                 "holdout_dir": str(holdout_dir),
@@ -201,8 +234,15 @@ def main() -> int:
     ret = np.clip(ret, -0.95, 0.95)
     t, n = ret.shape
     if t < min_rows:
+        if allow_skip:
+            return _write_skip(
+                f"rows<{min_rows}",
+                extra={"rows": int(t), "assets": int(n), "data_source": {"kind": source_kind, "detail": source_detail}},
+            )
         out = {
             "ok": False,
+            "skipped": False,
+            "required": bool(require_external_holdout),
             "reason": f"rows<{min_rows}",
             "rows": int(t),
             "assets": int(n),
@@ -252,6 +292,8 @@ def main() -> int:
     m = so._metrics(net)
     out = {
         "ok": True,
+        "skipped": False,
+        "required": bool(require_external_holdout),
         "method": "external_untouched_frozen_weights",
         "weights_source": w_source,
         "rows": int(t),

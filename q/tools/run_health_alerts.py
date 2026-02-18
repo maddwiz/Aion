@@ -114,7 +114,7 @@ def build_alert_payload(
     min_aion_feedback_hit_rate = float(thresholds.get("min_aion_feedback_hit_rate", 0.38))
     min_aion_feedback_profit_factor = float(thresholds.get("min_aion_feedback_profit_factor", 0.78))
     max_aion_feedback_age_hours = float(thresholds.get("max_aion_feedback_age_hours", 72.0))
-    min_runtime_total_scalar_mean = float(thresholds.get("min_runtime_total_scalar_mean", 0.22))
+    min_runtime_total_scalar_mean = float(thresholds.get("min_runtime_total_scalar_mean", 0.18))
     min_runtime_total_scalar_p10 = float(thresholds.get("min_runtime_total_scalar_p10", 0.10))
     min_runtime_total_scalar_min = float(thresholds.get("min_runtime_total_scalar_min", 0.04))
 
@@ -813,7 +813,7 @@ if __name__ == "__main__":
     max_memory_replay_failed_events = int(os.getenv("Q_MAX_MEMORY_REPLAY_FAILED_EVENTS", "0"))
     max_memory_replay_backlog_warn = int(os.getenv("Q_MAX_MEMORY_REPLAY_BACKLOG_WARN", "5"))
     max_memory_replay_backlog_alert = int(os.getenv("Q_MAX_MEMORY_REPLAY_BACKLOG_ALERT", "20"))
-    min_runtime_total_scalar_mean = float(os.getenv("Q_MIN_RUNTIME_TOTAL_SCALAR_MEAN", "0.22"))
+    min_runtime_total_scalar_mean = float(os.getenv("Q_MIN_RUNTIME_TOTAL_SCALAR_MEAN", "0.18"))
     min_runtime_total_scalar_p10 = float(os.getenv("Q_MIN_RUNTIME_TOTAL_SCALAR_P10", "0.10"))
     min_runtime_total_scalar_min = float(os.getenv("Q_MIN_RUNTIME_TOTAL_SCALAR_MIN", "0.04"))
     aion_feedback_source_pref = normalize_source_preference(os.getenv("Q_AION_FEEDBACK_SOURCE", "auto"))

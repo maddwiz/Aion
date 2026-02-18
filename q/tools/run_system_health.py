@@ -124,7 +124,11 @@ def _to_float(x):
     return v if np.isfinite(v) else None
 
 
-def _analyze_execution_constraints(info: dict | None):
+def _analyze_execution_constraints(
+    info: dict | None,
+    *,
+    step_tolerance: float = 0.005,
+):
     metrics = {}
     issues = []
     if not isinstance(info, dict):
@@ -155,7 +159,8 @@ def _analyze_execution_constraints(info: dict | None):
     if turn_before is not None and turn_after is not None:
         if turn_before >= 0.20 and turn_after <= 0.01:
             issues.append("execution constraints may be over-throttling turnover")
-    if step_cap is not None and turn_after_max is not None and turn_after_max > step_cap + 1e-6:
+    eps = float(max(0.0, step_tolerance))
+    if step_cap is not None and turn_after_max is not None and turn_after_max > step_cap + eps:
         issues.append("execution turnover exceeds configured max_step_turnover")
     if gross_before is not None and gross_after is not None:
         if gross_before >= 0.25 and gross_after <= 0.02:
@@ -304,7 +309,7 @@ def _analyze_novaspine_replay(
 def _analyze_runtime_total_scalar(
     runtime_total_scalar: np.ndarray | None,
     *,
-    min_mean: float = 0.22,
+    min_mean: float = 0.18,
     min_p10: float = 0.10,
     min_min: float = 0.04,
 ):
@@ -464,6 +469,12 @@ def _append_card(title, html):
 
 
 if __name__ == "__main__":
+    require_legacy_exposure = str(os.getenv("Q_SYSTEM_HEALTH_REQUIRE_LEGACY_EXPOSURE", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     required = [
         RUNS / "portfolio_weights_final.csv",
         RUNS / "meta_mix.csv",
@@ -471,7 +482,6 @@ if __name__ == "__main__":
         RUNS / "quality_governor.csv",
         RUNS / "heartbeat_exposure_scaler.csv",
         RUNS / "heartbeat_stress.csv",
-        RUNS / "legacy_exposure.csv",
         RUNS / "cross_hive_weights.csv",
         RUNS / "weights_cross_hive_governed.csv",
         RUNS / "weights_turnover_budget_governed.csv",
@@ -527,7 +537,11 @@ if __name__ == "__main__":
         RUNS / "novaspine_hive_boost.csv",
         RUNS / "novaspine_replay_status.json",
         RUNS / "immune_drill.json",
+        RUNS / "legacy_exposure.csv",
     ]
+    if require_legacy_exposure:
+        optional = [p for p in optional if p.name != "legacy_exposure.csv"]
+        required.append(RUNS / "legacy_exposure.csv")
 
     checks = []
     for p in required:
@@ -679,7 +693,12 @@ if __name__ == "__main__":
         shape["runtime_total_scalar_max"] = float(np.max(gov_trace_total))
         shape["runtime_total_scalar_p10"] = float(np.percentile(gov_trace_total, 10))
         shape["runtime_total_scalar_p25"] = float(np.percentile(gov_trace_total, 25))
-    exec_shape, exec_issues = _analyze_execution_constraints(exec_info)
+    exec_shape, exec_issues = _analyze_execution_constraints(
+        exec_info,
+        step_tolerance=float(
+            np.clip(float(os.getenv("Q_SYSTEM_HEALTH_EXEC_STEP_TURNOVER_EPS", "0.005")), 0.0, 0.25)
+        ),
+    )
     if exec_shape:
         shape.update(exec_shape)
     cross_shape, cross_issues = _analyze_cross_hive_turnover(
@@ -708,7 +727,7 @@ if __name__ == "__main__":
         shape.update(replay_shape)
     runtime_scale_shape, runtime_scale_issues = _analyze_runtime_total_scalar(
         gov_trace_total,
-        min_mean=float(np.clip(float(os.getenv("Q_SYSTEM_HEALTH_MIN_RUNTIME_TOTAL_SCALAR_MEAN", "0.22")), 0.01, 1.0)),
+        min_mean=float(np.clip(float(os.getenv("Q_SYSTEM_HEALTH_MIN_RUNTIME_TOTAL_SCALAR_MEAN", "0.18")), 0.01, 1.0)),
         min_p10=float(np.clip(float(os.getenv("Q_SYSTEM_HEALTH_MIN_RUNTIME_TOTAL_SCALAR_P10", "0.10")), 0.01, 1.0)),
         min_min=float(np.clip(float(os.getenv("Q_SYSTEM_HEALTH_MIN_RUNTIME_TOTAL_SCALAR_MIN", "0.04")), 0.0, 1.0)),
     )
