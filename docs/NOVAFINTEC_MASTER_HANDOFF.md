@@ -22,7 +22,7 @@ Implemented and validated:
 - Local multi-asset bundle ingestion (`ingest_multi_asset_csv_bundle.py`).
 
 Validation status:
-- Latest full local run: `529 passed`.
+- Latest full local run (`q/tests` + `aion/tests`): `605 passed`.
 - Latest targeted run (new governor walk-forward batch): `24 passed`.
 - Latest AION suite run after telemetry wiring: `216 passed`.
 - GitHub Actions workflow: `.github/workflows/ci.yml`.
