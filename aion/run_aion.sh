@@ -276,6 +276,25 @@ if [[ "$AION_MODE" == "brain" ]]; then
       exec "$PYTHON_BIN" -m aion.exec.dashboard
       ;;
     ops-guard)
+      FORCE_RESTART_OPS_GUARD="${AION_FORCE_RESTART_OPS_GUARD:-0}"
+      EXISTING_OPS_GUARD_PIDS="$(
+        ps -axo pid=,command= | awk '
+          /[[:space:]]-m[[:space:]]aion\.exec\.ops_guard([[:space:]]|$)/ {print $1}
+        ' || true
+      )"
+      if [[ -n "${EXISTING_OPS_GUARD_PIDS//[[:space:]]/}" ]]; then
+        if [[ "$FORCE_RESTART_OPS_GUARD" != "1" ]]; then
+          echo "[AION] Ops guard already running (${EXISTING_OPS_GUARD_PIDS//$'\n'/ })."
+          echo "[AION] Refusing duplicate launch. Set AION_FORCE_RESTART_OPS_GUARD=1 to recycle."
+          exit 0
+        fi
+        echo "[AION] AION_FORCE_RESTART_OPS_GUARD=1; recycling ops guard: ${EXISTING_OPS_GUARD_PIDS//$'\n'/ }"
+        while IFS= read -r pid; do
+          [[ -z "${pid//[[:space:]]/}" ]] && continue
+          kill "$pid" 2>/dev/null || true
+        done <<< "$EXISTING_OPS_GUARD_PIDS"
+        sleep 1
+      fi
       echo "[AION] Starting ops guard..."
       exec "$PYTHON_BIN" -m aion.exec.ops_guard
       ;;

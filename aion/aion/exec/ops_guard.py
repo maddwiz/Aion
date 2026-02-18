@@ -166,6 +166,60 @@ def _can_restart(now_ts: float, history: list[float], cooldown_sec: float, max_r
     return True, "ok"
 
 
+def _parse_elapsed_seconds(raw: str) -> float | None:
+    s = str(raw or "").strip()
+    if not s:
+        return None
+    if "-" in s:
+        day_part, clock = s.split("-", 1)
+        try:
+            days = int(day_part.strip())
+        except Exception:
+            return None
+    else:
+        days = 0
+        clock = s
+    toks = [t.strip() for t in clock.split(":") if t.strip()]
+    if not toks:
+        return None
+    try:
+        nums = [int(t) for t in toks]
+    except Exception:
+        return None
+    if len(nums) == 3:
+        hours, minutes, seconds = nums
+    elif len(nums) == 2:
+        hours = 0
+        minutes, seconds = nums
+    elif len(nums) == 1:
+        hours = 0
+        minutes = 0
+        seconds = nums[0]
+    else:
+        return None
+    total = float(days * 86400 + hours * 3600 + minutes * 60 + seconds)
+    return total if total >= 0.0 else None
+
+
+def _pid_elapsed_seconds(pid: int) -> float | None:
+    try:
+        text = subprocess.check_output(["ps", "-p", str(int(pid)), "-o", "etime="], text=True)
+    except Exception:
+        return None
+    return _parse_elapsed_seconds(text)
+
+
+def _max_pid_elapsed_seconds(pids: list[int]) -> float | None:
+    vals: list[float] = []
+    for pid in pids:
+        age = _pid_elapsed_seconds(pid)
+        if isinstance(age, float):
+            vals.append(age)
+    if not vals:
+        return None
+    return float(max(vals))
+
+
 def _trade_runtime_controls_age_sec(now_ts: float | None = None) -> float | None:
     info = runtime_controls_stale_info(
         cfg.STATE_DIR / "runtime_controls.json",
@@ -225,6 +279,7 @@ def guard_cycle(state: dict) -> dict:
     targets = [t for t in targets if task_module(t)]
 
     restart_history = state.setdefault("restart_history", {})
+    booting_until = state.setdefault("booting_until", {})
     restarted: dict[str, str] = {}
     skipped: dict[str, str] = {}
 
@@ -235,10 +290,23 @@ def guard_cycle(state: dict) -> dict:
         pids = meta.get("pids", [])
         if not isinstance(pids, list):
             pids = []
+        if running:
+            booting_until.pop(task, None)
+        else:
+            boot_deadline = float(booting_until.get(task, 0.0) or 0.0)
+            if boot_deadline > now_ts:
+                skipped[task] = "boot_grace"
+                continue
+
         if running and len(pids) > 1:
             reasons.append("duplicate_instances")
         if running and task == "trade" and _trade_runtime_controls_stale(now_ts=now_ts):
-            reasons.append("stale_runtime_controls")
+            # Avoid thrash on fresh launches: stale file from a prior process should
+            # not trigger restart until the current process has had a full stale window.
+            max_uptime = _max_pid_elapsed_seconds(pids)
+            stale_threshold = _trade_runtime_controls_stale_threshold_sec(now_ts=now_ts)
+            if (max_uptime is not None) and (max_uptime >= stale_threshold):
+                reasons.append("stale_runtime_controls")
         if running and not reasons:
             continue
 
@@ -260,6 +328,7 @@ def guard_cycle(state: dict) -> dict:
             stop_task(task)
         ok = start_task(task)
         if ok:
+            booting_until[task] = float(now_ts + max(30.0, float(cfg.OPS_GUARD_BOOT_GRACE_SEC)))
             if "duplicate_instances" not in reasons:
                 hist.append(now_ts)
             restarted[task] = "started"
@@ -294,6 +363,7 @@ def guard_cycle(state: dict) -> dict:
         "config": {
             "interval_sec": int(cfg.OPS_GUARD_INTERVAL_SEC),
             "restart_cooldown_sec": int(cfg.OPS_GUARD_RESTART_COOLDOWN_SEC),
+            "boot_grace_sec": int(cfg.OPS_GUARD_BOOT_GRACE_SEC),
             "max_restarts_per_hour": int(cfg.OPS_GUARD_MAX_RESTARTS_PER_HOUR),
             "trade_stale_threshold_sec": float(_trade_runtime_controls_stale_threshold_sec(now_ts=now_ts)),
         },

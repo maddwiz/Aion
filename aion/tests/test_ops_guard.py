@@ -27,6 +27,13 @@ def test_can_restart_respects_limits():
     assert reason2 == "ok"
 
 
+def test_parse_elapsed_seconds_formats():
+    assert og._parse_elapsed_seconds("04:14") == 254.0
+    assert og._parse_elapsed_seconds("1:02:03") == 3723.0
+    assert og._parse_elapsed_seconds("2-03:04:05") == 183845.0
+    assert og._parse_elapsed_seconds("bad") is None
+
+
 def test_guard_cycle_restarts_missing_task(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(og.cfg, "OPS_GUARD_TARGETS", ["trade"])
     monkeypatch.setattr(og.cfg, "OPS_GUARD_STATUS_FILE", tmp_path / "ops_guard_status.json")
@@ -144,8 +151,10 @@ def test_guard_cycle_restarts_trade_when_runtime_controls_stale(tmp_path: Path, 
     monkeypatch.setattr(og.cfg, "OPS_GUARD_INCIDENT_LOG", tmp_path / "ops_incidents.log")
     monkeypatch.setattr(og.cfg, "OPS_GUARD_RESTART_COOLDOWN_SEC", 1)
     monkeypatch.setattr(og.cfg, "OPS_GUARD_MAX_RESTARTS_PER_HOUR", 6)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_BOOT_GRACE_SEC", 60)
     monkeypatch.setattr(og.cfg, "OPS_GUARD_TRADE_STALE_SEC", 120)
     monkeypatch.setattr(og.time, "time", lambda: now)
+    monkeypatch.setattr(og, "_max_pid_elapsed_seconds", lambda _pids: 999.0)
 
     calls = {"n": 0}
 
@@ -164,6 +173,36 @@ def test_guard_cycle_restarts_trade_when_runtime_controls_stale(tmp_path: Path, 
     assert stopped["n"] == 1
     assert payload["restarts"]["trade"]["attempt"] == "started"
     assert payload["config"]["trade_stale_threshold_sec"] >= 60
+
+
+def test_guard_cycle_skips_stale_restart_during_trade_startup_grace(tmp_path: Path, monkeypatch):
+    st = tmp_path / "state"
+    st.mkdir(parents=True, exist_ok=True)
+    p = st / "runtime_controls.json"
+    p.write_text("{}", encoding="utf-8")
+    now = 1000.0
+    os.utime(p, (now - 500, now - 500))
+
+    monkeypatch.setattr(og.cfg, "STATE_DIR", st)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TARGETS", ["trade"])
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_STATUS_FILE", tmp_path / "ops_guard_status.json")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_INCIDENT_LOG", tmp_path / "ops_incidents.log")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_RESTART_COOLDOWN_SEC", 1)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_MAX_RESTARTS_PER_HOUR", 6)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_BOOT_GRACE_SEC", 60)
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TRADE_STALE_SEC", 120)
+    monkeypatch.setattr(og.time, "time", lambda: now)
+    monkeypatch.setattr(og, "_max_pid_elapsed_seconds", lambda _pids: 10.0)
+    monkeypatch.setattr(og, "status_snapshot", lambda _targets=None: {"trade": {"module": "aion.exec.paper_loop", "running": True, "pids": [111]}})
+
+    called = {"stop": 0, "start": 0}
+    monkeypatch.setattr(og, "stop_task", lambda _task: called.__setitem__("stop", called["stop"] + 1) or 1)
+    monkeypatch.setattr(og, "start_task", lambda _task: called.__setitem__("start", called["start"] + 1) or True)
+
+    payload = og.guard_cycle({"restart_history": {}})
+    assert called["stop"] == 0
+    assert called["start"] == 0
+    assert payload["restarts"]["trade"]["attempt"] is None
 
 
 def test_guard_cycle_restarts_trade_when_duplicate_instances(tmp_path: Path, monkeypatch):
@@ -222,3 +261,20 @@ def test_guard_cycle_forces_duplicate_cleanup_during_cooldown(tmp_path: Path, mo
     assert payload["restarts"]["trade"]["attempt"] == "started"
     assert payload["restarts"]["trade"]["skip"] is None
     assert payload["restarts"]["trade"]["restarts_last_hour"] == 1
+
+
+def test_guard_cycle_skips_missing_task_during_boot_grace(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_TARGETS", ["trade"])
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_STATUS_FILE", tmp_path / "ops_guard_status.json")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_INCIDENT_LOG", tmp_path / "ops_incidents.log")
+    monkeypatch.setattr(og.cfg, "OPS_GUARD_BOOT_GRACE_SEC", 180)
+    monkeypatch.setattr(og.time, "time", lambda: 1000.0)
+    monkeypatch.setattr(og, "status_snapshot", lambda _targets=None: {"trade": {"module": "aion.exec.paper_loop", "running": False, "pids": []}})
+
+    called = {"start": 0}
+    monkeypatch.setattr(og, "start_task", lambda _task: called.__setitem__("start", called["start"] + 1) or True)
+
+    payload = og.guard_cycle({"restart_history": {}, "booting_until": {"trade": 1100.0}})
+    assert called["start"] == 0
+    assert payload["restarts"]["trade"]["attempt"] is None
+    assert payload["restarts"]["trade"]["skip"] == "boot_grace"
